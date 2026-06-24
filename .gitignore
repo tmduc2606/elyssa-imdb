@@ -1,6 +1,11 @@
 # ─── Project ───────────────────────────────────────────────────────
+# Environment secrets (never commit actual .env)
+.env
+.env.local
+
 # Root docs folder — proposal, references, contracts
-docs/
+# (Trailing /docs/ matches any depth; prefix / restricts to root)
+/docs/
 
 # ─── Agent Instructions & OpenCode Integration ─────────────────────
 # Not source code — excluded from tracking on all branches
@@ -79,6 +84,10 @@ wandb/
 
 # ─── Docker ────────────────────────────────────────────────────────
 docker-compose.override.yml
+
+# Accidental nested build artifacts (from running compose inside docker/)
+docker/docker/
+docker/data-engineering/
 
 # ─── OS / IDE ──────────────────────────────────────────────────────
 .DS_Store

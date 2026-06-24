@@ -1,0 +1,12 @@
+# Docker ignore — exclude from build context
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.env
+*.log
+data/
+bronze/parquet/
+silver/
+gold/

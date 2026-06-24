@@ -1,0 +1,19 @@
+# Elyssa-IMDb | Data Engineering Stack — Docker Images
+# Neo4j Graph Database for relationship traversals & Cypher MERGE
+
+# ─── Neo4j Community ───────────────────────────────────────────────
+# Purpose: Graph layer — title/principal relationships, episodic content
+# Port: 7474 (HTTP), 7687 (Bolt)
+FROM neo4j:5.26.4-community
+
+# Environment
+ENV NEO4J_AUTH=neo4j/elyssa_neo4j_2026 \
+    NEO4J_server_memory_heap_max__size=2G \
+    NEO4J_server_memory_pagecache_size=1G \
+    NEO4J_PLUGINS='["apoc"]'
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=10s --retries=5 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1
+
+EXPOSE 7474 7687

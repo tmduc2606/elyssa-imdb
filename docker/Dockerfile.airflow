@@ -1,0 +1,37 @@
+# Elyssa-IMDb | Data Engineering Stack — Docker Images
+# Apache Airflow — orchestration for Elyssa pipeline DAGs
+# NOTE: Airflow does not support native Windows; runs exclusively in Docker.
+
+# ─── Apache Airflow ────────────────────────────────────────────────
+# Purpose: DAG orchestration — Bronze→Silver→Gold pipeline, Neo4j sync
+# Port: 8080 (Web UI)
+FROM apache/airflow:3.0.4
+
+# Switch to root for system packages
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Switch back to airflow user
+USER airflow
+
+# Install Python dependencies from requirements.txt
+COPY data-engineering/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Airflow config
+ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor \
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse \
+    AIRFLOW__CORE__LOAD_EXAMPLES=false \
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=60s \
+    CMD curl -f http://localhost:8080/api/v2/monitor/health || exit 1
+
+EXPOSE 8080
+
+# Run Airflow standalone (all-in-one for local dev)
+CMD ["standalone"]
