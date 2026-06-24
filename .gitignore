@@ -1,9 +1,18 @@
 # ─── Project ───────────────────────────────────────────────────────
-# Docs folder (root) — proposal, references, contracts
+# Root docs folder — proposal, references, contracts
 docs/
 
-# Module-level docs
-*/docs/
+# ─── Agent Instructions & OpenCode Integration ─────────────────────
+# Not source code — excluded from tracking on all branches
+.opencode/
+data-engineering/AGENTS.md
+data-engineering/agents/
+data-engineering/skills/
+data-engineering/presets/
+data-engineering/hooks/
+data-engineering/starter-packs/
+data-engineering/templates/
+data-engineering/duke/
 
 # ─── Python ────────────────────────────────────────────────────────
 __pycache__/
