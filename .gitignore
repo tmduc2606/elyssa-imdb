@@ -1,0 +1,84 @@
+# ─── Project ───────────────────────────────────────────────────────
+# Docs folder (root) — proposal, references, contracts
+docs/
+
+# Module-level docs
+*/docs/
+
+# ─── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing / Linting
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Node / Frontend (Web App module) ─────────────────────────────
+node_modules/
+.next/
+.nuxt/
+.cache/
+
+# ─── Debug / Report / Assessment Artifacts ────────────────────────
+*.log
+*.tmp
+*.bak
+*.dump
+reports/
+assessments/
+debug/
+*.profraw
+*.profdata
+
+# ─── Data / ML Artifacts (Data Science module) ────────────────────
+# Model checkpoints & serialized objects
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+*.pkl.zst
+mlruns/
+mlartifacts/
+wandb/
+
+# Raw data outputs & feature caches
+*.parquet
+*.csv
+*.tsv
+*.tsv.gz
+
+# ─── Docker ────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ─── OS / IDE ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
