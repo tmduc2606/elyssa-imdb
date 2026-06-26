@@ -7,6 +7,12 @@
 # (Trailing /docs/ matches any depth; prefix / restricts to root)
 /docs/
 
+# ─── Documentation (not source code) ──────────────────────────────
+data-engineering/docs/
+
+# Binary office documents (agent reports, proposals)
+*.docx
+
 # ─── Agent Instructions & OpenCode Integration ─────────────────────
 # Not source code — excluded from tracking on all branches
 .opencode/
