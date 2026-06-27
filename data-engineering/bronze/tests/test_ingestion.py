@@ -28,7 +28,7 @@ def test_each_source_has_required_keys():
         assert "columns" in cfg, f"{name} missing columns"
         assert "delimiter" in cfg, f"{name} missing delimiter"
         assert cfg["delimiter"] == "\t", f"{name} delimiter must be tab"
-        assert cfg["null_value"] == NULL_PATTERN, f"{name} null_value must be \\N"
+        assert cfg["null_value"] is None, f"{name} null_value must be None (preserve raw fidelity in Bronze)"
 
 def test_column_counts_match_imdb_spec():
     expected_counts = {
@@ -50,10 +50,13 @@ def test_metadata_columns():
     spark = SparkSession.builder.appName(SPARK_APP_NAME).master("local[1]").getOrCreate()
     try:
         df = spark.createDataFrame([{"a": "1"}])
-        df_md = add_metadata(df, "test_table", "abc123")
-        md_cols = {"_source_file", "_source_table", "_batch_id", "_ingested_at"}
+        df_md = add_metadata(df, "test_table", "abc123", row_count=42, checksum="abc123def456")
+        md_cols = {"_source_file", "_source_table", "_batch_id", "_ingested_at", "_row_count", "_checksum"}
         actual = set(df_md.columns)
         assert md_cols.issubset(actual), f"Missing metadata cols: {md_cols - actual}"
+        row = df_md.collect()[0]
+        assert row["_row_count"] == 42
+        assert row["_checksum"] == "abc123def456"
     finally:
         spark.stop()
 

@@ -29,11 +29,13 @@ def test_empty_to_null():
     spark = _spark()
     try:
         schema = StructType([StructField("a", StringType(), True), StructField("b", StringType(), True)])
-        df = spark.createDataFrame([("", "b")], schema)
+        df = spark.createDataFrame([("", "b"), (r"\N", "x")], schema)
         result = empty_to_null(df)
         rows = result.collect()
         assert rows[0]["a"] is None, "empty string should become null"
         assert rows[0]["b"] == "b"
+        assert rows[1]["a"] is None, "literal \\N string should become null"
+        assert rows[1]["b"] == "x"
     finally:
         spark.stop()
 
