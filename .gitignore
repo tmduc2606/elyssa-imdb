@@ -7,8 +7,14 @@
 # (Trailing /docs/ matches any depth; prefix / restricts to root)
 /docs/
 
-# ─── Documentation (not source code) ──────────────────────────────
+# ─── Documentation (not source code — agent planning docs excluded) ─
 data-engineering/docs/
+# EXCEPT: These 5 portfolio documentation files are tracked:
+!data-engineering/docs/architecture_overview.md
+!data-engineering/docs/etl_pipeline.md
+!data-engineering/docs/schema_dictionary.md
+!data-engineering/docs/data_quality_tests.md
+!data-engineering/docs/disaster_recovery.md
 
 # Binary office documents (agent reports, proposals)
 *.docx
