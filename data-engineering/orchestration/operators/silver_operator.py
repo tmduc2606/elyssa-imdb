@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 
 
 class SilverTransformOperator(BaseOperator):
@@ -12,15 +11,14 @@ class SilverTransformOperator(BaseOperator):
 
     template_fields = ("bronze_path", "jdbc_url")
 
-    @apply_defaults
     def __init__(
         self,
         bronze_path: str = "/data/bronze/",
         jdbc_url: str = "",
         jdbc_user: str = "",
         jdbc_password: str = "",
-        spark_master: str = "spark://spark-master:7077",
-        spark_app: str = "/opt/spark-apps/silver/etl_runner.py",
+        spark_master: str = "local[*]",
+        spark_app: str = "/opt/airflow/data-engineering/scripts/etl_runner.py",
         *args,
         **kwargs,
     ):
@@ -34,6 +32,13 @@ class SilverTransformOperator(BaseOperator):
 
     def execute(self, context):
         import subprocess
+        import os
+
+        # Set JAVA_HOME if not set
+        java_home = os.environ.get("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+        if os.path.isdir(java_home):
+            os.environ["JAVA_HOME"] = java_home
+
         cmd = [
             "spark-submit",
             "--master", self.spark_master,

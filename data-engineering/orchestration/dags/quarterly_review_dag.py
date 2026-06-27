@@ -14,7 +14,7 @@ Runs quarterly (Jan, Apr, Jul, Oct) via cron trigger.
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 default_args = {
@@ -108,20 +108,20 @@ with DAG(
     dag_id="quarterly_review_dag",
     default_args=default_args,
     description="Quarterly observability review — health report generation",
-    schedule_interval="0 9 1 1,4,7,10 *",  # Quarterly: Jan/Apr/Jul/Oct 1st
+    schedule="0 9 1 1,4,7,10 *",  # Quarterly: Jan/Apr/Jul/Oct 1st
     start_date=datetime(2026, 7, 1),
     catchup=False,
     tags=["observability", "quarterly", "review"],
 ) as dag:
 
-    start = DummyOperator(task_id="review_start")
+    start = EmptyOperator(task_id="review_start")
 
     generate_report = PythonOperator(
         task_id="generate_observability_report",
         python_callable=generate_observability_report,
     )
 
-    end = DummyOperator(
+    end = EmptyOperator(
         task_id="review_end",
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )

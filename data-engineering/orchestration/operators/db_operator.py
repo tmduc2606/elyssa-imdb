@@ -1,6 +1,6 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 from typing import Optional, List
+import os
 
 
 class DatabaseIngestOperator(BaseOperator):
@@ -13,7 +13,6 @@ class DatabaseIngestOperator(BaseOperator):
 
     template_fields = ("bronze_path", "source_type")
 
-    @apply_defaults
     def __init__(
         self,
         source_tables: List[str],
@@ -39,8 +38,19 @@ class DatabaseIngestOperator(BaseOperator):
             f"source={self.source_type}, incremental={self.incremental}"
         )
 
-        from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
-        from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
+        # Resolve bronze module path (works in Docker where data-engineering is at /opt/airflow)
+        try:
+            from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
+            from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
+        except ModuleNotFoundError:
+            # Fallback: add data-engineering to path
+            import sys
+            for p in sys.path:
+                de_path = os.path.join(p, "data-engineering")
+                if os.path.isdir(de_path) and de_path not in sys.path:
+                    sys.path.insert(0, de_path)
+            from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
+            from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
 
         if self.source_type == "duckdb":
             tables_config = DUCKDB_PARQUET_SOURCES

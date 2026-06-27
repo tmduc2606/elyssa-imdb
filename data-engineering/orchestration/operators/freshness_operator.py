@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 
 
 class FreshnessCheckOperator(BaseOperator):
@@ -12,7 +11,6 @@ class FreshnessCheckOperator(BaseOperator):
 
     template_fields = ("jdbc_url",)
 
-    @apply_defaults
     def __init__(
         self,
         jdbc_url: str = "",
@@ -30,8 +28,17 @@ class FreshnessCheckOperator(BaseOperator):
 
     def execute(self, context):
         import subprocess
+        import os
+
+        # Resolve freshness script path
+        freshness_script = "/opt/monitor/freshness.py"
+        if not os.path.isfile(freshness_script):
+            alt = "/opt/airflow/data-engineering/scripts/freshness.py"
+            if os.path.isfile(alt):
+                freshness_script = alt
+
         cmd = [
-            "python", "/opt/monitor/freshness.py",
+            "python", freshness_script,
             "--jdbc-url", self.jdbc_url,
             "--jdbc-user", self.jdbc_user,
             "--jdbc-password", self.jdbc_password,

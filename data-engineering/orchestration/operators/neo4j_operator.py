@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 from typing import List
 
 
@@ -12,7 +11,6 @@ class Neo4jSyncOperator(BaseOperator):
 
     template_fields = ("neo4j_uri",)
 
-    @apply_defaults
     def __init__(
         self,
         neo4j_uri: str = "",
@@ -32,9 +30,18 @@ class Neo4jSyncOperator(BaseOperator):
 
     def execute(self, context):
         import subprocess
+        import os
+
+        # Resolve sync script path
+        sync_script = self.sync_script
+        if not os.path.isfile(sync_script):
+            alt = "/opt/airflow/data-engineering/scripts/neo4j_sync.py"
+            if os.path.isfile(alt):
+                sync_script = alt
+
         tables_arg = ",".join(self.tables_to_sync)
         cmd = [
-            "python", self.sync_script,
+            "python", sync_script,
             "--uri", self.neo4j_uri,
             "--user", self.neo4j_user,
             "--password", self.neo4j_password,

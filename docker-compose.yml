@@ -18,7 +18,7 @@ services:
   postgres:
     image: elyssa-postgres:latest
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.postgres
     container_name: elyssa-postgres
     environment:
@@ -43,7 +43,7 @@ services:
       - "54321:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./docker/postgres/init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
       - elyssa-net
     restart: unless-stopped
@@ -52,7 +52,7 @@ services:
   neo4j:
     image: elyssa-neo4j:latest
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.neo4j
     container_name: elyssa-neo4j
     environment:
@@ -73,7 +73,7 @@ services:
   rustfs:
     image: elyssa-rustfs:latest
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.rustfs
     container_name: elyssa-rustfs
     environment:
@@ -96,7 +96,7 @@ services:
   duckdb:
     image: elyssa-duckdb:latest
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.duckdb
     container_name: elyssa-duckdb
     environment:
@@ -110,7 +110,7 @@ services:
   airflow:
     image: elyssa-airflow:latest
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile.airflow
     container_name: elyssa-airflow
     environment:
@@ -119,13 +119,15 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
       AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
+      PYTHONPATH: "/opt/airflow:/opt/airflow/operators"
     ports:
       - "8081:8080"
     volumes:
       - airflow_data:/opt/airflow
-      - ../data-engineering:/opt/airflow/data-engineering:ro
-    # Note: scripts/ and dags/ directories must exist before compose up.
-    # Create them with: mkdir -p data-engineering/scripts data-engineering/orchestration/dags
+      - ./data-engineering/scripts:/opt/airflow/scripts:ro
+      - ./data-engineering/orchestration/dags:/opt/airflow/dags:ro
+      - ./data-engineering/orchestration/operators:/opt/airflow/operators:ro
+      - ./data-engineering/orchestration/sensors:/opt/airflow/sensors:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -6,7 +6,6 @@ PostgreSQL database, uploading the dump to S3-compatible storage.
 """
 
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 from typing import Optional
 import subprocess
 import os
@@ -23,7 +22,6 @@ class BackupOperator(BaseOperator):
 
     template_fields = ("s3_bucket", "s3_prefix")
 
-    @apply_defaults
     def __init__(
         self,
         postgres_host: str = "postgres",

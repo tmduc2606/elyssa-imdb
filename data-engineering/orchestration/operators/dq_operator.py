@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 
 
 class DataQualityOperator(BaseOperator):
@@ -12,7 +11,6 @@ class DataQualityOperator(BaseOperator):
 
     template_fields = ("jdbc_url",)
 
-    @apply_defaults
     def __init__(
         self,
         jdbc_url: str = "",
@@ -32,9 +30,24 @@ class DataQualityOperator(BaseOperator):
 
     def execute(self, context):
         import subprocess
+        import os
+
+        # Resolve DQ script path
+        dq_script = self.dq_script
+        if not os.path.isfile(dq_script):
+            alt = "/opt/airflow/data-engineering/dq/run_checks.py"
+            if os.path.isfile(alt):
+                dq_script = alt
+
+        config_path = self.dq_config_path
+        if not os.path.isfile(config_path):
+            alt = "/opt/airflow/data-engineering/dq/config.yaml"
+            if os.path.isfile(alt):
+                config_path = alt
+
         cmd = [
-            "python", self.dq_script,
-            "--config", self.dq_config_path,
+            "python", dq_script,
+            "--config", config_path,
             "--jdbc-url", self.jdbc_url,
             "--jdbc-user", self.jdbc_user,
             "--jdbc-password", self.jdbc_password,

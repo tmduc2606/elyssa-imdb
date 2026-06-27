@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 from typing import List
 
 
@@ -13,13 +12,12 @@ class BronzeIngestOperator(BaseOperator):
 
     template_fields = ("bronze_path",)
 
-    @apply_defaults
     def __init__(
         self,
         source_tables: List[str],
         bronze_path: str = "/data/bronze/",
-        spark_master: str = "spark://spark-master:7077",
-        spark_app: str = "/opt/spark-apps/bronze/ingest_imdb.py",
+        spark_master: str = "local[*]",
+        spark_app: str = "/opt/airflow/data-engineering/bronze/ingest_imdb.py",
         *args,
         **kwargs,
     ):
@@ -31,6 +29,13 @@ class BronzeIngestOperator(BaseOperator):
 
     def execute(self, context):
         import subprocess
+        import os
+
+        # Set JAVA_HOME if not set (OpenJDK installed in Airflow image)
+        java_home = os.environ.get("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+        if os.path.isdir(java_home):
+            os.environ["JAVA_HOME"] = java_home
+
         tables_arg = ",".join(self.source_tables)
         cmd = [
             "spark-submit",

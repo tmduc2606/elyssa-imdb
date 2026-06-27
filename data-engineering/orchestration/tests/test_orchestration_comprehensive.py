@@ -34,7 +34,7 @@ class TestDAGStructure:
         with open(path) as f:
             content = f.read()
         assert "from airflow import DAG" in content
-        assert "DummyOperator" in content
+        assert "EmptyOperator" in content
         assert "PythonOperator" in content
 
     def test_dag_has_default_args(self):
@@ -157,12 +157,14 @@ class TestOperators:
             assert "template_fields" in content, f"{op_file} missing template_fields"
 
     def test_operators_have_apply_defaults(self):
+        """Airflow 3.x: apply_defaults is automatic; verify super().__init__ is called instead."""
         for op_file in os.listdir(OPERATORS_DIR):
             if op_file.endswith('.py') and op_file != '__init__.py':
                 path = os.path.join(OPERATORS_DIR, op_file)
                 with open(path) as f:
                     content = f.read()
-                assert "apply_defaults" in content, f"{op_file} missing apply_defaults decorator"
+                assert "super().__init__" in content or "apply_defaults" in content, \
+                    f"{op_file} missing super().__init__ or apply_defaults"
 
     def test_operators_handle_errors(self):
         for op_file in ['bronze_operator.py', 'silver_operator.py', 'dbt_operator.py', 'neo4j_operator.py', 'dq_operator.py']:

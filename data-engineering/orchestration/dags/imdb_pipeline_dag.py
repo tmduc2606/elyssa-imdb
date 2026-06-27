@@ -13,7 +13,18 @@ Execution order:
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta
+
+# ─── Ensure data-engineering module is importable ───────────────────
+# Inside Docker, dags are at /opt/airflow/dags/ and data-engineering
+# is mounted at /opt/airflow/data-engineering/. We need either
+# /opt/airflow or /opt/airflow/data-engineering on sys.path so that
+# `from bronze.*` and `from operators.*` resolve correctly.
+for _p in ("/opt/airflow/data-engineering", "/opt/airflow"):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from airflow import DAG
 from airflow.operators.dummy import DummyOperator
 from airflow.operators.python import PythonOperator
@@ -82,13 +93,13 @@ with DAG(
     dag_id="imdb_pipeline",
     default_args=default_args,
     description="Elyssa IMDb Bronze → Silver → Gold → Neo4j → DQ pipeline",
-    schedule_interval=None,
+    schedule=None,
     start_date=datetime(2026, 6, 1),
     catchup=False,
     tags=["imdb", "bronze", "silver", "gold", "neo4j"],
 ) as dag:
 
-    start = DummyOperator(task_id="pipeline_start")
+    start = EmptyOperator(task_id="pipeline_start")
 
     # ─── Bronze (TSV) ───────────────────────────────────────────────────────
     bronze_ingest = BronzeIngestOperator(
@@ -115,7 +126,7 @@ with DAG(
     )
 
     # ─── Bronze Ingestion Complete ───────────────────────────────────────────
-    bronze_done = DummyOperator(task_id="bronze_ingestion_done")
+    bronze_done = EmptyOperator(task_id="bronze_ingestion_done")
 
     # ─── Silver ──────────────────────────────────────────────────────────────
     silver_transform = SilverTransformOperator(
@@ -167,7 +178,7 @@ with DAG(
         sla_hours=24,
     )
 
-    end = DummyOperator(task_id="pipeline_end")
+    end = EmptyOperator(task_id="pipeline_end")
 
     # ─── DAG Structure ───────────────────────────────────────────────────────
     start >> [bronze_ingest, db_ingest] >> bronze_done >> silver_transform >> [gold_dbt_run, gold_dbt_test]

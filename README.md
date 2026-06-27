@@ -1,153 +1,162 @@
 # Elyssa-IMDb — Data Engineering Pipeline
 
+End-to-end data engineering pipeline for IMDb: Bronze (Parquet) → Silver (PostgreSQL 3NF/SCD2) → Gold (dbt star-schema marts) → Neo4j (graph sync).
+
+---
+
 ## Quick Start
 
-```bash
-# Clone
+```powershell
+# 1. Clone and enter the repo
 git clone <repo-url> && cd elyssa-imdb
 
-# Start infrastructure
+# 2. Start all services
 docker compose up -d
 
-# Wait for PostgreSQL healthcheck
+# 3. Wait for healthy status (~30s)
 docker compose ps
 ```
+
+All services should show `healthy`:
+
+```
+NAME              STATUS       PORTS
+elyssa-postgres   healthy      54321 → 5432
+elyssa-neo4j      healthy      7475 → 7474, 7688 → 7687
+elyssa-rustfs     healthy      9100 → 9000, 9101 → 9001
+elyssa-airflow    healthy      8081 → 8080
+elyssa-duckdb     healthy      (internal)
+```
+
+---
+
+## Service URLs
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Airflow** | http://localhost:8081 | See below |
+| **PostgreSQL** | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
+| **Neo4j Browser** | http://localhost:7475 | `neo4j` / `elyssa_neo_2026` |
+| **RustFS Console** | http://localhost:9101 | `elyssa` / `elyssa_s3_2026` |
+
+### Airflow Login
+
+Airflow 3.x generates a random admin password on first startup. To retrieve it:
+
+```powershell
+docker exec elyssa-airflow cat /opt/airflow/simple_auth_manager_passwords.json.generated
+```
+
+This prints JSON like `{"admin": "VqnH9zQBKCh8n3Ak"}`. Use `admin` as the username and the generated value as the password.
+
+---
+
+## Running the Pipeline
+
+### Via Airflow UI
+
+1. Open http://localhost:8081 and log in
+2. Find the `imdb_pipeline` DAG
+3. Toggle it ON and click **Trigger DAG**
+
+### Via CLI
+
+```powershell
+# Trigger the main pipeline
+docker exec elyssa-airflow airflow dags trigger imdb_pipeline
+
+# Check DAG status
+docker exec elyssa-airflow airflow dags list
+```
+
+---
 
 ## Architecture
 
 ```
-IMDb .tsv.gz → [Bronze: PySpark] → Parquet (RustFS)
-PostgreSQL CDC → [Bronze: DuckDB/Spark] → Parquet
-Parquet → [Silver: Spark ETL] → PostgreSQL (SCD2)
-Silver → [Gold: dbt] → Star-schema marts
-Gold → [Neo4j Sync] → Graph DB
-Silver → [DQ Checks] → data_quality_log
+IMDb .tsv → [Bronze: ingest_imdb.py] → Parquet (RustFS / local)
+Parquet → [Silver: transform.py + upsert.py] → PostgreSQL (14 tables, SCD2)
+PostgreSQL → [Gold: dbt] → Star-schema marts (dim_title, fact_performance, ...)
+PostgreSQL → [Neo4j Sync] → Graph DB (Title, Person, Genre nodes)
+PostgreSQL → [DQ: run_checks.py] → data_quality_log
 ```
 
-## Running the Pipeline
+---
 
-### Option 1: Docker (Recommended)
+## Local Development (No Docker for PySpark)
 
-```bash
-# Full stack (Postgres, Neo4j, RustFS, Airflow, DuckDB)
-docker compose up -d
-
-# Trigger DAG via Airflow UI
-open http://localhost:8081
-# Enable `imdb_pipeline` dag → trigger manually
-# Enable `neo4j_sync_dag` → auto-triggered after main pipeline
-# Enable `quarterly_review_dag` → auto-triggers quarterly
-```
-
-### Option 2: Local (for development)
-
-```bash
+```powershell
 # 1. Start only PostgreSQL
 docker compose up -d postgres
 
-# 2. Create virtual environment
-python -m venv .venv && source .venv/bin/activate  # or Scripts\activate on Windows
+# 2. Python environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows
 pip install -r data-engineering/requirements.txt
 
-# 3. Initialize Silver schema + migrations
-docker compose exec -U postgres postgres psql -f data-engineering/silver/schema.sql
-docker compose exec -U postgres postgres psql -f data-engineering/silver/migrations/001_initial_schema.sql
+# 3. Initialize Silver schema
+docker exec -i elyssa-postgres psql -U elyssa -d elyssa_warehouse < data-engineering/silver/schema.sql
 
-# 4. Bronze ingestion (requires Spark running or local mode)
-python data-engineering/bronze/ingest_imdb.py \
-  data/title.akas.tsv.gz data/title.basics.tsv.gz data/title.crew.tsv.gz \
-  data/title.episode.tsv.gz data/title.principals.tsv.gz data/title.ratings.tsv.gz \
-  data/name.basics.tsv.gz
+# 4. Run unit tests (no DB needed)
+python -m pytest data-engineering/bronze/tests/ -v
+python -m pytest data-engineering/orchestration/tests/ -v
 
-# 5. Silver ETL
-spark-submit data-engineering/scripts/etl_runner.py \
-  --bronze-path bronze/parquet/ \
-  --jdbc-url "postgresql://elyssa:elyssa_pg_2026@localhost:54321/elyssa_warehouse" \
-  --jdbc-user elyssa --jdbc-password elyssa_pg_2026
-
-# 6. Gold dbt
-cd data-engineering/gold
-dbt debug        # verify connection
-dbt run          # build all models
-dbt test         # run tests
-dbt docs generate # generate lineage docs
+# 5. Run live benchmark (DuckDB, reads real Parquet)
+python data-engineering/scripts/live_benchmark.py
 ```
+
+---
 
 ## Testing
 
-### Unit Tests (no infrastructure required)
-
-```bash
-# Bronze layer
+```powershell
+# All bronze tests (87 tests)
 python -m pytest data-engineering/bronze/tests/ -v
 
-# Orchestration (operators, sensors, DAG parsing)
+# Orchestration tests (24 tests)
 python -m pytest data-engineering/orchestration/tests/ -v
+
+# Full test suite (111 tests)
+python -m pytest data-engineering/bronze/tests/ data-engineering/orchestration/tests/ -v
 ```
 
-### Integration Tests (requires Docker PostgreSQL)
+---
 
-```bash
-# Start PostgreSQL
-docker compose up -d postgres
+## Project Structure
 
-# Silver layer
-python -m pytest data-engineering/silver/tests/ -v
-
-# Gold layer (dbt tests)
-cd data-engineering/gold
-dbt run && dbt test
-
-# DQ checks
-python data-engineering/dq/run_checks.py \
-  --config data-engineering/dq/config.yaml \
-  --jdbc-url "postgresql://elyssa:elyssa_pg_2026@localhost:54321/elyssa_warehouse" \
-  --jdbc-user elyssa --jdbc-password elyssa_pg_2026
+```
+elyssa-imdb/
+├── data-engineering/
+│   ├── bronze/          # Ingestion: ingest_imdb.py, db_reader.py, watermark.py
+│   ├── silver/          # ETL: schema.sql (14 tables), transform.py, upsert.py, fk_checks.py
+│   ├── gold/            # dbt project: staging → intermediate → marts
+│   ├── orchestration/   # Airflow: DAG + 7 operators
+│   ├── dq/              # Data quality: config.yaml, run_checks.py
+│   ├── scripts/         # ETL runner, benchmarks, neo4j sync, validation
+│   └── docs/            # Blueprints, evaluation, patch-ups
+├── docker/              # Dockerfiles + docker-compose.yml
+├── docker-compose.yml   # Root compose file (run from here)
+└── docs/overview/       # Main proposal
 ```
 
-### Great Expectations (Bronze validation)
+---
 
-```bash
-python data-engineering/dq/great_expectations/bronze_suite.py title.basics bronze/parquet/title.basics/
-```
-
-## Configuration
-
-### dbt Connection
-Edit `data-engineering/gold/profiles.yml` to change database credentials.
-
-### Retry Policy
-Edit `data-engineering/orchestration/config/retry.yaml`:
-```yaml
-max_retries: 4
-base_delay_s: 60
-max_delay_s: 1800
-exponential_factor: 2
-```
-
-### DQ Checks
-Edit `data-engineering/dq/config.yaml` to add/modify checks.
-
-### Docker Services
-Edit `docker/docker-compose.yml` to change ports, memory limits, or add services.
-
-## Key Commands Reference
+## Key Commands
 
 | Task | Command |
 |------|---------|
-| Start all services | `docker compose up -d` |
-| Stop all services | `docker compose down` |
+| Start all | `docker compose up -d` |
+| Stop all | `docker compose down` |
+| Stop + delete data | `docker compose down -v` |
+| Rebuild images | `docker compose build --no-cache` |
 | View logs | `docker compose logs -f <service>` |
-| PostgreSQL shell | `docker compose exec postgres psql -U elyssa -d elyssa_warehouse` |
-| Airflow UI | `http://localhost:8081` |
-| Neo4j Browser | `http://localhost:7475` |
-| RustFS Console | `http://localhost:9101` |
-| Run Bronze tests | `python -m pytest data-engineering/bronze/tests/ -v` |
-| Run Silver tests | `python -m pytest data-engineering/silver/tests/ -v` |
-| Run Gold tests | `cd data-engineering/gold && dbt test` |
-| Run DQ checks | `python data-engineering/dq/run_checks.py --jdbc-url ...` |
-| Generate dbt docs | `cd data-engineering/gold && dbt docs generate && dbt docs serve` |
-| Validation report | `python data-engineering/scripts/validation_report.py` |
+| PostgreSQL shell | `docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse` |
+| Get Airflow password | `docker exec elyssa-airflow cat /opt/airflow/simple_auth_manager_passwords.json.generated` |
+| Trigger DAG | `docker exec elyssa-airflow airflow dags trigger imdb_pipeline` |
+| dbt run | `docker exec elyssa-airflow bash -c "cd /opt/dbt && dbt run"` |
+| Run tests | `python -m pytest data-engineering/bronze/tests/ -v` |
+
+---
 
 ## Environment Variables
 
@@ -160,22 +169,22 @@ Edit `docker/docker-compose.yml` to change ports, memory limits, or add services
 | `RUSTFS_ACCESS_KEY` | elyssa | S3 access key |
 | `RUSTFS_SECRET_KEY` | elyssa_s3_2026 | S3 secret key |
 
+---
+
 ## Troubleshooting
 
-```bash
-# Check service health
+```powershell
+# Service won't start
 docker compose ps
-docker compose logs postgres | tail -20
+docker compose logs <service> | Select-Object -Last 20
 
-# Reset everything (WARNING: destroys data)
-docker compose down -v && docker compose up -d
+# PostgreSQL unhealthy (stale volume)
+docker compose down -v
+docker compose up -d
 
-# Rebuild images after code changes
-docker compose build --no-cache
+# Airflow can't find DAGs
+docker compose restart airflow
 
-# Check DAG parsing errors
-docker compose logs airflow | grep -i error
-
-# Verify dbt connection
-cd data-engineering/gold && dbt debug --no-version-check
+# Reset everything
+docker compose down -v && docker compose build --no-cache && docker compose up -d
 ```

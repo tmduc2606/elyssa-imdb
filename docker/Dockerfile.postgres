@@ -16,8 +16,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
     CMD pg_isready -U elyssa -d elyssa_warehouse || exit 1
 
-# Custom config for IMDb workload (write-heavy bulk COPY, hypertables)
-COPY docker/postgres/custom.conf /etc/postgresql/postgresql.conf.d/elyssa.conf
-COPY docker/postgres/init-scripts/ /docker-entrypoint-initdb.d/
-
 EXPOSE 5432

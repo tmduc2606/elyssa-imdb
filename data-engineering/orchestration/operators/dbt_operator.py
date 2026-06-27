@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
 
 
 class DbtRunOperator(BaseOperator):
@@ -11,7 +10,6 @@ class DbtRunOperator(BaseOperator):
 
     template_fields = ("dbt_project_dir",)
 
-    @apply_defaults
     def __init__(
         self,
         dbt_project_dir: str = "/opt/dbt/imdb_gold",
@@ -27,10 +25,20 @@ class DbtRunOperator(BaseOperator):
 
     def execute(self, context):
         import subprocess
+        import os
+
+        # Resolve dbt project path
+        project_dir = self.dbt_project_dir
+        if not os.path.isdir(project_dir):
+            # Fallback for Docker
+            alt = f"/opt/airflow/data-engineering/gold"
+            if os.path.isdir(alt):
+                project_dir = alt
+
         cmd = [
             "dbt",
             self.dbt_command,
-            "--project-dir", self.dbt_project_dir,
+            "--project-dir", project_dir,
             "--target", self.dbt_target,
         ]
         self.log.info(f"Running dbt: {' '.join(cmd)}")

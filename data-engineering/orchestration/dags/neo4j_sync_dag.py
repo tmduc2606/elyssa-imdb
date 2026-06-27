@@ -6,10 +6,15 @@ Triggered by trigger_rule="all_success" from the main DAG's
 gold_dbt_run task.
 """
 
+import os
+import sys
 from datetime import datetime, timedelta
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 from operators.neo4j_operator import Neo4jSyncOperator
@@ -29,13 +34,13 @@ with DAG(
     dag_id="neo4j_sync_dag",
     default_args=default_args,
     description="Neo4j graph sync — runs after main pipeline gold refresh",
-    schedule_interval=None,  # Triggered by main DAG
+    schedule=None,  # Triggered by main DAG
     start_date=datetime(2026, 6, 1),
     catchup=False,
     tags=["neo4j", "graph", "sync"],
 ) as dag:
 
-    start = DummyOperator(task_id="sync_start")
+    start = EmptyOperator(task_id="sync_start")
 
     neo4j_sync = Neo4jSyncOperator(
         task_id="neo4j_sync",
@@ -45,7 +50,7 @@ with DAG(
         tables_to_sync=["title_basics", "name_basics", "title_principal"],
     )
 
-    end = DummyOperator(
+    end = EmptyOperator(
         task_id="sync_end",
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )
