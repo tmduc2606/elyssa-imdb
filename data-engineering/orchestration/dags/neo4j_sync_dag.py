@@ -17,7 +17,10 @@ for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-eng
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+try:
+    from airflow.operators.dummy import DummyOperator
+except ImportError:
+    from airflow.operators.empty import EmptyOperator as DummyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 from operators.neo4j_operator import Neo4jSyncOperator

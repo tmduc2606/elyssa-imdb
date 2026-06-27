@@ -14,7 +14,10 @@ Runs quarterly (Jan, Apr, Jul, Oct) via cron trigger.
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.dummy import DummyOperator
+try:
+    from airflow.operators.dummy import DummyOperator
+except ImportError:
+    from airflow.operators.empty import EmptyOperator as DummyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 default_args = {

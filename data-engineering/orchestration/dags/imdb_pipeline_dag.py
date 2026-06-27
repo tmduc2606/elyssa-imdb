@@ -26,7 +26,10 @@ for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-eng
         sys.path.insert(0, _p)
 
 from airflow import DAG
-from airflow.operators.dummy import DummyOperator
+try:
+    from airflow.operators.dummy import DummyOperator
+except ImportError:
+    from airflow.operators.empty import EmptyOperator as DummyOperator
 from airflow.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 
