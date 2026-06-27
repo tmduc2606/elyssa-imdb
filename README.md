@@ -7,15 +7,21 @@ End-to-end data engineering pipeline for IMDb: Bronze (Parquet) → Silver (Post
 ## Quick Start
 
 ```powershell
-# 1. Clone and enter the repo
+# Clone
 git clone <repo-url> && cd elyssa-imdb
 
-# 2. Start all services
-docker compose up -d
+# Build + start infrastructure (one-time or after code changes)
+docker compose up -d --build
 
-# 3. Wait for healthy status (~30s)
+# Wait for PostgreSQL healthcheck
 docker compose ps
+
+# Trigger DAG via Airflow UI
+open http://localhost:8081
+# Enable `imdb_pipeline` dag → trigger manually
 ```
+
+> **Note:** Always run `docker compose` from the **repo root** (`elyssa-imdb/`), not from `data-engineering/`.
 
 All services should show `healthy`:
 
@@ -52,6 +58,13 @@ This prints JSON like `{"admin": "VqnH9zQBKCh8n3Ak"}`. Use `admin` as the userna
 ---
 
 ## Running the Pipeline
+
+### First Time / After Code Changes
+
+```powershell
+# Rebuild images and start all services
+docker compose up -d --build
+```
 
 ### Via Airflow UI
 
