@@ -2,6 +2,16 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import uuid
+import os
+import sys
+
+# ─── Ensure bronze module is importable ────────────────────────────
+# When run via spark-submit, the working directory may not be on sys.path.
+# Resolve from __file__: this file is in data-engineering/bronze/, so
+# the parent (data-engineering/) needs to be on sys.path.
+_de_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _de_root not in sys.path:
+    sys.path.insert(0, _de_root)
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import col, lit, when, current_timestamp, input_file_name
