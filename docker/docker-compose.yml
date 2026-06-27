@@ -76,6 +76,22 @@ services:
       - elyssa-net
     restart: unless-stopped
 
+  # ─── DuckDB (Ephemeral Analytics Engine) ────────────────────────
+  # Runs in-memory; reads Parquet directly from Bronze S3-compatible storage.
+  # No persistent volume — ephemeral by design per approved blueprint.
+  duckdb:
+    image: elyssa-duckdb:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.duckdb
+    container_name: elyssa-duckdb
+    environment:
+      DUCKDB_THREADS: "4"
+      DUCKDB_MEMORY_LIMIT_MB: "2048"
+    networks:
+      - elyssa-net
+    restart: "no"  # Ephemeral: run on demand, not persistent
+
   # ─── Apache Airflow ─────────────────────────────────────────────
   airflow:
     image: elyssa-airflow:latest

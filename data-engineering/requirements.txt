@@ -10,6 +10,7 @@ pyarrow==24.0.0
 # ─── Database Drivers ─────────────────────────────────────────────
 psycopg2-binary==2.9.12
 # sqlalchemy: pinned by apache-airflow (<2.0) — do not override
+duckdb==1.5.4
 neo4j==5.27.0
 
 # ─── Transformation ───────────────────────────────────────────────
