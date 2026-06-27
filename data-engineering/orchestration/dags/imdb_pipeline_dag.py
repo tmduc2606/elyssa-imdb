@@ -18,10 +18,10 @@ from datetime import datetime, timedelta
 
 # ─── Ensure data-engineering module is importable ───────────────────
 # Inside Docker, dags are at /opt/airflow/dags/ and data-engineering
-# is mounted at /opt/airflow/data-engineering/. We need either
-# /opt/airflow or /opt/airflow/data-engineering on sys.path so that
-# `from bronze.*` and `from operators.*` resolve correctly.
-for _p in ("/opt/airflow/data-engineering", "/opt/airflow"):
+# is mounted at /opt/airflow/data-engineering/. We need these on sys.path:
+#   - /opt/airflow/data-engineering         → for `from bronze.*`, `from silver.*`
+#   - /opt/airflow/data-engineering/orchestration → for `from operators.*`, `from sensors.*`
+for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-engineering", "/opt/airflow"):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 

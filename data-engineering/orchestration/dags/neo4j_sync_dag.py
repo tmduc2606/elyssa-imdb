@@ -10,11 +10,14 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# ─── Ensure orchestration module is importable ─────────────────────
+for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-engineering", "/opt/airflow"):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.empty import EmptyOperator
+from airflow.operators.dummy import DummyOperator
 from airflow.utils.trigger_rule import TriggerRule
 
 from operators.neo4j_operator import Neo4jSyncOperator
@@ -40,7 +43,7 @@ with DAG(
     tags=["neo4j", "graph", "sync"],
 ) as dag:
 
-    start = EmptyOperator(task_id="sync_start")
+    start = DummyOperator(task_id="sync_start")
 
     neo4j_sync = Neo4jSyncOperator(
         task_id="neo4j_sync",
@@ -50,7 +53,7 @@ with DAG(
         tables_to_sync=["title_basics", "name_basics", "title_principal"],
     )
 
-    end = EmptyOperator(
+    end = DummyOperator(
         task_id="sync_end",
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )
