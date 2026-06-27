@@ -8,6 +8,7 @@ from pyspark.sql.functions import col, lit, when, current_timestamp, input_file_
 import pyspark.sql.types as T
 
 from bronze.config import SOURCE_CONFIG, DEFAULT_OUTPUT_ROOT, DEFAULT_METADATA_ROOT
+from bronze.quarantine import validate_source_file, compute_file_checksum
 
 SPARK_APP_NAME = "ElyssaBronzeIngestion"
 
@@ -24,12 +25,13 @@ def generate_batch_id() -> str:
 
 def read_source(spark: SparkSession, file_path: str, source_name: str) -> DataFrame:
     cfg = SOURCE_CONFIG[source_name]
-    df = spark.read \
+    reader = spark.read \
         .option("sep", cfg["delimiter"]) \
         .option("header", "false") \
-        .option("nullValue", cfg["null_value"]) \
-        .option("emptyValue", "") \
-        .csv(file_path)
+        .option("emptyValue", "")
+    if cfg.get("null_value") is not None:
+        reader = reader.option("nullValue", cfg["null_value"])
+    df = reader.csv(file_path)
     if len(df.columns) != len(cfg["columns"]):
         raise ValueError(
             f"Column count mismatch for {source_name}: "
@@ -39,13 +41,16 @@ def read_source(spark: SparkSession, file_path: str, source_name: str) -> DataFr
         df = df.withColumnRenamed(f"_c{i}", name)
     return df
 
-def add_metadata(df: DataFrame, source_name: str, batch_id: str) -> DataFrame:
+def add_metadata(df: DataFrame, source_name: str, batch_id: str,
+                 row_count: int = 0, checksum: str = "") -> DataFrame:
     now_ts = datetime.now(timezone.utc).isoformat()
     return df \
         .withColumn("_source_file", input_file_name()) \
         .withColumn("_source_table", lit(source_name)) \
         .withColumn("_batch_id", lit(batch_id)) \
-        .withColumn("_ingested_at", lit(now_ts))
+        .withColumn("_ingested_at", lit(now_ts)) \
+        .withColumn("_row_count", lit(row_count)) \
+        .withColumn("_checksum", lit(checksum))
 
 def write_bronze(df: DataFrame, output_root: str, source_name: str) -> None:
     output_path = f"{output_root}/{source_name}"
@@ -73,8 +78,19 @@ def log_ingestion_metrics(spark: SparkSession, file_path: str, source_name: str,
 def ingest_single_source(spark: SparkSession, file_path: str, source_name: str,
                          output_root: str, batch_id: str, log_root: str) -> int:
     print(f"[{batch_id}] Ingesting {source_name} from {file_path}")
+
+    cfg = SOURCE_CONFIG[source_name]
+    expected_columns = len(cfg["columns"])
+    is_valid, error_msg, pre_count = validate_source_file(
+        file_path, source_name, expected_columns
+    )
+    if not is_valid:
+        print(f"[{batch_id}] QUARANTINED {source_name}: {error_msg}")
+        return 0
+
     df = read_source(spark, file_path, source_name)
-    df = add_metadata(df, source_name, batch_id)
+    checksum = compute_file_checksum(file_path)
+    df = add_metadata(df, source_name, batch_id, row_count=0, checksum=checksum)
     row_count = df.count()
     write_bronze(df, output_root, source_name)
     log_ingestion_metrics(spark, file_path, source_name, row_count, batch_id, log_root)

@@ -1,0 +1,96 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: silver
+    description: "Silver layer PostgreSQL tables"
+    tables:
+      - name: title_basics
+        description: "Core title data with SCD2"
+        columns:
+          - name: tconst
+            description: "Unique title identifier"
+            tests: [unique, not_null]
+          - name: title_type
+          - name: primary_title
+          - name: original_title
+          - name: is_adult
+          - name: start_year
+          - name: end_year
+          - name: runtime_minutes
+          - name: is_current
+
+      - name: name_basics
+        description: "Core person data with SCD2"
+        columns:
+          - name: nconst
+            tests: [unique, not_null]
+          - name: primary_name
+          - name: birth_year
+          - name: death_year
+          - name: is_current
+
+      - name: title_episode
+        description: "Episode-to-series links"
+        columns:
+          - name: tconst
+            tests: [unique, not_null]
+          - name: parent_tconst
+          - name: season_number
+          - name: episode_number
+
+      - name: title_rating
+        description: "Rating snapshots (hypertable)"
+        columns:
+          - name: tconst
+          - name: average_rating
+          - name: num_votes
+          - name: snapshot_date
+
+      - name: title_genre
+        description: "Title genre associations"
+        columns:
+          - name: tconst
+          - name: genre
+
+      - name: title_director
+        description: "Directors per title"
+        columns:
+          - name: tconst
+          - name: ordering
+          - name: nconst
+
+      - name: title_writer
+        description: "Writers per title"
+        columns:
+          - name: tconst
+          - name: ordering
+          - name: nconst
+
+      - name: title_principal
+        description: "Principal cast/crew"
+        columns:
+          - name: tconst
+          - name: ordering
+          - name: nconst
+          - name: category
+          - name: job
+
+      - name: title_principal_char
+        description: "Characters played"
+        columns:
+          - name: tconst
+          - name: ordering
+          - name: character_name
+
+      - name: name_profession
+        description: "Person professions"
+        columns:
+          - name: nconst
+          - name: profession
+
+      - name: name_known_for_title
+        description: "Titles a person is known for"
+        columns:
+          - name: nconst
+          - name: tconst

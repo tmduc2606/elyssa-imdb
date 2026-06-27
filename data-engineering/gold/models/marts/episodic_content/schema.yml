@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: fact_episode
+    description: "Episodic content fact table at grain (episode_key, series_key)"
+    columns:
+      - name: episode_key
+        tests: [unique, not_null]
+      - name: series_key
+        tests: [not_null]
+      - name: season_number
+        tests: [not_null]
+      - name: episode_number
+        tests: [not_null]

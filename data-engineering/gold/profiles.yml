@@ -1,0 +1,23 @@
+imdb_gold:
+  target: prod
+  outputs:
+    prod:
+      type: postgres
+      host: postgres
+      port: 5432
+      user: elyssa
+      pass: elyssa_pg_2026
+      dbname: elyssa_warehouse
+      schema: gold
+      threads: 4
+      keepalives_idle: 0
+    dev:
+      type: postgres
+      host: localhost
+      port: 54321
+      user: elyssa
+      pass: elyssa_pg_2026
+      dbname: elyssa_warehouse
+      schema: gold_dev
+      threads: 2
+      keepalives_idle: 0

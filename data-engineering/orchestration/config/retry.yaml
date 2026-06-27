@@ -1,0 +1,4 @@
+max_retries: 4
+base_delay_s: 60
+max_delay_s: 1800
+exponential_factor: 2

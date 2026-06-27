@@ -16,6 +16,7 @@ data-engineering/docs/
 # ─── Agent Instructions & OpenCode Integration ─────────────────────
 # Not source code — excluded from tracking on all branches
 .opencode/
+.git/opencode/
 data-engineering/AGENTS.md
 data-engineering/agents/
 data-engineering/skills/
