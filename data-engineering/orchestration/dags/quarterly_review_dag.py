@@ -114,14 +114,14 @@ with DAG(
     tags=["observability", "quarterly", "review"],
 ) as dag:
 
-    start = DummyOperator(task_id="review_start")
+    start = EmptyOperator(task_id="review_start")
 
     generate_report = PythonOperator(
         task_id="generate_observability_report",
         python_callable=generate_observability_report,
     )
 
-    end = DummyOperator(
+    end = EmptyOperator(
         task_id="review_end",
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )

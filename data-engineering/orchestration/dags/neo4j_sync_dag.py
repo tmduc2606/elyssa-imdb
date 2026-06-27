@@ -43,7 +43,7 @@ with DAG(
     tags=["neo4j", "graph", "sync"],
 ) as dag:
 
-    start = DummyOperator(task_id="sync_start")
+    start = EmptyOperator(task_id="sync_start")
 
     neo4j_sync = Neo4jSyncOperator(
         task_id="neo4j_sync",
@@ -53,7 +53,7 @@ with DAG(
         tables_to_sync=["title_basics", "name_basics", "title_principal"],
     )
 
-    end = DummyOperator(
+    end = EmptyOperator(
         task_id="sync_end",
         trigger_rule=TriggerRule.ALL_SUCCESS,
     )
