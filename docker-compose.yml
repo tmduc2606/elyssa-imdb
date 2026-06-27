@@ -119,15 +119,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
       AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
-      PYTHONPATH: "/opt/airflow:/opt/airflow/operators"
     ports:
       - "8081:8080"
     volumes:
       - airflow_data:/opt/airflow
-      - ./data-engineering/scripts:/opt/airflow/scripts:ro
-      - ./data-engineering/orchestration/dags:/opt/airflow/dags:ro
-      - ./data-engineering/orchestration/operators:/opt/airflow/operators:ro
-      - ./data-engineering/orchestration/sensors:/opt/airflow/sensors:ro
+      - ./data-engineering:/opt/airflow/data-engineering:ro
     depends_on:
       postgres:
         condition: service_healthy

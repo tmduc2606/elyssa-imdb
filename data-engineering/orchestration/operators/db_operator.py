@@ -39,19 +39,24 @@ class DatabaseIngestOperator(BaseOperator):
         )
 
         # Resolve bronze module path
-        # In Docker: data-engineering is mounted at /opt/airflow/data-engineering
-        # In local dev: go up from operators/ → orchestration/ → data-engineering/
+        # In Docker: operators mounted at /opt/airflow/operators/
+        # bronze is at /opt/airflow/data-engineering/bronze/
+        # __file__ = /opt/airflow/operators/db_operator.py → ../../ = /opt/airflow/
+        # We need /opt/airflow/data-engineering on sys.path
         try:
             from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
             from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
         except ModuleNotFoundError:
             import sys
-            # Determine the data-engineering root from this file's location
-            # __file__ = /opt/airflow/data-engineering/orchestration/operators/db_operator.py
-            # de_root = /opt/airflow/data-engineering
+            # Go up from operators/ → orchestration/ → data-engineering/
+            # Or from /opt/airflow/operators/ → /opt/airflow/ → add data-engineering/
             de_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
             if de_root not in sys.path:
                 sys.path.insert(0, de_root)
+            # Also try the Docker mount path directly
+            de_path = "/opt/airflow/data-engineering"
+            if os.path.isdir(de_path) and de_path not in sys.path:
+                sys.path.insert(0, de_path)
             from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
             from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
 
