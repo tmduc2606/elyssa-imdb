@@ -15,7 +15,7 @@ dbt-core==1.11.11
 dbt-postgres==1.10.2
 
 # ─── Data Quality ─────────────────────────────────────────────────
-great-expectations==0.18.23
+great-expectations==1.18.2
 
 # ─── Data Manipulation ────────────────────────────────────────────
 pandas==2.2.3
