@@ -22,7 +22,7 @@ class BronzeIngestOperator(BaseOperator):
     # Expected column counts per IMDb source table
     EXPECTED_COLUMNS = {
         "title.basics": 9,
-        "title.akas": 6,
+        "title.akas": 8,
         "title.crew": 3,
         "title.episode": 4,
         "title.principals": 6,
@@ -70,8 +70,15 @@ class BronzeIngestOperator(BaseOperator):
 
         conn = duckdb.connect(":memory:")
         conn.execute("SET threads = 2")
-        conn.execute("SET memory_limit = '6GB'")
+        # A2: Reduce memory_limit from 6GB to 3GB to prevent spill
+        conn.execute("SET memory_limit = '3GB'")
         conn.execute("SET preserve_insertion_order = false")
+
+        # A1: Set DuckDB temp_directory to dedicated path on airflow_data volume
+        temp_dir = "/opt/airflow/output/duckdb_temp/"
+        os.makedirs(temp_dir, exist_ok=True)
+        conn.execute(f"SET temp_directory = '{temp_dir}'")
+        conn.execute("SET max_temp_directory_size = '10GB'")
 
         # PostgreSQL connection for quarantine logging
         pg = None
@@ -150,14 +157,28 @@ class BronzeIngestOperator(BaseOperator):
                     pass
 
                 row_count = conn.execute(
-                    "SELECT COUNT(*) FROM read_csv('" + file_path + "', delim='\t', header=true, all_varchar=true)"
+                    "SELECT COUNT(*) FROM read_csv('" + file_path + "', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true)"
                 ).fetchone()[0]
+
+                # Log skip count: compare ingested rows vs file line count
+                file_lines = 0
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="replace") as _f:
+                        for _f_line in _f:
+                            file_lines += 1
+                    source_rows = max(0, file_lines - 1)  # subtract header
+                    skipped = source_rows - row_count
+                    if skipped > 0:
+                        self.log.warning(f"  {table}: {skipped} rows skipped (malformed/ragged) out of {source_rows} source rows")
+                except Exception:
+                    pass
+
                 self.log.info(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
 
                 conn.execute(
                     "COPY ("
                     "  SELECT *, ? AS _source_file, ? AS _source_table, ? AS _batch_id, ? AS _ingested_at, ? AS _row_count, ? AS _file_checksum "
-                    "  FROM read_csv('" + file_path + "', delim='\t', header=true, all_varchar=true)"
+                    "  FROM read_csv('" + file_path + "', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true)"
                     ") TO '" + output_path + "' (FORMAT PARQUET, COMPRESSION snappy)",
                     [file_path, table, batch_id, now_ts, row_count, file_checksum]
                 )
@@ -200,5 +221,13 @@ class BronzeIngestOperator(BaseOperator):
             }
         finally:
             conn.close()
+            # A1: Clean up DuckDB temp files
+            try:
+                import shutil
+                temp_dir = "/opt/airflow/output/duckdb_temp/"
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception as e:
+                self.log.warning(f"Failed to clean up DuckDB temp directory: {e}")
             if pg:
                 pg.close()

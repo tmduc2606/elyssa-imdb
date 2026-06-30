@@ -217,9 +217,23 @@ CREATE TABLE IF NOT EXISTS silver.quarantine (
     quarantined_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS silver.batch_metadata (
+    metadata_id    SERIAL PRIMARY KEY,
+    batch_id       VARCHAR(20) NOT NULL,
+    table_name     VARCHAR(200) NOT NULL,
+    source_file    TEXT,
+    file_checksum  VARCHAR(64),
+    row_count      INTEGER,
+    ingested_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_title_akas_type_ref ON silver.title_akas_type(title_id, ordering);
 CREATE INDEX IF NOT EXISTS idx_title_akas_attribute_ref ON silver.title_akas_attribute(title_id, ordering);
 CREATE INDEX IF NOT EXISTS idx_title_principal_char_ref ON silver.title_principal_char(tconst, ordering);
 CREATE INDEX IF NOT EXISTS idx_quarantine_batch ON silver.quarantine(batch_id);
 CREATE INDEX IF NOT EXISTS idx_dq_log_batch ON silver.data_quality_log(batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_metadata_batch ON silver.batch_metadata(batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_metadata_table ON silver.batch_metadata(table_name);
+
+COMMENT ON TABLE silver.batch_metadata IS 'Batch-level checksum and lineage tracking per source table';

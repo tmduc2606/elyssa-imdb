@@ -68,7 +68,7 @@ class QuarantineCheckOperator(BaseOperator):
         log.log_stage(stage="quarantine_check", batch_id=batch_id,
                       status="complete" if count == 0 else "warning",
                       row_count=count,
-                      message=f"Batch {batch_id}: {count} quarantined (threshold: {fail_threshold}), "
+                      message=f"Batch {batch_id}: {count} quarantined (threshold: {self.fail_threshold}), "
                               f"total: {total_quarantined}, checks: {check_names}")
 
         if count > 0:

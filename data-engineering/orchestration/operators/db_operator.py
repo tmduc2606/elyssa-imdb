@@ -51,7 +51,8 @@ class DatabaseIngestOperator(BaseOperator):
         import shutil
 
         # Source config: map table names to Parquet source paths
-        parquet_root = "/opt/airflow/data-engineering/duke/gate0/bronze"
+        # Reads from the actual bronze output produced by BronzeIngestOperator
+        parquet_root = "/opt/airflow/output/bronze"
 
         try:
             total_rows = 0

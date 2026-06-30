@@ -47,6 +47,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── Neo4j ──────────────────────────────────────────────────────
   neo4j:
@@ -68,6 +73,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── RustFS (S3-compatible) ─────────────────────────────────────
   rustfs:
@@ -89,6 +99,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── DuckDB (Ephemeral Analytics Engine) ────────────────────────
   # Runs in-memory; reads Parquet directly from Bronze S3-compatible storage.
@@ -105,6 +120,11 @@ services:
     networks:
       - elyssa-net
     restart: "no"  # Ephemeral: run on demand, not persistent
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── Apache Airflow ─────────────────────────────────────────────
   airflow:
@@ -119,6 +139,10 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
       AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
+      AIRFLOW__CORE__PARALLELISM: "8"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "WARNING"
+      AIRFLOW__CORE__LOG_FILENAME_TEMPLATE: "{{ti.dag_id}}/{{ti.task_id}}/{{ts}}/{{try_number}}.log"
     ports:
       - "8081:8080"
     volumes:
@@ -132,6 +156,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
 
 volumes:
   pg_data:

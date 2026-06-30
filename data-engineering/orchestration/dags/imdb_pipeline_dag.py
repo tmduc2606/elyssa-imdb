@@ -5,13 +5,12 @@ Orchestrates: Sensor → Bronze ingestion → Silver ETL → Gold dbt → Neo4j 
 Execution order:
   0. imdb_sensor           (detect new .tsv files)
   1. bronze_ingest          (DuckDB TSV→Parquet, with quarantine)
-  2. db_ingest              (Parquet copy for DB backup)
-  3. silver_transform       (DuckDB→CSV→psycopg2 COPY, parent+child normalization)
-  4. gold_dbt_run           (dbt run for staging → intermediate → marts)
-  5. gold_dbt_test          (dbt test for Gold validation)
-  6. neo4j_sync             (sync silver tables to Neo4j graph)
-  7. dq_checks              (null-rate, referential integrity, row-count)
-  8. freshness_monitor      (check last_updated freshness SLA)
+  2. silver_transform       (DuckDB→CSV→psycopg2 COPY, parent+child normalization)
+  3. gold_dbt_run           (dbt run for staging → intermediate → marts)
+  4. gold_dbt_test          (dbt test for Gold validation)
+  5. neo4j_sync             (sync silver tables to Neo4j graph)
+  6. dq_checks              (null-rate, referential integrity, row-count)
+  7. freshness_monitor      (check last_updated freshness SLA)
 """
 
 import json
@@ -34,7 +33,6 @@ from operators.dbt_operator import DbtRunOperator
 from operators.neo4j_operator import Neo4jSyncOperator
 from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
-from operators.db_operator import DatabaseIngestOperator
 from operators.imdb_sensor import IMDbDataSensor
 from operators.quarantine_operator import QuarantineCheckOperator
 
@@ -42,6 +40,7 @@ from operators.quarantine_operator import QuarantineCheckOperator
 _RETRY_CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "config", "retry.yaml"
 )
+
 
 def _load_retry_config() -> dict:
     try:
@@ -56,7 +55,19 @@ def _load_retry_config() -> dict:
             "exponential_factor": 2,
         }
 
+
 _retry_cfg = _load_retry_config()
+
+# ─── Centralized path config ────────────────────────────────────────
+_PATHS_CONFIG = os.path.join(os.path.dirname(__file__), "..", "config", "paths.yaml")
+_BRONZE_PATH = "/opt/airflow/output/bronze/"  # fallback default
+try:
+    import yaml
+    with open(_PATHS_CONFIG) as _pf:
+        _paths = yaml.safe_load(_pf)
+    _BRONZE_PATH = _paths["bronze"]["output_path"]
+except Exception:
+    pass
 
 
 # ─── Alerting callbacks ──────────────────────────────────────────────
@@ -128,20 +139,7 @@ with DAG(
             "title.episode", "title.principals", "title.ratings",
             "name.basics",
         ],
-        bronze_path="/opt/airflow/output/bronze/",
-    )
-
-    # ─── Bronze (Database Parquet copy) ───────────────────────────────────
-    db_ingest = DatabaseIngestOperator(
-        task_id="db_ingest",
-        source_tables=[
-            "title.basics", "title.akas", "title.crew",
-            "title.episode", "title.principals", "title.ratings",
-            "name.basics",
-        ],
-        source_type="postgresql",
-        bronze_path="/opt/airflow/output/bronze/db/",
-        incremental=True,
+        bronze_path=_BRONZE_PATH,
     )
 
     # ─── Bronze Ingestion Complete ────────────────────────────────────────
@@ -159,8 +157,8 @@ with DAG(
     # ─── Silver (parent + child normalization) ────────────────────────────
     silver_transform = SilverTransformOperator(
         task_id="silver_transform",
-        bronze_path="/opt/airflow/output/bronze/",
-        jdbc_url="postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse",
+        bronze_path=_BRONZE_PATH,
+        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
         jdbc_user="elyssa",
         jdbc_password="elyssa_pg_2026",
     )
@@ -191,18 +189,18 @@ with DAG(
     # ─── Data Quality (halts on threshold violations) ─────────────────────
     dq_checks = DataQualityOperator(
         task_id="dq_checks",
-        jdbc_url="postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse",
+        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
         jdbc_user="elyssa",
         jdbc_password="elyssa_pg_2026",
         dq_config_path="/opt/airflow/data-engineering/dq/config.yaml",
         run_gx=True,
-        bronze_path="/opt/airflow/output/bronze/",
+        bronze_path=_BRONZE_PATH,
     )
 
     # ─── Freshness ────────────────────────────────────────────────────────
     freshness_check = FreshnessCheckOperator(
         task_id="freshness_check",
-        jdbc_url="postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse",
+        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
         jdbc_user="elyssa",
         jdbc_password="elyssa_pg_2026",
         sla_hours=24,
@@ -212,8 +210,10 @@ with DAG(
 
     # ─── DAG Structure ────────────────────────────────────────────────────
     # Sensor → bronze → quarantine_check → silver → gold → neo4j → dq → freshness → end
-    start >> imdb_sensor >> [bronze_ingest, db_ingest] >> bronze_done
+    # gold_dbt_test depends on gold_dbt_run (tests run against fresh Gold tables)
+    # db_ingest REMOVED from critical path (Phase 1 optimization A3) — was a no-op copy
+    start >> imdb_sensor >> bronze_ingest >> bronze_done
     bronze_done >> quarantine_check >> silver_transform
-    silver_transform >> [gold_dbt_run, gold_dbt_test]
-    gold_dbt_run >> neo4j_sync >> dq_checks >> freshness_check >> end
+    silver_transform >> gold_dbt_run >> [gold_dbt_test, neo4j_sync]
     gold_dbt_test >> dq_checks
+    neo4j_sync >> dq_checks >> freshness_check >> end

@@ -45,6 +45,13 @@ class SilverTransformOperator(BaseOperator):
         conn = duckdb.connect(":memory:")
         conn.execute("SET threads = 2")
         conn.execute("SET memory_limit = '4GB'")
+        conn.execute("SET preserve_insertion_order = false")
+
+        # A1: Set DuckDB temp_directory to dedicated path on airflow_data volume
+        temp_dir = "/opt/airflow/output/duckdb_temp/"
+        os.makedirs(temp_dir, exist_ok=True)
+        conn.execute(f"SET temp_directory = '{temp_dir}'")
+        conn.execute("SET max_temp_directory_size = '10GB'")
 
         pg = psycopg2.connect(
             host="postgres", port=5432,
@@ -231,7 +238,8 @@ class SilverTransformOperator(BaseOperator):
 
                 if is_scd2:
                     pk_col = scd2_pk_map[dst_table]
-                    stg_table = f"{dst_table}_staging"
+                    # Temp tables must be unqualified (no schema prefix)
+                    stg_table = f"stg_{dst_table.replace('.', '_')}"
 
                     # Drop and recreate staging table (same structure minus SCD2/audit cols)
                     stg_cols = [c for c in snake_cols
@@ -241,6 +249,9 @@ class SilverTransformOperator(BaseOperator):
 
                     pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
                     pg_cursor.execute(f"CREATE TEMP TABLE {stg_table} ({stg_create_cols})")
+
+                    # Add index on PK for fast UPDATE ... WHERE pk IN (SELECT ...)
+                    pg_cursor.execute(f"CREATE INDEX idx_{stg_table}_pk ON {stg_table} ({pk_col})")
 
                     # COPY into staging
                     stg_cols_part = f"({stg_cols_list})"
@@ -468,4 +479,12 @@ class SilverTransformOperator(BaseOperator):
             raise
         finally:
             conn.close()
+            # A1: Clean up DuckDB temp files
+            try:
+                import shutil
+                temp_dir = "/opt/airflow/output/duckdb_temp/"
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception as e:
+                self.log.warning(f"Failed to clean up DuckDB temp directory: {e}")
             pg.close()
