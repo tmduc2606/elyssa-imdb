@@ -1,29 +1,21 @@
 # Elyssa-IMDb | Data Engineering | Python Dependencies
-# Stack: PySpark, PostgreSQL/TimescaleDB, dbt, Neo4j, Airflow, Great Expectations, RustFS
-# Python: pinned to 3.13.x (3.14+ breaks great-expectations<numpy compat>)
-# Pin strategy: minor version pins for stability
+# Stack: DuckDB, PostgreSQL/TimescaleDB, dbt, Neo4j, Airflow
+# NOTE: apache-airflow 3.0.4 is pre-installed in base image — do NOT pin
 
 # ─── Processing ────────────────────────────────────────────────────
-pyspark==4.1.2
-pyarrow==24.0.0
+duckdb==1.1.3
+pyarrow==18.1.0
 
 # ─── Database Drivers ─────────────────────────────────────────────
-psycopg2-binary==2.9.12
-# sqlalchemy: pinned by apache-airflow (<2.0) — do not override
-duckdb==1.5.4
+psycopg2-binary==2.9.10
 neo4j==5.27.0
 
-# ─── Transformation ───────────────────────────────────────────────
+# ─── Transformation (dbt — pin core+adapter together) ─────────────
+dbt-core==1.11.11
 dbt-postgres==1.10.2
 
-# ─── Orchestration ────────────────────────────────────────────────
-apache-airflow==3.0.4
-
 # ─── Data Quality ─────────────────────────────────────────────────
-great-expectations==1.18.1
-
-# ─── Object Storage (RustFS — S3-compatible) ─────────────────────
-boto3==1.43.36
+great-expectations==0.18.23
 
 # ─── Data Manipulation ────────────────────────────────────────────
 pandas==2.2.3

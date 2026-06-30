@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 WITH current_count AS (
     SELECT COUNT(*) AS cnt
     FROM {{ source('silver', 'title_basics') }}

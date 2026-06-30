@@ -8,6 +8,11 @@ and logs results to silver.data_quality_log and silver.quarantine.
 import argparse
 import yaml
 import json
+import sys
+from datetime import datetime, timezone
+
+sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
+from pipeline_logger import get_logger
 
 
 DEFAULT_CHECKS = [
@@ -59,14 +64,22 @@ DEFAULT_CHECKS = [
 def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: str):
     import psycopg2
 
+    log = get_logger()
+    batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
     if config_path:
         with open(config_path) as f:
             checks = yaml.safe_load(f).get("checks", [])
     else:
         checks = DEFAULT_CHECKS
 
+    log.log_stage(stage="dq_runner", batch_id=batch_id, status="started",
+                  message=f"Running {len(checks)} DQ checks")
+
     conn = psycopg2.connect(jdbc_url, user=jdbc_user, password=jdbc_password)
     cursor = conn.cursor()
+    # Disable parallel workers to avoid shared memory issues in Docker
+    cursor.execute("SET max_parallel_workers_per_gather = 0")
     all_passed = True
 
     for check in checks:
@@ -119,6 +132,8 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                     """, (f"{name}_alert", table, "row_count_deviation",
                           value, alert_threshold_pct / 100.0, False, None))
                     print(f"[DQ] ALERT: {name} — row count deviation {value:.2%} exceeds {alert_threshold_pct}%")
+                    all_passed = False
+                    continue
 
             else:
                 continue
@@ -133,6 +148,9 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
 
             status = "PASS" if passed else "FAIL"
             print(f"[DQ] {status}: {name} = {value:.4f} (threshold: {threshold})")
+            log.log_stage(stage="dq_check", batch_id=batch_id,
+                          status=status.lower(), row_count=int(value * 10000),
+                          message=f"{name}: {value:.4f} vs {threshold}")
             all_passed = all_passed and passed
 
         except Exception as e:
@@ -146,6 +164,10 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
     conn.commit()
     cursor.close()
     conn.close()
+
+    log.log_stage(stage="dq_runner", batch_id=batch_id,
+                  status="complete" if all_passed else "failed",
+                  message=f"All checks passed" if all_passed else f"Some checks failed")
     return all_passed
 
 

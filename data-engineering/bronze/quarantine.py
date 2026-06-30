@@ -40,8 +40,10 @@ def validate_gzip(file_path: str) -> tuple[bool, Optional[str]]:
 
 def validate_row_count(file_path: str, expected_columns: int, delimiter: str = "\t") -> tuple[bool, Optional[str], int]:
     """Validate that the file has the expected column count and at least one row."""
+    import gzip
     try:
-        with gzip.open(file_path, "rt", encoding="utf-8") as f:
+        opener = gzip.open if file_path.endswith(".gz") else open
+        with opener(file_path, "rt", encoding="utf-8") as f:
             first_line = f.readline().strip()
             if not first_line:
                 return False, "File is empty (no header/data)", 0

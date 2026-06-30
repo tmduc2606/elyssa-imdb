@@ -2,6 +2,7 @@ version: 2
 
 sources:
   - name: silver
+    database: elyssa_warehouse
     schema: silver
     description: "Silver layer PostgreSQL tables"
     tables:

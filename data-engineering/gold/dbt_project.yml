@@ -19,10 +19,11 @@ models:
   imdb_gold:
     staging:
       +materialized: view
-      +schema: gold_stg
+      +schema: stg
     intermediate:
-      +materialized: view
-      +schema: gold_int
+      +materialized: table
+      +schema: int
+      +pre_hook: "SET work_mem = '512MB'"
+      +post_hook: "SET work_mem = DEFAULT"
     marts:
       +materialized: table
-      +schema: gold

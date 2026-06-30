@@ -7,7 +7,12 @@ Wired as upstream of bronze_ingest in the pipeline DAG.
 
 import os
 import glob
+import sys
+from datetime import datetime, timezone
 from airflow.sensors.base import BaseSensorOperator
+
+sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
+from pipeline_logger import get_logger
 
 
 class IMDbDataSensor(BaseSensorOperator):
@@ -41,15 +46,24 @@ class IMDbDataSensor(BaseSensorOperator):
         self.file_pattern = file_pattern
 
     def poke(self, context):
+        log = get_logger()
+        batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         search_path = os.path.join(self.source_dir, self.file_pattern)
         files = glob.glob(search_path)
         # Filter to non-zero size files
         valid = [f for f in files if os.path.getsize(f) > 0]
         if valid:
-            self.log.info(f"Detected {len(valid)} source file(s): {[os.path.basename(f) for f in valid]}")
+            file_list = [os.path.basename(f) for f in valid]
+            self.log.info(f"Detected {len(valid)} source file(s): {file_list}")
+            log.log_stage(stage="imdb_sensor", batch_id=batch_id,
+                          status="success", row_count=len(valid),
+                          message=f"Found {len(valid)} files: {', '.join(file_list)}")
             ti = context.get("ti")
             if ti:
                 ti.xcom_push(key="source_files", value=valid)
             return True
         self.log.info(f"No source files found matching {search_path}")
+        log.log_stage(stage="imdb_sensor", batch_id=batch_id,
+                      status="pending",
+                      message=f"No files at {search_path}, will retry")
         return False

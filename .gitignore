@@ -111,6 +111,11 @@ data-engineering/bronze/db_parquet/
 data-engineering/bronze/logs/
 data-engineering/logs/
 
+# ─── dbt artifacts (compiled output, downloaded packages) ─────────
+data-engineering/gold/target/
+data-engineering/gold/dbt_packages/
+data-engineering/gold/logs/
+
 # ─── OS / IDE ──────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

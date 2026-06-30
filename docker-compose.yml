@@ -123,9 +123,9 @@ services:
       - "8081:8080"
     volumes:
       - airflow_data:/opt/airflow
-      - ./data-engineering:/opt/airflow/data-engineering:ro
+      - ./data-engineering:/opt/airflow/data-engineering:rw
       - ./data-engineering/orchestration/dags:/opt/airflow/dags:ro
-      - ./data-engineering/orchestration/operators:/opt/airflow/operators:ro
+      - ./data-engineering/orchestration/operators:/opt/airflow/operators:rw
     depends_on:
       postgres:
         condition: service_healthy

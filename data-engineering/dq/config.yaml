@@ -25,8 +25,8 @@ checks:
   - name: row_count_title_basics
     table: silver.title_basics
     metric: row_count_variance
-    expected_min: 100000
-    expected_count: 6000000
+    expected_min: 1000000
+    expected_count: 12600000
     threshold: 0.2
     alert_threshold_pct: 20
     severity: error
@@ -34,8 +34,17 @@ checks:
   - name: row_count_name_basics
     table: silver.name_basics
     metric: row_count_variance
-    expected_min: 100000
-    expected_count: 6000000
+    expected_min: 1000000
+    expected_count: 15400000
+    threshold: 0.2
+    alert_threshold_pct: 20
+    severity: error
+
+  - name: row_count_title_episode
+    table: silver.title_episode
+    metric: row_count_variance
+    expected_min: 1000000
+    expected_count: 9700000
     threshold: 0.2
     alert_threshold_pct: 20
     severity: error

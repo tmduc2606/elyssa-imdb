@@ -13,6 +13,14 @@ CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;
 CREATE SCHEMA IF NOT EXISTS gold;
 
+-- Grant schema permissions (re-applied on every run, survives rebuilds)
+GRANT USAGE ON SCHEMA bronze TO elyssa;
+GRANT USAGE ON SCHEMA silver TO elyssa;
+GRANT USAGE ON SCHEMA gold TO elyssa;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA bronze TO elyssa;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA silver TO elyssa;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA gold TO elyssa;
+
 -- ─── Sequences for Surrogate Keys ─────────────────────────────────────────────
 
 CREATE SEQUENCE IF NOT EXISTS silver.title_key_seq START 1 INCREMENT 1;
@@ -37,12 +45,12 @@ CREATE TABLE IF NOT EXISTS silver.title_basics (
     is_current      BOOLEAN NOT NULL DEFAULT TRUE,
     -- Audit
     batch_id        VARCHAR(20),
-    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_title_basics_tconst UNIQUE (tconst)
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_title_basics_tconst ON silver.title_basics(tconst);
 CREATE INDEX IF NOT EXISTS idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_title_basics_current_tconst ON silver.title_basics(tconst) WHERE is_current = TRUE;
 
 COMMENT ON TABLE silver.title_basics IS 'Core table for every title (movie, series, episode, etc.) with SCD2 tracking';
 COMMENT ON COLUMN silver.title_basics.start_year IS 'Release year; for TV series this is the start year';
@@ -63,12 +71,13 @@ COMMENT ON TABLE silver.title_genre IS 'Genres associated with a title (up to 3 
 -- ─── 3. Title Ratings ─────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS silver.title_rating (
-    tconst         VARCHAR(20) PRIMARY KEY,
+    tconst         VARCHAR(20) NOT NULL,
     average_rating NUMERIC(3,1) NOT NULL CHECK (average_rating BETWEEN 0.0 AND 10.0),
     num_votes      INTEGER NOT NULL CHECK (num_votes >= 0),
     snapshot_date  DATE NOT NULL DEFAULT CURRENT_DATE,
     batch_id       VARCHAR(20),
-    ingested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    ingested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tconst, snapshot_date)
 );
 
 SELECT create_hypertable('silver.title_rating', 'snapshot_date', if_not_exists => TRUE);
@@ -206,12 +215,12 @@ CREATE TABLE IF NOT EXISTS silver.name_basics (
     is_current   BOOLEAN NOT NULL DEFAULT TRUE,
     -- Audit
     batch_id     VARCHAR(20),
-    ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_name_basics_nconst UNIQUE (nconst)
+    ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_name_basics_nconst ON silver.name_basics(nconst);
 CREATE INDEX IF NOT EXISTS idx_name_basics_current ON silver.name_basics(is_current) WHERE is_current = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_name_basics_current_nconst ON silver.name_basics(nconst) WHERE is_current = TRUE;
 
 COMMENT ON TABLE silver.name_basics IS 'Core table for every person (actor, director, writer, etc.) with SCD2 tracking';
 
@@ -281,6 +290,21 @@ CREATE TABLE IF NOT EXISTS silver.quarantine (
 );
 
 COMMENT ON TABLE silver.quarantine IS 'Rejected records that failed validation checks';
+
+CREATE TABLE IF NOT EXISTS silver.batch_metadata (
+    metadata_id    SERIAL PRIMARY KEY,
+    batch_id       VARCHAR(20) NOT NULL,
+    table_name     VARCHAR(200) NOT NULL,
+    source_file    TEXT,
+    file_checksum  VARCHAR(64),
+    row_count      INTEGER,
+    ingested_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_batch_metadata_batch ON silver.batch_metadata(batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_metadata_table ON silver.batch_metadata(table_name);
+
+COMMENT ON TABLE silver.batch_metadata IS 'Batch-level checksum and lineage tracking per source table';
 
 -- ─── Performance Indexes for Common Join Paths ───────────────────────────────
 

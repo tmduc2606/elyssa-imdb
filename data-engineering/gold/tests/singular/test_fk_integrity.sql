@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 -- FK integrity: verify all title_key references resolve
 SELECT
     'title_basics' AS fk_check,

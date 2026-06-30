@@ -1,53 +1,204 @@
 from airflow.models import BaseOperator
 from typing import List
+import os
+import sys
+from datetime import datetime, timezone
+
+sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
+from pipeline_logger import get_logger
 
 
 class BronzeIngestOperator(BaseOperator):
     """
-    Triggers PySpark bronze ingestion for specified source tables.
+    Triggers bronze ingestion for specified source tables.
 
-    Submits a spark-submit job for bronze/ingest_imdb.py with the
-    given source tables and bronze output path.
+    Uses DuckDB for TSV→Parquet conversion (fast, no Java dependency).
+    Validates each source file before processing — corrupt/invalid files
+    are quarantined and skipped, never silently dropped.
     """
 
     template_fields = ("bronze_path",)
 
+    # Expected column counts per IMDb source table
+    EXPECTED_COLUMNS = {
+        "title.basics": 9,
+        "title.akas": 6,
+        "title.crew": 3,
+        "title.episode": 4,
+        "title.principals": 6,
+        "title.ratings": 3,
+        "name.basics": 6,
+    }
+
     def __init__(
         self,
         source_tables: List[str],
-        bronze_path: str = "/data/bronze/",
-        spark_master: str = "local[*]",
-        spark_app: str = "/opt/airflow/data-engineering/bronze/ingest_imdb.py",
+        bronze_path: str = "/opt/airflow/output/bronze/",
+        source_dir: str = "/opt/airflow/data-engineering/duke/gate0/source/",
+        quarantine_root: str = "/opt/airflow/output/bronze/quarantine/",
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.source_tables = source_tables
         self.bronze_path = bronze_path
-        self.spark_master = spark_master
-        self.spark_app = spark_app
+        self.source_dir = source_dir
+        self.quarantine_root = quarantine_root
+
+    def _quarantine_record(self, pg_cursor, table, file_path, error, batch_id):
+        """Write a quarantine record to PostgreSQL silver.quarantine."""
+        try:
+            pg_cursor.execute(
+                """INSERT INTO silver.quarantine
+                   (table_name, batch_id, check_name, error_message, quarantined_at)
+                   VALUES (%s, %s, %s, %s, NOW())""",
+                (table, batch_id, "bronze_file_validation", error),
+            )
+        except Exception as e:
+            self.log.warning(f"Failed to log quarantine to PostgreSQL: {e}")
 
     def execute(self, context):
-        import subprocess
-        import os
+        import duckdb
+        import psycopg2
 
-        # Set JAVA_HOME if not set (OpenJDK installed in Airflow image)
-        java_home = os.environ.get("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
-        if os.path.isdir(java_home):
-            os.environ["JAVA_HOME"] = java_home
+        log = get_logger()
+        batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        start_ts = datetime.now(timezone.utc)
 
-        tables_arg = ",".join(self.source_tables)
-        cmd = [
-            "spark-submit",
-            "--master", self.spark_master,
-            "--deploy-mode", "client",
-            self.spark_app,
-            "--tables", tables_arg,
-            "--output", self.bronze_path,
-        ]
-        self.log.info(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            self.log.error(f"Spark submit failed: {result.stderr}")
-            raise RuntimeError(f"Bronze ingestion failed: {result.stderr}")
-        self.log.info(f"Bronze ingestion completed: {result.stdout[:500]}")
+        log.log_stage(stage="bronze_ingest", batch_id=batch_id, status="started",
+                      message=f"Processing {len(self.source_tables)} tables")
+
+        conn = duckdb.connect(":memory:")
+        conn.execute("SET threads = 2")
+        conn.execute("SET memory_limit = '6GB'")
+        conn.execute("SET preserve_insertion_order = false")
+
+        # PostgreSQL connection for quarantine logging
+        pg = None
+        try:
+            pg = psycopg2.connect(
+                host="postgres", port=5432,
+                user="elyssa", password="elyssa_pg_2026",
+                dbname="elyssa_warehouse",
+            )
+            pg.autocommit = True
+        except Exception as e:
+            self.log.warning(f"Cannot connect to PostgreSQL for quarantine logging: {e}")
+
+        try:
+            os.makedirs(self.bronze_path, exist_ok=True)
+            os.makedirs(self.quarantine_root, exist_ok=True)
+
+            source_files = {
+                "title.basics": "title.basics.tsv",
+                "title.akas": "title.akas.tsv",
+                "title.crew": "title.crew.tsv",
+                "title.episode": "title.episode.tsv",
+                "title.principals": "title.principals.tsv",
+                "title.ratings": "title.ratings.tsv",
+                "name.basics": "name.basics.tsv",
+            }
+
+            total_rows = 0
+            quarantined = []
+            processed = []
+
+            for table in self.source_tables:
+                filename = source_files.get(table, f"{table}.tsv")
+                file_path = os.path.join(self.source_dir, filename)
+
+                if not os.path.exists(file_path):
+                    self.log.warning(f"Source file not found: {file_path}, skipping {table}")
+                    continue
+
+                # ── Validate file before processing ────────────────────────
+                expected_cols = self.EXPECTED_COLUMNS.get(table)
+                if expected_cols is not None:
+                    try:
+                        sys.path.insert(0, "/opt/airflow/data-engineering")
+                        from bronze.quarantine import validate_source_file
+
+                        is_valid, error_msg, row_count = validate_source_file(
+                            file_path, table, expected_cols, self.quarantine_root
+                        )
+                        if not is_valid:
+                            self.log.warning(f"QUARANTINE {table}: {error_msg}")
+                            quarantined.append({"table": table, "error": error_msg})
+                            if pg:
+                                cur = pg.cursor()
+                                self._quarantine_record(cur, table, file_path, error_msg, batch_id)
+                            continue
+                    except ImportError:
+                        self.log.info("quarantine module not available, skipping validation")
+                    except Exception as e:
+                        self.log.warning(f"Validation error for {table}: {e}")
+
+                # ── Process valid file ─────────────────────────────────────
+                output_path = os.path.join(self.bronze_path, f"{table}.parquet")
+                now_ts = datetime.now(timezone.utc).isoformat()
+
+                # ── Compute file checksum for lineage ───────────────────────
+                file_checksum = ""
+                try:
+                    import hashlib
+                    sha256 = hashlib.sha256()
+                    with open(file_path, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(8192), b""):
+                            sha256.update(chunk)
+                    file_checksum = sha256.hexdigest()
+                except Exception:
+                    pass
+
+                row_count = conn.execute(
+                    "SELECT COUNT(*) FROM read_csv('" + file_path + "', delim='\t', header=true, all_varchar=true)"
+                ).fetchone()[0]
+                self.log.info(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
+
+                conn.execute(
+                    "COPY ("
+                    "  SELECT *, ? AS _source_file, ? AS _source_table, ? AS _batch_id, ? AS _ingested_at, ? AS _row_count, ? AS _file_checksum "
+                    "  FROM read_csv('" + file_path + "', delim='\t', header=true, all_varchar=true)"
+                    ") TO '" + output_path + "' (FORMAT PARQUET, COMPRESSION snappy)",
+                    [file_path, table, batch_id, now_ts, row_count, file_checksum]
+                )
+
+                total_rows += row_count
+                processed.append({"table": table, "rows": row_count})
+                self.log.info(f"  {table} written -> {output_path}")
+                log.log_stage(stage="bronze_ingest", batch_id=batch_id,
+                              status="success", row_count=row_count,
+                              message=f"{table} -> {output_path}")
+
+                # ── Persist batch metadata (checksum lineage) ───────────
+                if pg:
+                    try:
+                        meta_cursor = pg.cursor()
+                        meta_cursor.execute(
+                            """INSERT INTO silver.batch_metadata
+                               (batch_id, table_name, source_file, file_checksum, row_count, ingested_at)
+                               VALUES (%s, %s, %s, %s, %s, NOW())""",
+                            (batch_id, table, file_path, file_checksum, row_count)
+                        )
+                    except Exception as e:
+                        self.log.warning(f"Failed to persist batch metadata for {table}: {e}")
+
+            # ── Summary ────────────────────────────────────────────────────
+            elapsed = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
+            self.log.info(
+                f"Bronze ingestion complete: {total_rows} rows across {len(processed)} tables"
+                + (f", {len(quarantined)} quarantined" if quarantined else "")
+            )
+            log.log_stage(stage="bronze_ingest", batch_id=batch_id,
+                          status="complete", row_count=total_rows,
+                          duration_ms=elapsed,
+                          message=f"{len(processed)} tables, {len(quarantined)} quarantined")
+            return {
+                "batch_id": batch_id,
+                "total_rows": total_rows,
+                "processed": processed,
+                "quarantined": quarantined,
+            }
+        finally:
+            conn.close()
+            if pg:
+                pg.close()

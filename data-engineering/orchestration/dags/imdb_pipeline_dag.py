@@ -1,14 +1,17 @@
 """
 Elyssa-IMDb Pipeline — Main DAG
 
-Orchestrates: Bronze ingestion → Silver ETL → Gold dbt → Neo4j sync → DQ checks
+Orchestrates: Sensor → Bronze ingestion → Silver ETL → Gold dbt → Neo4j sync → DQ checks
 Execution order:
-  1. bronze_ingest          (7 parallel sensors → PySpark jobs)
-  2. silver_transform       (schema enforcer → array normalizer → SCD2 → upsert)
-  3. gold_dbt               (dbt run for staging → intermediate → marts)
-  4. neo4j_sync             (sync silver tables to Neo4j graph)
-  5. data_quality           (Great Expectations + row-count checks)
-  6. freshness_monitor      (check last_updated freshness SLA)
+  0. imdb_sensor           (detect new .tsv files)
+  1. bronze_ingest          (DuckDB TSV→Parquet, with quarantine)
+  2. db_ingest              (Parquet copy for DB backup)
+  3. silver_transform       (DuckDB→CSV→psycopg2 COPY, parent+child normalization)
+  4. gold_dbt_run           (dbt run for staging → intermediate → marts)
+  5. gold_dbt_test          (dbt test for Gold validation)
+  6. neo4j_sync             (sync silver tables to Neo4j graph)
+  7. dq_checks              (null-rate, referential integrity, row-count)
+  8. freshness_monitor      (check last_updated freshness SLA)
 """
 
 import json
@@ -17,8 +20,6 @@ import sys
 from datetime import datetime, timedelta
 
 # ─── Ensure data-engineering module is importable ───────────────────
-# Inside Docker, data-engineering is mounted at /opt/airflow/data-engineering/
-# We need these on sys.path for `from bronze.*`, `from operators.*`, `from sensors.*`
 for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-engineering", "/opt/airflow"):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
@@ -26,7 +27,6 @@ for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-eng
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
-from airflow.sensors.external_task import ExternalTaskSensor
 
 from operators.bronze_operator import BronzeIngestOperator
 from operators.silver_operator import SilverTransformOperator
@@ -35,19 +35,26 @@ from operators.neo4j_operator import Neo4jSyncOperator
 from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
 from operators.db_operator import DatabaseIngestOperator
-from sensors.imdb_sensor import DataFileSensor
+from operators.imdb_sensor import IMDbDataSensor
+from operators.quarantine_operator import QuarantineCheckOperator
 
-# ─── Load retry config ──────────────────────────────────────────────
+# ─── Retry config (exponential backoff) ─────────────────────────────
 _RETRY_CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "config", "retry.yaml"
 )
+
 def _load_retry_config() -> dict:
     try:
         import yaml
         with open(_RETRY_CONFIG_PATH) as f:
             return yaml.safe_load(f)
     except Exception:
-        return {"max_retries": 4, "base_delay_s": 60, "max_delay_s": 1800, "exponential_factor": 2}
+        return {
+            "max_retries": 4,
+            "base_delay_s": 60,
+            "max_delay_s": 1800,
+            "exponential_factor": 2,
+        }
 
 _retry_cfg = _load_retry_config()
 
@@ -71,7 +78,10 @@ def _on_retry_callback(context):
     """Warn on retry — early signal of transient failures."""
     task_instance = context.get("task_instance")
     if task_instance:
-        print(f"[ALERT:WARN] Task {task_instance.task_id} retrying (attempt {task_instance.try_number})")
+        print(
+            f"[ALERT:WARN] Task {task_instance.task_id} retrying "
+            f"(attempt {task_instance.try_number})"
+        )
 
 
 default_args = {
@@ -81,6 +91,7 @@ default_args = {
     "email_on_retry": False,
     "retries": _retry_cfg.get("max_retries", 4),
     "retry_delay": timedelta(seconds=_retry_cfg.get("base_delay_s", 60)),
+    "retry_exponential_backoff": True,
     "max_retry_delay": timedelta(seconds=_retry_cfg.get("max_delay_s", 1800)),
     "execution_timeout": timedelta(hours=4),
     "on_failure_callback": _on_failure_callback,
@@ -90,7 +101,7 @@ default_args = {
 with DAG(
     dag_id="imdb_pipeline",
     default_args=default_args,
-    description="Elyssa IMDb Bronze → Silver → Gold → Neo4j → DQ pipeline",
+    description="Elyssa IMDb Sensor → Bronze → Silver → Gold → Neo4j → DQ pipeline",
     schedule=None,
     start_date=datetime(2026, 6, 1),
     catchup=False,
@@ -99,7 +110,17 @@ with DAG(
 
     start = EmptyOperator(task_id="pipeline_start")
 
-    # ─── Bronze (TSV) ───────────────────────────────────────────────────────
+    # ─── Sensor (detect new data) ─────────────────────────────────────────
+    imdb_sensor = IMDbDataSensor(
+        task_id="imdb_data_sensor",
+        source_dir="/opt/airflow/data-engineering/duke/gate0/source/",
+        file_pattern="*.tsv",
+        poke_interval=300,
+        timeout=3600,
+        mode="reschedule",
+    )
+
+    # ─── Bronze (TSV → Parquet, with quarantine) ──────────────────────────
     bronze_ingest = BronzeIngestOperator(
         task_id="bronze_ingest",
         source_tables=[
@@ -107,10 +128,10 @@ with DAG(
             "title.episode", "title.principals", "title.ratings",
             "name.basics",
         ],
-        bronze_path="/data/bronze/",
+        bronze_path="/opt/airflow/output/bronze/",
     )
 
-    # ─── Bronze (Database) ───────────────────────────────────────────────────
+    # ─── Bronze (Database Parquet copy) ───────────────────────────────────
     db_ingest = DatabaseIngestOperator(
         task_id="db_ingest",
         source_tables=[
@@ -119,66 +140,80 @@ with DAG(
             "name.basics",
         ],
         source_type="postgresql",
-        bronze_path="/data/bronze/db/",
+        bronze_path="/opt/airflow/output/bronze/db/",
         incremental=True,
     )
 
-    # ─── Bronze Ingestion Complete ───────────────────────────────────────────
+    # ─── Bronze Ingestion Complete ────────────────────────────────────────
     bronze_done = EmptyOperator(task_id="bronze_ingestion_done")
 
-    # ─── Silver ──────────────────────────────────────────────────────────────
-    silver_transform = SilverTransformOperator(
-        task_id="silver_transform",
-        bronze_path="/data/bronze/",
-        jdbc_url="{{ conn.postgres_silver.host }}",
-        jdbc_user="{{ conn.postgres_silver.login }}",
-        jdbc_password="{{ conn.postgres_silver.password }}",
+    # ─── Quarantine Check (post-bronze validation) ────────────────────────
+    quarantine_check = QuarantineCheckOperator(
+        task_id="quarantine_check",
+        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
+        jdbc_user="elyssa",
+        jdbc_password="elyssa_pg_2026",
+        fail_threshold=1000,
     )
 
-    # ─── Gold ────────────────────────────────────────────────────────────────
+    # ─── Silver (parent + child normalization) ────────────────────────────
+    silver_transform = SilverTransformOperator(
+        task_id="silver_transform",
+        bronze_path="/opt/airflow/output/bronze/",
+        jdbc_url="postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse",
+        jdbc_user="elyssa",
+        jdbc_password="elyssa_pg_2026",
+    )
+
+    # ─── Gold (dbt run + test) ────────────────────────────────────────────
     gold_dbt_run = DbtRunOperator(
         task_id="gold_dbt_run",
-        dbt_project_dir="/opt/dbt/imdb_gold",
+        dbt_project_dir="/opt/airflow/data-engineering/gold",
         dbt_target="prod",
     )
 
     gold_dbt_test = DbtRunOperator(
         task_id="gold_dbt_test",
-        dbt_project_dir="/opt/dbt/imdb_gold",
+        dbt_project_dir="/opt/airflow/data-engineering/gold",
         dbt_command="test",
         dbt_target="prod",
     )
 
-    # ─── Neo4j ───────────────────────────────────────────────────────────────
+    # ─── Neo4j ────────────────────────────────────────────────────────────
     neo4j_sync = Neo4jSyncOperator(
         task_id="neo4j_sync",
-        neo4j_uri="{{ conn.neo4j.uri }}",
-        neo4j_user="{{ conn.neo4j.login }}",
-        neo4j_password="{{ conn.neo4j.password }}",
+        neo4j_uri="bolt://neo4j:7687",
+        neo4j_user="neo4j",
+        neo4j_password="elyssa_neo_2026",
         tables_to_sync=["title_basics", "name_basics", "title_principal"],
     )
 
-    # ─── Data Quality ────────────────────────────────────────────────────────
+    # ─── Data Quality (halts on threshold violations) ─────────────────────
     dq_checks = DataQualityOperator(
         task_id="dq_checks",
-        jdbc_url="{{ conn.postgres_silver.host }}",
-        jdbc_user="{{ conn.postgres_silver.login }}",
-        jdbc_password="{{ conn.postgres_silver.password }}",
-        dq_config_path="/opt/dq/config.yaml",
+        jdbc_url="postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse",
+        jdbc_user="elyssa",
+        jdbc_password="elyssa_pg_2026",
+        dq_config_path="/opt/airflow/data-engineering/dq/config.yaml",
+        run_gx=True,
+        bronze_path="/opt/airflow/output/bronze/",
     )
 
-    # ─── Freshness ──────────────────────────────────────────────────────────
+    # ─── Freshness ────────────────────────────────────────────────────────
     freshness_check = FreshnessCheckOperator(
         task_id="freshness_check",
-        jdbc_url="{{ conn.postgres_silver.host }}",
-        jdbc_user="{{ conn.postgres_silver.login }}",
-        jdbc_password="{{ conn.postgres_silver.password }}",
+        jdbc_url="postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse",
+        jdbc_user="elyssa",
+        jdbc_password="elyssa_pg_2026",
         sla_hours=24,
     )
 
     end = EmptyOperator(task_id="pipeline_end")
 
-    # ─── DAG Structure ───────────────────────────────────────────────────────
-    start >> [bronze_ingest, db_ingest] >> bronze_done >> silver_transform >> [gold_dbt_run, gold_dbt_test]
+    # ─── DAG Structure ────────────────────────────────────────────────────
+    # Sensor → bronze → quarantine_check → silver → gold → neo4j → dq → freshness → end
+    start >> imdb_sensor >> [bronze_ingest, db_ingest] >> bronze_done
+    bronze_done >> quarantine_check >> silver_transform
+    silver_transform >> [gold_dbt_run, gold_dbt_test]
     gold_dbt_run >> neo4j_sync >> dq_checks >> freshness_check >> end
     gold_dbt_test >> dq_checks

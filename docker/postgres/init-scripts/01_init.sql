@@ -5,15 +5,20 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Create schemas for Medallion Architecture
+-- Create schemas for Medallion Architecture (in elyssa_warehouse)
 CREATE SCHEMA IF NOT EXISTS bronze;
 CREATE SCHEMA IF NOT EXISTS silver;
 CREATE SCHEMA IF NOT EXISTS gold;
 
--- Grant permissions
+-- Grant permissions (re-applied on every rebuild)
 GRANT ALL ON SCHEMA bronze TO elyssa;
 GRANT ALL ON SCHEMA silver TO elyssa;
 GRANT ALL ON SCHEMA gold TO elyssa;
+-- Future tables in silver also get full privileges
+ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT ALL ON TABLES TO elyssa;
+
+-- Note: silver schema/tables are created by 02_silver_schema.sql (alphabetical order)
+--       in this same elyssa_warehouse database.
 
 -- Create graph sync tracking table (used by Airflow Neo4j sync)
 CREATE TABLE IF NOT EXISTS public.graph_sync_status (

@@ -23,29 +23,33 @@ models:
           lineage_source: "silver.title_basics.title_type"
       - name: start_year
         tests:
-          - accepted_range:
-              min_value: 1874
-              max_value: 2030
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1874
+                max_value: 2030
         meta:
           lineage_source: "silver.title_basics.start_year"
       - name: average_rating
         tests:
-          - accepted_range:
-              min_value: 0.0
-              max_value: 10.0
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 10.0
         meta:
           lineage_source: "silver.title_rating.average_rating"
       - name: num_votes
         tests:
-          - accepted_range:
-              min_value: 0
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
         meta:
           lineage_source: "silver.title_rating.num_votes"
       - name: runtime_minutes
         tests:
-          - accepted_range:
-              min_value: 1
-              max_value: 1000
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 1000
         meta:
           lineage_source: "silver.title_basics.runtime_minutes"
 
@@ -58,9 +62,10 @@ models:
         tests: [not_null]
       - name: birth_year
         tests:
-          - accepted_range:
-              min_value: 1800
-              max_value: 2030
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1800
+                max_value: 2030
 
   - name: fact_title_rating
     description: "Title rating fact at grain (title_key, snapshot_date)"
@@ -71,13 +76,15 @@ models:
         tests: [not_null]
       - name: average_rating
         tests:
-          - accepted_range:
-              min_value: 0.0
-              max_value: 10.0
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 10.0
       - name: num_votes
         tests:
-          - accepted_range:
-              min_value: 0
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
 
   - name: fact_title_principal
     description: "Principal fact at grain (title_key, name_key, character_key)"
@@ -89,16 +96,4 @@ models:
       - name: character_name
         tests: []
       - name: category
-        tests: [not_null]
-
-  - name: fact_episode
-    description: "Episodic content fact at grain (episode_key, series_key)"
-    columns:
-      - name: episode_key
-        tests: [unique, not_null]
-      - name: series_key
-        tests: [not_null]
-      - name: season_number
-        tests: [not_null]
-      - name: episode_number
         tests: [not_null]

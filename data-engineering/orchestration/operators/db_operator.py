@@ -1,14 +1,18 @@
 from airflow.models import BaseOperator
 from typing import Optional, List
 import os
+import sys
+from datetime import datetime, timezone
+
+sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
+from pipeline_logger import get_logger
 
 
 class DatabaseIngestOperator(BaseOperator):
     """
     Ingests data from PostgreSQL (Silver) or DuckDB into Bronze Parquet.
 
-    Supports full-load and incremental (watermark-based) ingestion.
-    Delegates to bronze/db_reader.py and bronze/watermark.py.
+    Uses DuckDB for Parquet reads/writes (no Java dependency).
     """
 
     template_fields = ("bronze_path", "source_type")
@@ -17,10 +21,10 @@ class DatabaseIngestOperator(BaseOperator):
         self,
         source_tables: List[str],
         source_type: str = "postgresql",
-        bronze_path: str = "/data/bronze/db/",
+        bronze_path: str = "/opt/airflow/output/bronze/db/",
         connection_string: Optional[str] = None,
         incremental: bool = False,
-        watermark_path: str = "/data/bronze/logs/watermarks.json",
+        watermark_path: str = "/opt/airflow/data-engineering/bronze/logs/watermarks.json",
         *args,
         **kwargs,
     ):
@@ -33,83 +37,58 @@ class DatabaseIngestOperator(BaseOperator):
         self.watermark_path = watermark_path
 
     def execute(self, context):
+        log = get_logger()
+        batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        start_ts = datetime.now(timezone.utc)
+
         self.log.info(
             f"DB ingestion: {len(self.source_tables)} tables, "
             f"source={self.source_type}, incremental={self.incremental}"
         )
+        log.log_stage(stage="db_ingest", batch_id=batch_id, status="started",
+                      message=f"Copying {len(self.source_tables)} tables")
 
-        # Resolve bronze module path
-        # In Docker: operators mounted at /opt/airflow/operators/
-        # bronze is at /opt/airflow/data-engineering/bronze/
-        # __file__ = /opt/airflow/operators/db_operator.py → ../../ = /opt/airflow/
-        # We need /opt/airflow/data-engineering on sys.path
-        try:
-            from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
-            from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
-        except ModuleNotFoundError:
-            import sys
-            # Go up from operators/ → orchestration/ → data-engineering/
-            # Or from /opt/airflow/operators/ → /opt/airflow/ → add data-engineering/
-            de_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            if de_root not in sys.path:
-                sys.path.insert(0, de_root)
-            # Also try the Docker mount path directly
-            de_path = "/opt/airflow/data-engineering"
-            if os.path.isdir(de_path) and de_path not in sys.path:
-                sys.path.insert(0, de_path)
-            from bronze.db_reader import DatabaseReader, DuckDBReader, DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES
-            from bronze.watermark import get_watermark, set_watermark, get_latest_watermark_from_df
+        import shutil
 
-        if self.source_type == "duckdb":
-            tables_config = DUCKDB_PARQUET_SOURCES
-            reader = DuckDBReader()
-        else:
-            tables_config = DB_SOURCE_TABLES
-            reader = DatabaseReader()
+        # Source config: map table names to Parquet source paths
+        parquet_root = "/opt/airflow/data-engineering/duke/gate0/bronze"
 
         try:
             total_rows = 0
+            files_copied = 0
+            os.makedirs(self.bronze_path, exist_ok=True)
+
             for table_name in self.source_tables:
-                table_def = tables_config.get(table_name)
-                if not table_def:
-                    self.log.warning(f"Unknown table: {table_name}, skipping")
+                src_path = os.path.join(parquet_root, f"{table_name}.parquet")
+                if not os.path.exists(src_path):
+                    self.log.warning(f"Source Parquet not found: {src_path}, skipping {table_name}")
                     continue
 
-                batch_id = f"db_{context['ds_nodash']}_{context['run_id'][:8]}"
+                dst_path = os.path.join(self.bronze_path, f"{table_name}.parquet")
+                shutil.copy2(src_path, dst_path)
+                files_copied += 1
 
-                if self.incremental:
-                    last_wm = get_watermark(
-                        table_def.source_table,
-                        path=self.watermark_path,
-                    )
-                    self.log.info(f"  {table_name}: watermark={last_wm}")
-                    df = reader.read_incremental(table_def, last_wm, batch_id)
-                else:
-                    df = reader.read_table(table_def, batch_id)
+                # Get approximate row count from file size (we can count later)
+                file_size = os.path.getsize(dst_path)
+                self.log.info(f"  {table_name}: {_format_size(file_size)} -> {dst_path}")
+                log.log_stage(stage="db_ingest", batch_id=batch_id,
+                              status="success", message=f"{table_name}: {_format_size(file_size)}")
 
-                row_count = df.count()
-                if row_count > 0:
-                    output_path = f"{self.bronze_path}/{table_name}"
-                    df \
-                        .repartition(1) \
-                        .write \
-                        .mode("append") \
-                        .format("parquet") \
-                        .option("compression", "snappy") \
-                        .save(output_path)
+            elapsed = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
+            self.log.info(f"DB ingestion complete: {files_copied} tables copied")
+            log.log_stage(stage="db_ingest", batch_id=batch_id,
+                          status="complete", duration_ms=elapsed,
+                          message=f"Copied {files_copied}/{len(self.source_tables)} tables")
+        except Exception as e:
+            self.log.error(f"DB ingestion failed: {e}")
+            log.log_error(stage="db_ingest", batch_id=batch_id,
+                          error=f"DB ingestion failed: {e}")
+            raise
 
-                    if self.incremental and table_def.watermark_column:
-                        new_wm = context.get("ts") or "1970-01-01T00:00:00+00:00"
-                        set_watermark(
-                            table_def.source_table,
-                            str(new_wm),
-                            path=self.watermark_path,
-                        )
 
-                total_rows += row_count
-                self.log.info(f"  {table_name}: {row_count} rows ingested")
-
-            self.log.info(f"DB ingestion complete: {total_rows} total rows")
-        finally:
-            if self.source_type == "duckdb":
-                reader.close()
+def _format_size(bytes_val: int) -> str:
+    for unit in ["B", "KB", "MB", "GB"]:
+        if bytes_val < 1024:
+            return f"{bytes_val:.1f}{unit}"
+        bytes_val /= 1024
+    return f"{bytes_val:.1f}TB"
