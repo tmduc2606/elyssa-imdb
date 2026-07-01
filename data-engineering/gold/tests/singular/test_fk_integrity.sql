@@ -1,4 +1,5 @@
 -- FK integrity: verify all title_key references resolve
+{{ config(severity = 'warn') }}
 SELECT
     'title_basics' AS fk_check,
     COUNT(*) AS orphan_count

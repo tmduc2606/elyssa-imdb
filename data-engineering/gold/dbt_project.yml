@@ -21,9 +21,7 @@ models:
       +materialized: view
       +schema: stg
     intermediate:
-      +materialized: table
+      +materialized: ephemeral
       +schema: int
       +pre_hook: "SET work_mem = '512MB'"
       +post_hook: "SET work_mem = DEFAULT"
-    marts:
-      +materialized: table

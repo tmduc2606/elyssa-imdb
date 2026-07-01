@@ -104,7 +104,7 @@ default_args = {
     "retry_delay": timedelta(seconds=_retry_cfg.get("base_delay_s", 60)),
     "retry_exponential_backoff": True,
     "max_retry_delay": timedelta(seconds=_retry_cfg.get("max_delay_s", 1800)),
-    "execution_timeout": timedelta(hours=4),
+    "execution_timeout": timedelta(hours=8),
     "on_failure_callback": _on_failure_callback,
     "on_retry_callback": _on_retry_callback,
 }

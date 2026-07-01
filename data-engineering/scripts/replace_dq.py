@@ -1,67 +1,28 @@
-"""
-Data Quality Check Runner
+file_path = 'data-engineering/dq/run_checks.py'
 
-Reads DQ config, executes checks against Silver PostgreSQL,
-and logs results to silver.data_quality_log and silver.quarantine.
-"""
+with open(file_path, 'r') as f:
+    lines = f.readlines()
 
-import argparse
-import yaml
-import json
-import sys
-from datetime import datetime, timezone
+# Find start of def run_checks
+start = -1
+for i, line in enumerate(lines):
+    if line.strip().startswith('def run_checks'):
+        start = i
+        break
 
-sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
-from pipeline_logger import get_logger
+if start == -1:
+    print("Function not found")
+    exit(1)
 
+# Find end (next def or end of file)
+end = len(lines)
+for i in range(start + 1, len(lines)):
+    if lines[i].strip().startswith('def '):
+        end = i
+        break
 
-DEFAULT_CHECKS = [
-    {
-        "name": "null_rate_title_basics",
-        "table": "silver.title_basics",
-        "metric": "null_rate",
-        "column": "primary_title",
-        "threshold": 0.0,
-        "severity": "error",
-    },
-    {
-        "name": "null_rate_title_rating",
-        "table": "silver.title_rating",
-        "metric": "null_rate",
-        "column": "average_rating",
-        "threshold": 0.0,
-        "severity": "error",
-    },
-    {
-        "name": "referential_title_episode",
-        "table": "silver.title_episode",
-        "metric": "orphan_rate",
-        "fk_column": "parent_tconst",
-        "pk_table": "silver.title_basics",
-        "pk_column": "tconst",
-        "threshold": 0.01,
-        "severity": "warn",
-    },
-    {
-        "name": "row_count_title_basics",
-        "table": "silver.title_basics",
-        "metric": "row_count_variance",
-        "expected_min": 100000,
-        "threshold": 0.2,
-        "severity": "error",
-    },
-    {
-        "name": "row_count_name_basics",
-        "table": "silver.name_basics",
-        "metric": "row_count_variance",
-        "expected_min": 100000,
-        "threshold": 0.2,
-        "severity": "error",
-    },
-]
-
-
-def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: str):
+# New function lines (each line ends with newline)
+new_func = '''def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: str):
     """
     Data Quality Check Runner
 
@@ -190,19 +151,16 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                   status="complete" if all_passed else "failed",
                   message=f"All checks passed" if all_passed else f"Some checks failed")
     return all_passed
-def main():
-    parser = argparse.ArgumentParser(description="Data Quality Runner")
-    parser.add_argument("--config", default="")
-    parser.add_argument("--jdbc-url", required=True)
-    parser.add_argument("--jdbc-user", required=True)
-    parser.add_argument("--jdbc-password", required=True)
-    args = parser.parse_args()
+'''
 
-    passed = run_checks(args.config, args.jdbc_url, args.jdbc_user, args.jdbc_password)
-    if not passed:
-        raise RuntimeError("Data quality checks failed")
-    print("[DQ] All checks passed")
+# Ensure each line ends with newline (the triple-quoted string already has newlines)
+# But we need to split into lines and ensure each line ends with \n
+new_lines = new_func.splitlines(keepends=True)  # This keeps the newline characters
 
+# Replace
+new_lines_all = lines[:start] + new_lines + lines[end:]
 
-if __name__ == "__main__":
-    main()
+with open(file_path, 'w') as f:
+    f.writelines(new_lines_all)
+
+print("Successfully replaced run_checks function.")

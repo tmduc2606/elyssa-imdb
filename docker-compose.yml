@@ -29,11 +29,12 @@ services:
       postgres
         -c shared_preload_libraries=timescaledb
         -c max_connections=200
-        -c shared_buffers=256MB
-        -c work_mem=64MB
-        -c maintenance_work_mem=128MB
+        -c shared_buffers=512MB
+        -c work_mem=128MB
+        -c maintenance_work_mem=256MB
         -c wal_level=replica
-        -c max_wal_size=2GB
+        -c max_wal_size=4GB
+        -c effective_cache_size=1536MB
         -c checkpoint_completion_target=0.9
         -c random_page_cost=1.1
         -c effective_io_concurrency=200

@@ -50,9 +50,20 @@ SET r.category = row.category,
 
 
 def sync_table(uri, user, password, table_name):
+    """
+    Sync a single table from PostgreSQL to Neo4j using streaming.
+    """
     from neo4j import GraphDatabase
     import psycopg2
     import psycopg2.extras
+    from decimal import Decimal
+
+    def _convert_row(row: dict) -> dict:
+        """Convert Decimal values to float for Neo4j compatibility."""
+        return {
+            k: float(v) if isinstance(v, Decimal) else v
+            for k, v in row.items()
+        }
 
     # Map table_name to source query
     TABLE_QUERIES = {
@@ -83,44 +94,37 @@ def sync_table(uri, user, password, table_name):
         print(f"[Neo4j] Unknown table: {table_name}")
         return
 
-    # Read data from PostgreSQL
-    pg_conn = psycopg2.connect(
-        host="postgres", port=5432, dbname="elyssa_warehouse",
-        user="elyssa", password="elyssa_pg_2026"
-    )
-    batches = []
-    with pg_conn.cursor(name=f"neo4j_sync_{table_name}", cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.itersize = 5000
-        cur.execute(TABLE_QUERIES[table_name])
-        batch = []
-        for row in cur:
-            batch.append(dict(row))
-            if len(batch) >= 5000:
-                batches.append(batch)
-                batch = []
-        if batch:
-            batches.append(batch)
-    pg_conn.close()
-
-    # Write to Neo4j via MERGE
-    driver = GraphDatabase.driver(uri, auth=(user, password))
-    cypher_map = {
+    CYPHER_MAP = {
         "title_basics": CYPHER_SYNC_TITLE,
         "name_basics": CYPHER_SYNC_PERSON,
         "title_principal": CYPHER_SYNC_ACTED_IN,
     }
-    cypher = cypher_map[table_name]
 
-    with driver.session() as session:
-        total_synced = 0
-        for batch in batches:
-            session.run(cypher, batch=batch)
-            total_synced += len(batch)
-
-    driver.close()
-    print(f"[Neo4j] Synced {total_synced} rows for {table_name}")
-
-
+    # Read data from PostgreSQL and stream to Neo4j
+    pg_conn = psycopg2.connect(
+        host="postgres", port=5432, dbname="elyssa_warehouse",
+        user="elyssa", password="elyssa_pg_2026"
+    )
+    try:
+        with pg_conn.cursor(name=f"neo4j_sync_{table_name}", cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.itersize = 5000
+            cur.execute(TABLE_QUERIES[table_name])
+            batch = []
+            driver = GraphDatabase.driver(uri, auth=(user, password))
+            with driver.session() as session:
+                total_synced = 0
+                for row in cur:
+                    batch.append(_convert_row(dict(row)))
+                    if len(batch) >= 5000:
+                        session.run(CYPHER_MAP[table_name], batch=batch)
+                        total_synced += len(batch)
+                        batch = []
+                if batch:
+                    session.run(CYPHER_MAP[table_name], batch=batch)
+                    total_synced += len(batch)
+            driver.close()
+    finally:
+        pg_conn.close()
 def main():
     parser = argparse.ArgumentParser(description="Neo4j Sync Runner")
     parser.add_argument("--uri", required=True)

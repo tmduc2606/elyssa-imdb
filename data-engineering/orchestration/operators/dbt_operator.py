@@ -50,7 +50,11 @@ class DbtRunOperator(BaseOperator):
         # Auto-run dbt deps if packages are missing
         packages_dir = os.path.join(project_dir, "dbt_packages")
         packages_yml = os.path.join(project_dir, "packages.yml")
-        if os.path.isfile(packages_yml) and not os.path.isdir(packages_dir):
+        needs_deps = (
+            not os.path.isdir(packages_dir)  # directory missing
+            or (os.path.isdir(packages_dir) and not os.listdir(packages_dir))  # empty dir
+        )
+        if os.path.isfile(packages_yml) and needs_deps:
             deps_cmd = [
                 "dbt", "deps",
                 "--project-dir", project_dir,

@@ -87,8 +87,8 @@ Or via CLI:
 docker exec elyssa-airflow airflow dags trigger imdb_pipeline
 ```
 
-The pipeline runs 12 tasks:
-`sensor → bronze_ingest → db_copy → silver_transform → dbt_run → dbt_test → neo4j_sync → dq_checks (+ Great Expectations) → freshness_sla`
+The pipeline runs the following tasks:
+`sensor → bronze_ingest → quarantine_check → silver_transform → gold_dbt_run → [gold_dbt_test, neo4j_sync] → dq_checks (+ Great Expectations) → freshness_check`
 
 ### 5. Monitor
 

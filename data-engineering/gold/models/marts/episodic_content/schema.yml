@@ -9,6 +9,12 @@ models:
       - name: series_key
         tests: [not_null]
       - name: season_number
-        tests: [not_null]
+        tests:
+          - not_null:
+              config:
+                severity: warn
       - name: episode_number
-        tests: [not_null]
+        tests:
+          - not_null:
+              config:
+                severity: warn

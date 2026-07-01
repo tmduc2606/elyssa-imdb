@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS silver.title_basics (
 );
 CREATE INDEX IF NOT EXISTS idx_title_basics_tconst ON silver.title_basics(tconst);
 CREATE INDEX IF NOT EXISTS idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE;
+CREATE INDEX IF NOT EXISTS idx_title_basics_tconst_is_current ON silver.title_basics(tconst, is_current);
 
 -- 2. Title Genres
 CREATE TABLE IF NOT EXISTS silver.title_genre (
@@ -237,3 +238,7 @@ CREATE INDEX IF NOT EXISTS idx_batch_metadata_batch ON silver.batch_metadata(bat
 CREATE INDEX IF NOT EXISTS idx_batch_metadata_table ON silver.batch_metadata(table_name);
 
 COMMENT ON TABLE silver.batch_metadata IS 'Batch-level checksum and lineage tracking per source table';
+
+CREATE INDEX IF NOT EXISTS idx_title_genre_tconst_genre ON silver.title_genre(tconst, genre);
+CREATE INDEX IF NOT EXISTS idx_title_director_tconst ON silver.title_director(tconst);
+CREATE INDEX IF NOT EXISTS idx_title_writer_tconst ON silver.title_writer(tconst);

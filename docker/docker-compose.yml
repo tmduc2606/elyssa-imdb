@@ -39,6 +39,7 @@ services:
         -c effective_io_concurrency=200
         -c log_min_duration_statement=1000
         -c timezone=UTC
+    shm_size: '1g'
     ports:
       - "54321:5432"
     volumes:

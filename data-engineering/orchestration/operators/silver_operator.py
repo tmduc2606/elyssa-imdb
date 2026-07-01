@@ -163,6 +163,9 @@ class SilverTransformOperator(BaseOperator):
             "isOriginalTitle": "0",
         }
 
+        # Columns that need VARCHAR -> BOOLEAN cast for PostgreSQL COPY
+        bool_casts = {"isAdult", "isOriginalTitle"}
+
         # Tables that require NOT NULL columns — filter out rows where those
         # columns are NULL (IMDb source data quality issues, e.g. 88 rows in
         # name.basics have no primaryName). These rows are skipped (quarantined
@@ -189,6 +192,8 @@ class SilverTransformOperator(BaseOperator):
                     default_val = not_null_fixes.get(col_name)
                     if default_val is not None:
                         expr = f"COALESCE({expr}, '{default_val}')"
+                    if col_name in bool_casts:
+                        expr = f"CASE WHEN {expr} = '1' THEN 't' WHEN {expr} = '0' THEN 'f' ELSE 'f' END"
                     select_parts.append(f"{expr} AS \"{col_name}\"")
                 select_sql = ", ".join(select_parts)
 
@@ -238,6 +243,13 @@ class SilverTransformOperator(BaseOperator):
 
                 if is_scd2:
                     pk_col = scd2_pk_map[dst_table]
+                    # Drop indexes for the specific table to speed up SCD2
+                    if dst_table == "silver.title_basics":
+                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_tconst")
+                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_current")
+                    elif dst_table == "silver.name_basics":
+                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_nconst")
+                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_current")
                     # Temp tables must be unqualified (no schema prefix)
                     stg_table = f"stg_{dst_table.replace('.', '_')}"
 
@@ -265,14 +277,38 @@ class SilverTransformOperator(BaseOperator):
                     pg_cursor.execute(f"""
                         UPDATE {dst_table}
                         SET valid_to = NOW(), is_current = FALSE
-                        WHERE {pk_col} IN (SELECT {pk_col} FROM {stg_table})
-                          AND is_current = TRUE
+                        FROM {stg_table} s
+                        WHERE {dst_table}.{pk_col} = s.{pk_col}
+                          AND {dst_table}.is_current = TRUE
                     """)
+                    # Recreate indexes after load
+                    if dst_table == "silver.title_basics":
+                        pg_cursor.execute("CREATE INDEX idx_title_basics_tconst ON silver.title_basics(tconst)")
+                        pg_cursor.execute("CREATE INDEX idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE")
+                    elif dst_table == "silver.name_basics":
+                        pg_cursor.execute("CREATE INDEX idx_name_basics_nconst ON silver.name_basics(nconst)")
+                        pg_cursor.execute("CREATE INDEX idx_name_basics_current ON silver.name_basics(is_current) WHERE is_current = TRUE")
                     expired = pg_cursor.rowcount
 
                     # Insert new versions
                     stg_insert_cols = ", ".join(stg_cols)
-                    stg_select_cols = ", ".join(stg_cols)
+                    # Type casts for SCD2 staging tables (all staging cols are VARCHAR)
+                    scd2_type_casts = {
+                        "silver.title_basics": {
+                            "is_adult": "::BOOLEAN",
+                            "start_year": "::SMALLINT",
+                            "end_year": "::SMALLINT",
+                            "runtime_minutes": "::INTEGER",
+                        },
+                        "silver.name_basics": {
+                            "birth_year": "::SMALLINT",
+                            "death_year": "::SMALLINT",
+                        },
+                    }
+                    casts = scd2_type_casts.get(dst_table, {})
+                    stg_select_cols = ", ".join(
+                        f"{c}{casts.get(c, '')}" for c in stg_cols
+                    )
                     pg_cursor.execute(f"""
                         INSERT INTO {dst_table} ({stg_insert_cols}, valid_from, is_current, batch_id, ingested_at)
                         SELECT {stg_select_cols}, NOW(), TRUE, '{batch_id}', NOW()
@@ -320,15 +356,16 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "title.crew",
                     "sql": """
                         SELECT tconst,
-                               CAST(ordinality AS SMALLINT) AS ordering,
+                               CAST(ROW_NUMBER() OVER (PARTITION BY tconst) AS SMALLINT) AS ordering,
                                director AS nconst
-                        FROM read_parquet('{path}')
-                        CROSS JOIN LATERAL UNNEST(
-                            string_split(NULLIF(directors, '\\N'), ',')
-                        ) WITH ORDINALITY AS _(director, ordinality)
-                        WHERE directors IS NOT NULL
-                          AND directors != ''
-                          AND directors != '\\N'
+                        FROM (
+                            SELECT tconst,
+                                   UNNEST(string_split(NULLIF(directors, '\\N'), ',')) AS director
+                            FROM read_parquet('{path}')
+                            WHERE directors IS NOT NULL
+                              AND directors != ''
+                              AND directors != '\\N'
+                        ) sub
                     """,
                 },
                 {
@@ -337,15 +374,16 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "title.crew",
                     "sql": """
                         SELECT tconst,
-                               CAST(ordinality AS SMALLINT) AS ordering,
+                               CAST(ROW_NUMBER() OVER (PARTITION BY tconst) AS SMALLINT) AS ordering,
                                writer AS nconst
-                        FROM read_parquet('{path}')
-                        CROSS JOIN LATERAL UNNEST(
-                            string_split(NULLIF(writers, '\\N'), ',')
-                        ) WITH ORDINALITY AS _(writer, ordinality)
-                        WHERE writers IS NOT NULL
-                          AND writers != ''
-                          AND writers != '\\N'
+                        FROM (
+                            SELECT tconst,
+                                   UNNEST(string_split(NULLIF(writers, '\\N'), ',')) AS writer
+                            FROM read_parquet('{path}')
+                            WHERE writers IS NOT NULL
+                              AND writers != ''
+                              AND writers != '\\N'
+                        ) sub
                     """,
                 },
                 {
@@ -398,15 +436,16 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "name.basics",
                     "sql": """
                         SELECT nconst,
-                               CAST(ordinality AS SMALLINT) AS profession_order,
+                               CAST(ROW_NUMBER() OVER (PARTITION BY nconst) AS SMALLINT) AS profession_order,
                                profession AS profession
-                        FROM read_parquet('{path}')
-                        CROSS JOIN LATERAL UNNEST(
-                            string_split(NULLIF(primaryProfession, '\\N'), ',')
-                        ) WITH ORDINALITY AS _(profession, ordinality)
-                        WHERE primaryProfession IS NOT NULL
-                          AND primaryProfession != ''
-                          AND primaryProfession != '\\N'
+                        FROM (
+                            SELECT nconst,
+                                   UNNEST(string_split(NULLIF(primaryProfession, '\\N'), ',')) AS profession
+                            FROM read_parquet('{path}')
+                            WHERE primaryProfession IS NOT NULL
+                              AND primaryProfession != ''
+                              AND primaryProfession != '\\N'
+                        ) sub
                     """,
                 },
                 {
@@ -415,15 +454,16 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "name.basics",
                     "sql": """
                         SELECT nconst,
-                               CAST(ordinality AS SMALLINT) AS known_for_order,
+                               CAST(ROW_NUMBER() OVER (PARTITION BY nconst) AS SMALLINT) AS known_for_order,
                                title AS tconst
-                        FROM read_parquet('{path}')
-                        CROSS JOIN LATERAL UNNEST(
-                            string_split(NULLIF(knownForTitles, '\\N'), ',')
-                        ) WITH ORDINALITY AS _(title, ordinality)
-                        WHERE knownForTitles IS NOT NULL
-                          AND knownForTitles != ''
-                          AND knownForTitles != '\\N'
+                        FROM (
+                            SELECT nconst,
+                                   UNNEST(string_split(NULLIF(knownForTitles, '\\N'), ',')) AS title
+                            FROM read_parquet('{path}')
+                            WHERE knownForTitles IS NOT NULL
+                              AND knownForTitles != ''
+                              AND knownForTitles != '\\N'
+                        ) sub
                     """,
                 },
             ]
