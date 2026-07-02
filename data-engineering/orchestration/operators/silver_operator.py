@@ -1,4 +1,5 @@
 from airflow.models import BaseOperator
+from airflow.exceptions import AirflowTaskCancelled
 from typing import Optional
 import os
 import sys
@@ -57,6 +58,10 @@ class SilverTransformOperator(BaseOperator):
             host="postgres", port=5432,
             user=self.jdbc_user, password=self.jdbc_password,
             dbname="elyssa_warehouse",
+            keepalives=1,
+            keepalives_idle=300,
+            keepalives_interval=60,
+            keepalives_count=5,
         )
         pg.autocommit = False
 
@@ -64,8 +69,8 @@ class SilverTransformOperator(BaseOperator):
         schema_path = "/opt/airflow/data-engineering/silver/schema.sql"
         if os.path.exists(schema_path):
             with open(schema_path, "r") as f:
-                pg_cursor = pg.cursor()
-                pg_cursor.execute(f.read())
+                with pg.cursor() as pg_cursor:
+                    pg_cursor.execute(f.read())
             pg.commit()
             self.log.info("Schema applied from schema.sql")
         else:
@@ -77,8 +82,8 @@ class SilverTransformOperator(BaseOperator):
             ("silver.name_basics", "uq_name_basics_nconst"),
         ]:
             try:
-                pg_cursor = pg.cursor()
-                pg_cursor.execute(f"ALTER TABLE {_tbl} DROP CONSTRAINT IF EXISTS {_old_con}")
+                with pg.cursor() as pg_cursor:
+                    pg_cursor.execute(f"ALTER TABLE {_tbl} DROP CONSTRAINT IF EXISTS {_old_con}")
                 pg.commit()
                 self.log.info(f"Dropped old constraint {_old_con} on {_tbl}")
             except Exception:
@@ -176,7 +181,11 @@ class SilverTransformOperator(BaseOperator):
 
         try:
             total_rows = 0
-            for src_table, (dst_table, camel_cols, pk_cols) in table_defs.items():
+            table_items = list(table_defs.items())
+            for table_idx, (src_table, (dst_table, camel_cols, pk_cols)) in enumerate(table_items):
+                self.log.info(f"  [{table_idx+1}/{len(table_items)}] Starting {src_table} -> {dst_table}...")
+                if self.is_cancelled():
+                    raise AirflowTaskCancelled("Task cancelled during silver_transform parent processing")
                 parquet_path = os.path.join(self.bronze_path, f"{src_table}.parquet")
                 if not os.path.exists(parquet_path):
                     self.log.warning(f"Parquet not found: {parquet_path}, skipping")
@@ -234,99 +243,99 @@ class SilverTransformOperator(BaseOperator):
                 pg_cols_part = f"({snake_cols_list})"
 
                 # ── SCD2 Merge (title_basics, name_basics) vs Truncate+Copy ──
-                pg_cursor = pg.cursor()
                 scd2_pk_map = {
                     "silver.title_basics": "tconst",
                     "silver.name_basics": "nconst",
                 }
                 is_scd2 = dst_table in scd2_pk_map
 
-                if is_scd2:
-                    pk_col = scd2_pk_map[dst_table]
-                    # Drop indexes for the specific table to speed up SCD2
-                    if dst_table == "silver.title_basics":
-                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_tconst")
-                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_current")
-                    elif dst_table == "silver.name_basics":
-                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_nconst")
-                        pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_current")
-                    # Temp tables must be unqualified (no schema prefix)
-                    stg_table = f"stg_{dst_table.replace('.', '_')}"
+                with pg.cursor() as pg_cursor:
+                    if is_scd2:
+                        pk_col = scd2_pk_map[dst_table]
+                        # Drop indexes for the specific table to speed up SCD2
+                        if dst_table == "silver.title_basics":
+                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_tconst")
+                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_current")
+                        elif dst_table == "silver.name_basics":
+                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_nconst")
+                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_current")
+                        # Temp tables must be unqualified (no schema prefix)
+                        stg_table = f"stg_{dst_table.replace('.', '_')}"
 
-                    # Drop and recreate staging table (same structure minus SCD2/audit cols)
-                    stg_cols = [c for c in snake_cols
-                                if c not in ("is_current", "valid_from", "valid_to", "ingested_at", "batch_id")]
-                    stg_cols_list = ", ".join(stg_cols)
-                    stg_create_cols = ", ".join(f"{c} VARCHAR" for c in stg_cols)
+                        # Drop and recreate staging table (same structure minus SCD2/audit cols)
+                        stg_cols = [c for c in snake_cols
+                                    if c not in ("is_current", "valid_from", "valid_to", "ingested_at", "batch_id")]
+                        stg_cols_list = ", ".join(stg_cols)
+                        stg_create_cols = ", ".join(f"{c} VARCHAR" for c in stg_cols)
 
-                    pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
-                    pg_cursor.execute(f"CREATE TEMP TABLE {stg_table} ({stg_create_cols})")
+                        pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
+                        pg_cursor.execute(f"CREATE TEMP TABLE {stg_table} ({stg_create_cols})")
 
-                    # Add index on PK for fast UPDATE ... WHERE pk IN (SELECT ...)
-                    pg_cursor.execute(f"CREATE INDEX idx_{stg_table}_pk ON {stg_table} ({pk_col})")
+                        # Add index on PK for fast UPDATE ... WHERE pk IN (SELECT ...)
+                        pg_cursor.execute(f"CREATE INDEX idx_{stg_table}_pk ON {stg_table} ({pk_col})")
 
-                    # COPY into staging
-                    stg_cols_part = f"({stg_cols_list})"
-                    with open(csv_path, "r") as f:
-                        pg_cursor.copy_expert(
-                            f"COPY {stg_table} {stg_cols_part} FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
-                            f,
+                        # COPY into staging
+                        stg_cols_part = f"({stg_cols_list})"
+                        with open(csv_path, "r") as f:
+                            pg_cursor.copy_expert(
+                                f"COPY {stg_table} {stg_cols_part} FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
+                                f,
+                            )
+
+                        # Expire existing rows that still appear in new data
+                        pg_cursor.execute(f"""
+                            UPDATE {dst_table}
+                            SET valid_to = NOW(), is_current = FALSE
+                            FROM {stg_table} s
+                            WHERE {dst_table}.{pk_col} = s.{pk_col}
+                              AND {dst_table}.is_current = TRUE
+                        """)
+                        # Recreate indexes after load
+                        if dst_table == "silver.title_basics":
+                            pg_cursor.execute("CREATE INDEX idx_title_basics_tconst ON silver.title_basics(tconst)")
+                            pg_cursor.execute("CREATE INDEX idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE")
+                        elif dst_table == "silver.name_basics":
+                            pg_cursor.execute("CREATE INDEX idx_name_basics_nconst ON silver.name_basics(nconst)")
+                            pg_cursor.execute("CREATE INDEX idx_name_basics_current ON silver.name_basics(is_current) WHERE is_current = TRUE")
+                        expired = pg_cursor.rowcount
+
+                        # Insert new versions
+                        stg_insert_cols = ", ".join(stg_cols)
+                        # Type casts for SCD2 staging tables (all staging cols are VARCHAR)
+                        scd2_type_casts = {
+                            "silver.title_basics": {
+                                "is_adult": "::BOOLEAN",
+                                "start_year": "::SMALLINT",
+                                "end_year": "::SMALLINT",
+                                "runtime_minutes": "::INTEGER",
+                            },
+                            "silver.name_basics": {
+                                "birth_year": "::SMALLINT",
+                                "death_year": "::SMALLINT",
+                            },
+                        }
+                        casts = scd2_type_casts.get(dst_table, {})
+                        stg_select_cols = ", ".join(
+                            f"{c}{casts.get(c, '')}" for c in stg_cols
                         )
+                        pg_cursor.execute(f"""
+                            INSERT INTO {dst_table} ({stg_insert_cols}, valid_from, is_current, batch_id, ingested_at)
+                            SELECT {stg_select_cols}, NOW(), TRUE, '{batch_id}', NOW()
+                            FROM {stg_table}
+                        """)
+                        inserted = pg_cursor.rowcount
 
-                    # Expire existing rows that still appear in new data
-                    pg_cursor.execute(f"""
-                        UPDATE {dst_table}
-                        SET valid_to = NOW(), is_current = FALSE
-                        FROM {stg_table} s
-                        WHERE {dst_table}.{pk_col} = s.{pk_col}
-                          AND {dst_table}.is_current = TRUE
-                    """)
-                    # Recreate indexes after load
-                    if dst_table == "silver.title_basics":
-                        pg_cursor.execute("CREATE INDEX idx_title_basics_tconst ON silver.title_basics(tconst)")
-                        pg_cursor.execute("CREATE INDEX idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE")
-                    elif dst_table == "silver.name_basics":
-                        pg_cursor.execute("CREATE INDEX idx_name_basics_nconst ON silver.name_basics(nconst)")
-                        pg_cursor.execute("CREATE INDEX idx_name_basics_current ON silver.name_basics(is_current) WHERE is_current = TRUE")
-                    expired = pg_cursor.rowcount
-
-                    # Insert new versions
-                    stg_insert_cols = ", ".join(stg_cols)
-                    # Type casts for SCD2 staging tables (all staging cols are VARCHAR)
-                    scd2_type_casts = {
-                        "silver.title_basics": {
-                            "is_adult": "::BOOLEAN",
-                            "start_year": "::SMALLINT",
-                            "end_year": "::SMALLINT",
-                            "runtime_minutes": "::INTEGER",
-                        },
-                        "silver.name_basics": {
-                            "birth_year": "::SMALLINT",
-                            "death_year": "::SMALLINT",
-                        },
-                    }
-                    casts = scd2_type_casts.get(dst_table, {})
-                    stg_select_cols = ", ".join(
-                        f"{c}{casts.get(c, '')}" for c in stg_cols
-                    )
-                    pg_cursor.execute(f"""
-                        INSERT INTO {dst_table} ({stg_insert_cols}, valid_from, is_current, batch_id, ingested_at)
-                        SELECT {stg_select_cols}, NOW(), TRUE, '{batch_id}', NOW()
-                        FROM {stg_table}
-                    """)
-                    inserted = pg_cursor.rowcount
-
-                    pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
-                    self.log.info(f"  {dst_table}: {expired} expired, {inserted} inserted (SCD2)")
-                else:
-                    # Truncate and COPY into PostgreSQL
-                    # CASCADE handles FK constraints (e.g. title_akas_type -> title_akas)
-                    pg_cursor.execute(f"TRUNCATE {dst_table} CASCADE")
-                    with open(csv_path, "r") as f:
-                        pg_cursor.copy_expert(
-                            f"COPY {dst_table} {pg_cols_part} FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
-                            f,
-                        )
+                        pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
+                        self.log.info(f"  {dst_table}: {expired} expired, {inserted} inserted (SCD2)")
+                    else:
+                        # Truncate and COPY into PostgreSQL
+                        # CASCADE handles FK constraints (e.g. title_akas_type -> title_akas)
+                        pg_cursor.execute(f"TRUNCATE {dst_table} CASCADE")
+                        with open(csv_path, "r") as f:
+                            pg_cursor.copy_expert(
+                                f"COPY {dst_table} {pg_cols_part} FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
+                                f,
+                            )
 
                 os.remove(csv_path)
                 total_rows += row_count
@@ -469,31 +478,39 @@ class SilverTransformOperator(BaseOperator):
             ]
 
             child_rows = 0
-            for child in child_table_defs:
+            for child_idx, child in enumerate(child_table_defs):
                 parquet_path = os.path.join(self.bronze_path, f"{child['src_table']}.parquet")
                 if not os.path.exists(parquet_path):
                     self.log.warning(f"Child parquet not found: {parquet_path}, skipping")
                     continue
 
+                self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
                 sql = child["sql"].format(path=parquet_path)
+
+                if self.is_cancelled():
+                    raise AirflowTaskCancelled("Task cancelled during silver_transform child processing")
+
                 row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
 
                 if row_count == 0:
                     self.log.info(f"  {child['dst_table']}: 0 rows, skipping")
                     continue
 
+                self.log.info(f"  {child['dst_table']}: {row_count} rows to load")
+
                 csv_path = f"/tmp/silver_{child['dst_table'].replace('.', '_')}.csv"
                 conn.execute(f"COPY ({sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
+                self.log.info(f"  {child['dst_table']}: CSV export done")
 
-                pg_cursor = pg.cursor()
-                pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
+                with pg.cursor() as pg_cursor:
+                    pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
 
-                with open(csv_path, "r") as f:
-                    cols = ", ".join(child["snake_cols"])
-                    pg_cursor.copy_expert(
-                        f"COPY {child['dst_table']} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
-                        f,
-                    )
+                    with open(csv_path, "r") as f:
+                        cols = ", ".join(child["snake_cols"])
+                        pg_cursor.copy_expert(
+                            f"COPY {child['dst_table']} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
+                            f,
+                        )
                 os.remove(csv_path)
                 child_rows += row_count
                 self.log.info(f"  {child['dst_table']}: {row_count} rows loaded")
