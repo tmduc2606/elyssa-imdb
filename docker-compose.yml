@@ -40,6 +40,7 @@ services:
         -c effective_io_concurrency=200
         -c log_min_duration_statement=1000
         -c timezone=UTC
+    shm_size: '1g'
     ports:
       - "54321:5432"
     volumes:
@@ -64,7 +65,7 @@ services:
     environment:
       NEO4J_AUTH: "neo4j/elyssa_neo_2026"
       NEO4J_server_memory_heap_max__size: "2G"
-      NEO4J_server_memory_pagecache_size: "1G"
+      NEO4J_server_memory_pagecache_size: "4G"
     ports:
       - "7475:7474"   # HTTP
       - "7688:7687"   # Bolt
