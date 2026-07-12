@@ -95,3 +95,14 @@ sources:
         columns:
           - name: nconst
           - name: tconst
+
+      - name: title_akas
+        description: "Alternative/localised titles with region and language"
+        columns:
+          - name: title_id
+            tests: [not_null]
+          - name: ordering
+          - name: title
+          - name: region
+          - name: language
+          - name: is_original_title

@@ -1,5 +1,5 @@
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, when, split, explode, posexplode, arrays_zip
+from pyspark.sql.functions import col, when, split, explode, posexplode, arrays_zip, trim
 from pyspark.sql.types import BooleanType, IntegerType, ShortType, DecimalType, DateType
 
 NULL_MARKER = r"\N"
@@ -59,6 +59,9 @@ def cast_types(df: DataFrame, source_name: str) -> DataFrame:
             df = df.withColumn(target_col, col(src_col).cast(dtype))
             if target_col != src_col:
                 df = df.drop(src_col)
+    # Filter invalid runtime values (negative or zero)
+    if "runtime_minutes" in df.columns and source_name == "title.basics":
+        df = df.filter((col("runtime_minutes").isNull()) | (col("runtime_minutes") > 0))
     return df
 
 def rename_to_silver(df: DataFrame, source_name: str) -> DataFrame:
@@ -101,5 +104,6 @@ def explode_array(df: DataFrame, source_name: str) -> list[DataFrame]:
             *[col(c) for c in id_cols.split(",")],
             posexplode(split(col(col_name), sep)).alias("_pos", value_col)
         )
+        exploded = exploded.withColumn(value_col, trim(col(value_col)))
         result.append((target_table, exploded))
     return result

@@ -4,9 +4,22 @@ WITH title_base AS (
 genres AS (
     SELECT
         tconst,
-        STRING_AGG(genre, ', ' ORDER BY genre) AS genre_list
+        STRING_AGG(TRIM(genre), ', ' ORDER BY TRIM(genre)) AS genre_list
     FROM {{ source('silver', 'title_genre') }}
     GROUP BY tconst
+),
+regions AS (
+    SELECT
+        title_id,
+        STRING_AGG(region, ', ' ORDER BY region) AS region_list,
+        STRING_AGG(language, ', ' ORDER BY language) AS language_list,
+        COUNT(*) AS aka_count
+    FROM (
+        SELECT DISTINCT title_id, region, language
+        FROM {{ source('silver', 'title_akas') }}
+        WHERE region IS NOT NULL
+    ) distinct_akas
+    GROUP BY title_id
 ),
 directors AS (
     SELECT
@@ -52,10 +65,14 @@ SELECT
     ep.parent_tconst,
     ep.series_title,
     ep.season_number,
-    ep.episode_number
+    ep.episode_number,
+    rg.region_list,
+    rg.language_list,
+    rg.aka_count
 FROM title_base tb
 LEFT JOIN genres g ON tb.tconst = g.tconst
 LEFT JOIN directors d ON tb.tconst = d.tconst
 LEFT JOIN writers w ON tb.tconst = w.tconst
 LEFT JOIN ratings r ON tb.tconst = r.tconst
 LEFT JOIN episodes ep ON tb.tconst = ep.tconst
+LEFT JOIN regions rg ON tb.tconst = rg.title_id

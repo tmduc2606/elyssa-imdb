@@ -27,5 +27,8 @@ SELECT
     parent_tconst,
     series_title,
     season_number,
-    episode_number
+    episode_number,
+    region_list,
+    language_list,
+    aka_count
 FROM {{ ref('int_title_details') }}

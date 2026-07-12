@@ -4,8 +4,10 @@ SELECT
     e.season_number,
     e.episode_number,
     b.primary_title AS series_title,
-    b.start_year AS series_start_year
+    b.start_year AS series_start_year,
+    b.title_type AS series_type
 FROM {{ source('silver', 'title_episode') }} e
 LEFT JOIN {{ source('silver', 'title_basics') }} b
     ON e.parent_tconst = b.tconst
     AND b.is_current = TRUE
+    AND b.title_type IN ('tvSeries', 'tvMiniSeries')
