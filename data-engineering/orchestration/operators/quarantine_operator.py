@@ -36,7 +36,7 @@ class QuarantineCheckOperator(BaseOperator):
         import psycopg2
 
         log = get_logger()
-        batch_id = context.get("ti").xcom_pull(task_ids="bronze_ingest", key="batch_id") or \
+        batch_id = context.get("task_instance").xcom_pull(task_ids="bronze_ingest", key="batch_id") or \
                    datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         log.log_stage(stage="quarantine_check", batch_id=batch_id, status="started",

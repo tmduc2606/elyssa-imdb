@@ -29,17 +29,18 @@ services:
       postgres
         -c shared_preload_libraries=timescaledb
         -c max_connections=200
-        -c shared_buffers=256MB
-        -c work_mem=64MB
-        -c maintenance_work_mem=128MB
+        -c shared_buffers=512MB
+        -c work_mem=128MB
+        -c maintenance_work_mem=256MB
         -c wal_level=replica
-        -c max_wal_size=2GB
+        -c max_wal_size=4GB
+        -c effective_cache_size=1536MB
         -c checkpoint_completion_target=0.9
         -c random_page_cost=1.1
         -c effective_io_concurrency=200
         -c log_min_duration_statement=1000
         -c timezone=UTC
-    shm_size: '1g'
+    shm_size: '2g'
     ports:
       - "54321:5432"
     volumes:
@@ -48,6 +49,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── Neo4j ──────────────────────────────────────────────────────
   neo4j:
@@ -69,6 +75,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── RustFS (S3-compatible) ─────────────────────────────────────
   rustfs:
@@ -90,6 +101,11 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── DuckDB (Ephemeral Analytics Engine) ────────────────────────
   # Runs in-memory; reads Parquet directly from Bronze S3-compatible storage.
@@ -106,6 +122,11 @@ services:
     networks:
       - elyssa-net
     restart: "no"  # Ephemeral: run on demand, not persistent
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # ─── Apache Airflow ─────────────────────────────────────────────
   airflow:
@@ -120,19 +141,28 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
       AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
+      AIRFLOW__CORE__PARALLELISM: "8"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "WARNING"
+      AIRFLOW__CORE__LOG_FILENAME_TEMPLATE: "{{ti.dag_id}}/{{ti.task_id}}/{{ts}}/{{try_number}}.log"
     ports:
       - "8081:8080"
     volumes:
       - airflow_data:/opt/airflow
-      - ../data-engineering:/opt/airflow/data-engineering:ro
-    # Note: scripts/ and dags/ directories must exist before compose up.
-    # Create them with: mkdir -p data-engineering/scripts data-engineering/orchestration/dags
+      - ../data-engineering:/opt/airflow/data-engineering:rw
+      - ../data-engineering/orchestration/dags:/opt/airflow/dags:ro
+      - ../data-engineering/orchestration/operators:/opt/airflow/operators:rw
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - elyssa-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
 
 volumes:
   pg_data:

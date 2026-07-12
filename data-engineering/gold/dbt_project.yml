@@ -25,3 +25,8 @@ models:
       +schema: int
       +pre_hook: "SET work_mem = '512MB'"
       +post_hook: "SET work_mem = DEFAULT"
+    marts:
+      +materialized: table
+      +schema: gold
+      episodic_content:
+        +materialized: table

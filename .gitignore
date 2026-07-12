@@ -2,6 +2,7 @@
 # Environment secrets (never commit actual .env)
 .env
 .env.local
+docker/.env
 
 # Root docs folder — proposal, references, contracts
 # (Trailing /docs/ matches any depth; prefix / restricts to root)
@@ -9,12 +10,15 @@
 
 # ─── Documentation (not source code — agent planning docs excluded) ─
 data-engineering/docs/
-# EXCEPT: These 5 portfolio documentation files are tracked:
+# EXCEPT: These portfolio documentation files are tracked:
 !data-engineering/docs/architecture_overview.md
 !data-engineering/docs/etl_pipeline.md
 !data-engineering/docs/schema_dictionary.md
 !data-engineering/docs/data_quality_tests.md
 !data-engineering/docs/disaster_recovery.md
+!data-engineering/docs/phase1_summary.md
+!data-engineering/docs/blueprint_database_ingestion.md
+!data-engineering/docs/pipeline-optimization-blueprint.md
 
 # Binary office documents (agent reports, proposals)
 *.docx
@@ -94,6 +98,8 @@ wandb/
 *.csv
 *.tsv
 *.tsv.gz
+*.db
+*.db.wal
 
 # ─── Docker ────────────────────────────────────────────────────────
 docker-compose.override.yml
@@ -125,5 +131,7 @@ Desktop.ini
 *~
 .vscode/
 .idea/
+.cursor/
+.windsurf/
 *.sublime-project
 *.sublime-workspace

@@ -58,7 +58,7 @@ class IMDbDataSensor(BaseSensorOperator):
             log.log_stage(stage="imdb_sensor", batch_id=batch_id,
                           status="success", row_count=len(valid),
                           message=f"Found {len(valid)} files: {', '.join(file_list)}")
-            ti = context.get("ti")
+            ti = context.get("task_instance")
             if ti:
                 ti.xcom_push(key="source_files", value=valid)
             return True

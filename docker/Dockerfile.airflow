@@ -28,6 +28,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Pre-install dbt packages at build time (avoids runtime network dependency)
 # Copy entire gold project so dbt deps can resolve packages into dbt_packages/
 COPY data-engineering/gold /opt/gold-build
+USER root
+RUN chown -R airflow:root /opt/gold-build
+USER airflow
 RUN dbt deps --project-dir /opt/gold-build --profiles-dir /opt/gold-build 2>/dev/null || \
     echo "[WARN] dbt deps at build time failed — will retry at task time"
 

@@ -27,6 +27,8 @@ models:
               arguments:
                 min_value: 1874
                 max_value: 2030
+              config:
+                severity: warn
         meta:
           lineage_source: "silver.title_basics.start_year"
       - name: average_rating

@@ -8,7 +8,7 @@
 FROM python:3.13-slim-bookworm
 
 # Install DuckDB
-RUN pip install --no-cache-dir duckdb==1.5.4
+RUN pip install --no-cache-dir duckdb==1.1.3
 
 # Health check: verify DuckDB can import and run a basic query
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=5s \
@@ -16,5 +16,3 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=5s \
 
 # Default: keep alive for on-demand query execution via exec
 CMD ["sleep", "infinity"]
-
-EXPOSE 0

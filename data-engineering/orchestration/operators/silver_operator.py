@@ -1,5 +1,4 @@
 from airflow.models import BaseOperator
-from airflow.exceptions import AirflowTaskCancelled
 from typing import Optional
 import os
 import sys
@@ -184,8 +183,6 @@ class SilverTransformOperator(BaseOperator):
             table_items = list(table_defs.items())
             for table_idx, (src_table, (dst_table, camel_cols, pk_cols)) in enumerate(table_items):
                 self.log.info(f"  [{table_idx+1}/{len(table_items)}] Starting {src_table} -> {dst_table}...")
-                if self.is_cancelled():
-                    raise AirflowTaskCancelled("Task cancelled during silver_transform parent processing")
                 parquet_path = os.path.join(self.bronze_path, f"{src_table}.parquet")
                 if not os.path.exists(parquet_path):
                     self.log.warning(f"Parquet not found: {parquet_path}, skipping")
@@ -486,9 +483,6 @@ class SilverTransformOperator(BaseOperator):
 
                 self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
                 sql = child["sql"].format(path=parquet_path)
-
-                if self.is_cancelled():
-                    raise AirflowTaskCancelled("Task cancelled during silver_transform child processing")
 
                 row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
 

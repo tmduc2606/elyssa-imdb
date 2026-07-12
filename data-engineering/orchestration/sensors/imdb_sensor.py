@@ -47,7 +47,7 @@ class IMDbDataSensor(BaseSensorOperator):
         valid = [f for f in files if os.path.getsize(f) > 0]
         if valid:
             self.log.info(f"Detected {len(valid)} source file(s): {[os.path.basename(f) for f in valid]}")
-            ti = context.get("ti")
+            ti = context.get("task_instance")
             if ti:
                 ti.xcom_push(key="source_files", value=valid)
             return True

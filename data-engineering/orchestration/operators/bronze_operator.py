@@ -157,7 +157,7 @@ class BronzeIngestOperator(BaseOperator):
                     pass
 
                 row_count = conn.execute(
-                    "SELECT COUNT(*) FROM read_csv('" + file_path + "', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true)"
+                    "SELECT COUNT(*) FROM read_csv('" + file_path + "', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
                 ).fetchone()[0]
 
                 # Log skip count: compare ingested rows vs file line count
@@ -178,7 +178,7 @@ class BronzeIngestOperator(BaseOperator):
                 conn.execute(
                     "COPY ("
                     "  SELECT *, ? AS _source_file, ? AS _source_table, ? AS _batch_id, ? AS _ingested_at, ? AS _row_count, ? AS _file_checksum "
-                    "  FROM read_csv('" + file_path + "', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true)"
+                    "  FROM read_csv('" + file_path + "', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
                     ") TO '" + output_path + "' (FORMAT PARQUET, COMPRESSION snappy)",
                     [file_path, table, batch_id, now_ts, row_count, file_checksum]
                 )

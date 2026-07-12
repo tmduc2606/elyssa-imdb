@@ -77,7 +77,7 @@ def _on_failure_callback(context):
     dag_id = context.get("dag", {}).dag_id if context.get("dag") else "unknown"
     task_id = task_instance.task_id if task_instance else "unknown"
     exception = context.get("exception")
-    log_url = task_instance.log_url if task_instance else ""
+    log_url = task_instance.get_log_url() if task_instance else ""
 
     severity = "HIGH" if task_id in ["bronze_ingest", "silver_transform"] else "MEDIUM"
     print(f"[ALERT:{severity}] DAG={dag_id} Task={task_id} FAILED")

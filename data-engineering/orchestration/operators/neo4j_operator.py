@@ -22,7 +22,7 @@ class Neo4jSyncOperator(BaseOperator):
         neo4j_user: str = "",
         neo4j_password: str = "",
         tables_to_sync: List[str] = None,
-        sync_script: str = "/opt/airflow/scripts/neo4j_sync.py",
+        sync_script: str = "/opt/airflow/data-engineering/scripts/neo4j_sync.py",
         *args,
         **kwargs,
     ):

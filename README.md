@@ -1,6 +1,6 @@
-# Elyssa-IMDb — Data Engineering Pipeline (Phase 1)
+# Elyssa-IMDb — Data Engineering Pipeline
 
-End-to-end pipeline for IMDb: Bronze (Parquet) → Silver (PostgreSQL 3NF/SCD2) → Gold (dbt star-schema marts) → Neo4j (graph sync).
+End-to-end IMDb pipeline: **Bronze** (Parquet) → **Silver** (PostgreSQL 3NF/SCD2) → **Gold** (dbt star-schema marts) → **Neo4j** (graph sync).
 
 ---
 
@@ -9,18 +9,16 @@ End-to-end pipeline for IMDb: Bronze (Parquet) → Silver (PostgreSQL 3NF/SCD2) 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
 | Docker | 24+ | With `docker compose` plugin |
-| Disk space | **~20 GB free** | Source TSVs (~10 GB) + Bronze Parquet (~2.5 GB) + Docker images (~6 GB) + volumes |
-| RAM | 8 GB+ | Docker Desktop resource limit |
+| Disk space | ~20 GB free | Source TSVs (~10 GB) + Parquet (~5 GB) + Docker images (~6 GB) |
+| RAM | 16 GB+ | Docker Desktop resource limit (PostgreSQL 2 GB shm, Neo4j 6 GB heap+cache) |
 
 ---
 
-## Phase 1 — Full Pipeline
+## Quick Start
 
 ### 1. Download IMDb Source Data
 
 ```powershell
-# Downloads 7 TSV files (~10 GB) to data-engineering/duke/gate0/source/
-# Source: https://datasets.imdbws.com/
 $files = @(
     "title.basics", "title.akas", "title.ratings", "title.episode",
     "title.crew", "title.principals", "name.basics"
@@ -34,38 +32,28 @@ foreach ($f in $files) {
     if (-not (Test-Path $out)) {
         Write-Host "Downloading $f ..."
         Invoke-WebRequest -Uri $url -OutFile $out
-        # Decompress inline
-        gunzip -c $out > "$dest/$f.tsv"
-        Remove-Item $out
     } else {
         Write-Host "$f already exists, skipping"
     }
 }
 ```
 
-> **Note:** Source TSVs are gitignored under `data-engineering/duke/`. They must be present before the pipeline runs.
-
 ### 2. Build + Start Infrastructure
 
 ```powershell
-# Prune stale build cache (saves ~25 GB over repeated rebuilds)
 docker builder prune -f
-
-# Build images and start all services
 docker compose up -d --build
-
-# Verify all services healthy (~30s)
 docker compose ps
 ```
 
-Expected output:
+Expected:
 
 ```
 NAME              STATUS       PORTS
-elyssa-postgres   healthy      54321 → 5432
-elyssa-neo4j      healthy      7475 → 7474, 7688 → 7687
-elyssa-rustfs     healthy      9100 → 9000, 9101 → 9001
-elyssa-airflow    healthy      8081 → 8080
+elyssa-postgres   healthy      54321 -> 5432
+elyssa-neo4j      healthy      7475 -> 7474, 7688 -> 7687
+elyssa-rustfs     healthy      9100 -> 9000, 9101 -> 9001
+elyssa-airflow    healthy      8081 -> 8080
 elyssa-duckdb     healthy      (internal)
 ```
 
@@ -75,28 +63,20 @@ elyssa-duckdb     healthy      (internal)
 docker exec elyssa-airflow cat /opt/airflow/simple_auth_manager_passwords.json.generated
 ```
 
-Login at http://localhost:8081 with `admin` / <generated password>.
+Login at http://localhost:8081 with `admin` / \<generated password\>.
 
 ### 4. Trigger Pipeline
-
-Open Airflow UI → find `imdb_pipeline` DAG → toggle ON → click **Trigger DAG**.
-
-Or via CLI:
 
 ```powershell
 docker exec elyssa-airflow airflow dags trigger imdb_pipeline
 ```
 
-The pipeline runs the following tasks:
-`sensor → bronze_ingest → quarantine_check → silver_transform → gold_dbt_run → [gold_dbt_test, neo4j_sync] → dq_checks (+ Great Expectations) → freshness_check`
+Pipeline tasks: `sensor → bronze_ingest → quarantine_check → silver_transform → gold_dbt_run → [gold_dbt_test, neo4j_sync] → dq_checks → freshness_check`
 
 ### 5. Monitor
 
 ```powershell
-# Watch logs
 docker compose logs -f airflow
-
-# PostgreSQL shell (check tables)
 docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse
 ```
 
@@ -104,21 +84,15 @@ docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse
 
 ## Cleanup
 
-Docker named volumes accumulate pipeline data (PostgreSQL WAL, Neo4j store, Bronze Parquet). Free C: drive space:
-
 ```powershell
-# Stop containers + delete all named volumes
-docker compose down -v
-
-# Prune Docker build cache
-docker builder prune -a -f
+docker compose down -v         # Stop + delete all data volumes
+docker builder prune -a -f     # Prune all build cache
 ```
 
-To rebuild from scratch after cleanup:
+Rebuild from scratch:
 
 ```powershell
-docker builder prune -f
-docker compose up -d --build
+docker builder prune -f && docker compose up -d --build
 ```
 
 ---
@@ -133,18 +107,17 @@ docker compose up -d --build
 | View logs | `docker compose logs -f <service>` |
 | PostgreSQL shell | `docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse` |
 | Trigger DAG | `docker exec elyssa-airflow airflow dags trigger imdb_pipeline` |
-| Test bronze | `python -m pytest data-engineering/bronze/tests/ -v` |
 
 ---
 
 ## Architecture
 
 ```
-IMDb .tsv → [Bronze: ingest_imdb.py] → Parquet (RustFS / local)
-Parquet  → [Silver: transform.py + upsert.py] → PostgreSQL (14 tables, SCD2)
-PostgreSQL → [Gold: dbt] → Star-schema marts (dim_title, fact_performance, ...)
-PostgreSQL → [Neo4j Sync] → Graph DB (Title, Person, Genre nodes)
-PostgreSQL → [DQ: run_checks.py + GX] → data_quality_log
+IMDb .tsv.gz → [Bronze: DuckDB ingestion] → Parquet on disk
+Parquet → [Silver: PySpark ETL] → PostgreSQL (14 tables, SCD2)
+PostgreSQL → [Gold: dbt] → Star-schema marts (6 tables, 4 views)
+PostgreSQL → [Neo4j Sync] → Graph DB (Title, Person nodes + ACTED_IN relationships)
+PostgreSQL → [DQ Checks] → data_quality_log
 ```
 
 ---
@@ -157,3 +130,18 @@ PostgreSQL → [DQ: run_checks.py + GX] → data_quality_log
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
 | Neo4j Browser | http://localhost:7475 | `neo4j` / `elyssa_neo_2026` |
 | RustFS Console | http://localhost:9101 | `elyssa` / `elyssa_s3_2026` |
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| `data-engineering/docs/phase1_summary.md` | Unified Phase 1 summary — row counts, performance, fixes, architecture decisions |
+| `data-engineering/docs/architecture_overview.md` | Medallion architecture, tech stack, SCD2 logic |
+| `data-engineering/docs/etl_pipeline.md` | DAG flow, retry policies, failure handling |
+| `data-engineering/docs/schema_dictionary.md` | Silver + Gold schema reference (all columns, types) |
+| `data-engineering/docs/data_quality_tests.md` | Test coverage and how to run |
+| `data-engineering/docs/disaster_recovery.md` | RPO/RTO, backup/restore procedures |
+| `data-engineering/docs/blueprint_database_ingestion.md` | Phase 2A blueprint |
+| `data-engineering/docs/pipeline-optimization-blueprint.md` | Optimization roadmap |
