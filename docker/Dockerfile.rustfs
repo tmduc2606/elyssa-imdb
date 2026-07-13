@@ -4,7 +4,7 @@
 # ─── RustFS ────────────────────────────────────────────────────────
 # Purpose: Bronze layer raw storage — append-only Parquet, Snappy-compressed
 # Port: 9000 (S3 API), 9001 (admin console)
-FROM rustfs/rustfs:0.3.5
+FROM rustfs/rustfs:latest
 
 # Environment
 ENV RUSTFS_ACCESS_KEY=elyssa \

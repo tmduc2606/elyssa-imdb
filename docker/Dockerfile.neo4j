@@ -4,7 +4,7 @@
 # ─── Neo4j Community ───────────────────────────────────────────────
 # Purpose: Graph layer — title/principal relationships, episodic content
 # Port: 7474 (HTTP), 7687 (Bolt)
-FROM neo4j:5.26.4-community
+FROM neo4j:community
 
 # Environment
 ENV NEO4J_AUTH=neo4j/elyssa_neo_2026 \

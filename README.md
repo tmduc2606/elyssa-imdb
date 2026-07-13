@@ -67,16 +67,72 @@ Login at http://localhost:8081 with `admin` / \<generated password\>.
 
 ### 4. Trigger Pipeline
 
+DAGs are **paused by default** on first deploy. Unpause before triggering.
+
+**CLI method:**
+
 ```powershell
+# Unpause (required — DAGs start paused)
+docker exec elyssa-airflow airflow dags unpause imdb_pipeline -y
+
+# Trigger
 docker exec elyssa-airflow airflow dags trigger imdb_pipeline
 ```
+
+**UI method:**
+
+1. Open Airflow at http://localhost:8081
+2. Log in with `admin` / \<generated password\>
+3. Find `imdb_pipeline` in the DAG list
+4. Toggle the **Pause/Unpause** switch to unpause (grey = unpaused)
+5. Click the **Play** button (▶) → **Trigger DAG**
 
 Pipeline tasks: `sensor → bronze_ingest → quarantine_check → silver_transform → gold_dbt_run → [gold_dbt_test, neo4j_sync] → dq_checks → freshness_check`
 
 ### 5. Monitor
 
+**Airflow logs:**
+
 ```powershell
 docker compose logs -f airflow
+```
+
+**DAG run status (CLI):**
+
+```powershell
+# List DAG runs and their state
+docker exec elyssa-airflow airflow dags list-runs imdb_pipeline
+
+# List all task states for the current run
+docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline manual__2026-07-13T01:06:12.255890+00:00
+```
+
+**Task logs (Airflow 3.x REST API):**
+
+```powershell
+# Get Airflow admin password
+docker exec elyssa-airflow python3 -c "import json; d=json.load(open('/opt/airflow/simple_auth_manager_passwords.json.generated')); print(list(d.values())[0])"
+
+# Get auth token
+$token = curl -s -X POST "http://localhost:8081/auth/token" `
+  -H "Content-Type: application/x-www-form-urlencoded" `
+  -d "username=admin&password=PASSWORD" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+
+# View task logs
+curl -s -H "Authorization: Bearer $token" `
+  "http://localhost:8081/api/v2/dags/imdb_pipeline/dagRuns/RUN_ID/taskInstances/TASK_ID/logs/1" | `
+  python3 -c "import sys,json; [print(e.get('event','')) for e in json.load(sys.stdin)['content']]"
+```
+
+**Bronze output (Parquet files):**
+
+```powershell
+docker exec elyssa-airflow ls -lh /opt/airflow/output/bronze/
+```
+
+**PostgreSQL shell:**
+
+```powershell
 docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse
 ```
 
@@ -105,8 +161,11 @@ docker builder prune -f && docker compose up -d --build
 | Stop | `docker compose down` |
 | Stop + delete data | `docker compose down -v` |
 | View logs | `docker compose logs -f <service>` |
+| List task states | `docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_id>` |
+| Get admin password | `docker exec elyssa-airflow python3 -c "import json; d=json.load(open('/opt/airflow/simple_auth_manager_passwords.json.generated')); print(list(d.values())[0])"` |
+| Bronze Parquet files | `docker exec elyssa-airflow ls -lh /opt/airflow/output/bronze/` |
 | PostgreSQL shell | `docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse` |
-| Trigger DAG | `docker exec elyssa-airflow airflow dags trigger imdb_pipeline` |
+| Trigger DAG | `docker exec elyssa-airflow airflow dags unpause imdb_pipeline -y && docker exec elyssa-airflow airflow dags trigger imdb_pipeline` |
 
 ---
 

@@ -143,7 +143,7 @@ services:
       AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
       AIRFLOW__CORE__PARALLELISM: "8"
       AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
-      AIRFLOW__LOGGING__LOGGING_LEVEL: "WARNING"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
       AIRFLOW__CORE__LOG_FILENAME_TEMPLATE: "{{ti.dag_id}}/{{ti.task_id}}/{{ts}}/{{try_number}}.log"
     ports:
       - "8081:8080"

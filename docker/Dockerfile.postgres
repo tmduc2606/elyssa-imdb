@@ -5,7 +5,7 @@
 # ─── PostgreSQL + TimescaleDB ─────────────────────────────────────
 # Purpose: Silver/Gold warehouse, star-schema marts, SCD2 tables
 # Port: 5432 (mapped to 54321 on host to avoid conflicts)
-FROM postgres:16-bookworm
+FROM postgres:16
 
 # Install TimescaleDB extension
 RUN apt-get update && apt-get install -y --no-install-recommends \

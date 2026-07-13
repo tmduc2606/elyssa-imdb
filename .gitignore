@@ -54,6 +54,8 @@ ENV/
 
 # Jupyter
 .ipynb_checkpoints/
+data-science/figures/
+data-science/scripts/
 
 # Testing / Linting
 .pytest_cache/
