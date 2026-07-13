@@ -91,115 +91,63 @@ Pipeline tasks: `sensor → bronze_ingest → quarantine_check → silver_transf
 
 ### 5. Monitor
 
-#### Airflow (Orchestration)
+#### Live logs
 
 ```powershell
-# Live logs
 docker compose logs -f airflow
+```
 
+#### DAG and task status
+
+```powershell
 # DAG run status
 docker exec elyssa-airflow airflow dags list-runs imdb_pipeline
 
 # Task-level status for current run
 docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline manual__2026-07-13T01:06:12.255890+00:00
+
+# Single task state
+docker exec elyssa-airflow airflow tasks state imdb_pipeline bronze_ingest manual__2026-07-13T01:06:12.255890+00:00
 ```
 
-**Task logs (Airflow 3.x REST API):**
+#### Task logs (Airflow 3.x REST API)
+
+Airflow 3.x removed `airflow tasks logs` from the CLI. Use the REST API instead.
 
 ```powershell
-# Get Airflow admin password
+# 1. Get admin password
 docker exec elyssa-airflow python3 -c "import json; d=json.load(open('/opt/airflow/simple_auth_manager_passwords.json.generated')); print(list(d.values())[0])"
 
-# Get auth token
+# 2. Get auth token
 $token = curl -s -X POST "http://localhost:8081/auth/token" `
   -H "Content-Type: application/x-www-form-urlencoded" `
   -d "username=admin&password=PASSWORD" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 
-# View task logs
+# 3. View task logs (replace RUN_ID, TASK_ID)
 curl -s -H "Authorization: Bearer $token" `
   "http://localhost:8081/api/v2/dags/imdb_pipeline/dagRuns/RUN_ID/taskInstances/TASK_ID/logs/1" | `
   python3 -c "import sys,json; [print(e.get('event','')) for e in json.load(sys.stdin)['content']]"
 ```
 
-#### Bronze (Parquet on Airflow volume)
+#### Bronze output
 
 ```powershell
-# List ingested Parquet files
 docker exec elyssa-airflow ls -lh /opt/airflow/output/bronze/
-
-# Quick row count via DuckDB
-docker exec elyssa-airflow python3 -c "
-import duckdb
-conn = duckdb.connect(':memory:')
-for t in ['title.basics','title.akas','title.crew','title.episode','title.principals','title.ratings','name.basics']:
-    f = f'/opt/airflow/output/bronze/{t}.parquet'
-    import os
-    if os.path.exists(f):
-        c = conn.execute(f\"SELECT count(*) FROM '{f}'\").fetchone()[0]
-        print(f'{t}: {c:,} rows')
-conn.close()
-"
 ```
 
-#### Silver (PostgreSQL — 3NF / SCD2)
+#### Quick data checks
 
 ```powershell
-# Interactive shell
-docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse
+# Silver: row counts + latest batch
+docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT table_name, n_live_tup FROM pg_stat_user_tables WHERE schemaname='silver' ORDER BY table_name;"
+docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT batch_id, table_name, row_count, ingested_at FROM silver.batch_metadata ORDER BY ingested_at DESC LIMIT 10;"
 
-# Row counts per Silver table (one-liner)
-docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "
-SELECT table_name, n_live_tup AS estimated_rows
-FROM pg_stat_user_tables
-WHERE schemaname = 'silver'
-ORDER BY table_name;
-"
-
-# Check latest batch metadata
-docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "
-SELECT batch_id, table_name, row_count, ingested_at
-FROM silver.batch_metadata
-ORDER BY ingested_at DESC
-LIMIT 15;
-"
-```
-
-#### Gold (dbt — star-schema marts)
-
-```powershell
-# Run dbt tests against Gold models
-docker exec elyssa-airflow dbt test --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold
-
-# List Gold sources and their freshness
+# Gold: dbt source freshness
 docker exec elyssa-airflow dbt source freshness --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold
 
-# Generate dbt docs (served locally)
-docker exec elyssa-airflow dbt docs generate --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold
-```
-
-#### Neo4j (Graph)
-
-```powershell
-# Cypher shell
-docker exec -it elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026
-
-# Count nodes and relationships
+# Neo4j: node + relationship counts
 docker exec elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026 "MATCH (n) RETURN labels(n), count(*);"
 docker exec elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026 "MATCH ()-[r]->() RETURN type(r), count(*);"
-
-# Sample graph query: top actors by title count
-docker exec elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026 "
-MATCH (p:Person)-[r:ACTED_IN]->(t:Title)
-RETURN p.name, count(t) AS titles
-ORDER BY titles DESC LIMIT 10;
-"
-```
-
-#### RustFS (S3-compatible Bronze storage)
-
-```powershell
-# List bronze bucket via AWS CLI
-docker exec elyssa-rustfs ls -la /data/
 ```
 
 ---
@@ -226,18 +174,11 @@ docker builder prune -f && docker compose up -d --build
 | Build + start | `docker builder prune -f && docker compose up -d --build` |
 | Stop | `docker compose down` |
 | Stop + delete data | `docker compose down -v` |
-| View logs | `docker compose logs -f <service>` |
-| List task states | `docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_id>` |
-| Get admin password | `docker exec elyssa-airflow python3 -c "import json; d=json.load(open('/opt/airflow/simple_auth_manager_passwords.json.generated')); print(list(d.values())[0])"` |
-| Bronze Parquet files | `docker exec elyssa-airflow ls -lh /opt/airflow/output/bronze/` |
-| Bronze row counts | _see §5 Bronze — DuckDB row count script_ |
-| Silver table rows | `docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT table_name, n_live_tup FROM pg_stat_user_tables WHERE schemaname='silver' ORDER BY table_name;"` |
-| Silver batch metadata | `docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT batch_id, table_name, row_count, ingested_at FROM silver.batch_metadata ORDER BY ingested_at DESC LIMIT 15;"` |
-| dbt tests | `docker exec elyssa-airflow dbt test --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold` |
-| dbt source freshness | `docker exec elyssa-airflow dbt source freshness --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold` |
-| Neo4j Cypher shell | `docker exec -it elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026` |
-| Neo4j node/edge counts | `docker exec elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026 "MATCH (n) RETURN labels(n), count(*); MATCH ()-[r]->() RETURN type(r), count(*);"` |
-| RustFS data list | `docker exec elyssa-rustfs ls -la /data/` |
+| View live logs | `docker compose logs -f airflow` |
+| DAG run status | `docker exec elyssa-airflow airflow dags list-runs imdb_pipeline` |
+| Task state | `docker exec elyssa-airflow airflow tasks state imdb_pipeline <task_id> <run_id>` |
+| Task logs | _see §5 REST API — Airflow 3.x has no `tasks logs` CLI_ |
+| Bronze files | `docker exec elyssa-airflow ls -lh /opt/airflow/output/bronze/` |
 | PostgreSQL shell | `docker exec -it elyssa-postgres psql -U elyssa -d elyssa_warehouse` |
 | Trigger DAG | `docker exec elyssa-airflow airflow dags unpause imdb_pipeline -y && docker exec elyssa-airflow airflow dags trigger imdb_pipeline` |
 
