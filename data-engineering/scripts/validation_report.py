@@ -66,7 +66,7 @@ def validate_file_structure():
         "orchestration/operators/bronze_operator.py": os.path.exists(os.path.join(base, 'orchestration', 'operators', 'bronze_operator.py')),
         "orchestration/operators/silver_operator.py": os.path.exists(os.path.join(base, 'orchestration', 'operators', 'silver_operator.py')),
         "orchestration/operators/dbt_operator.py": os.path.exists(os.path.join(base, 'orchestration', 'operators', 'dbt_operator.py')),
-        "orchestration/operators/neo4j_operator.py": os.path.exists(os.path.join(base, 'orchestration', 'operators', 'neo4j_operator.py')),
+
         "orchestration/operators/dq_operator.py": os.path.exists(os.path.join(base, 'orchestration', 'operators', 'dq_operator.py')),
         "orchestration/operators/freshness_operator.py": os.path.exists(os.path.join(base, 'orchestration', 'operators', 'freshness_operator.py')),
         "dq/config.yaml": os.path.exists(os.path.join(base, 'dq', 'config.yaml')),
@@ -252,7 +252,6 @@ def validate_dag_structure():
         "has_bronze_task": "bronze_ingest" in content,
         "has_silver_task": "silver_transform" in content,
         "has_gold_tasks": "gold_dbt_run" in content and "gold_dbt_test" in content,
-        "has_neo4j_task": "neo4j_sync" in content,
         "has_dq_task": "dq_checks" in content,
         "has_freshness_task": "freshness_check" in content,
         "has_dependencies": ">>" in content,

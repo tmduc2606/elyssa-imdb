@@ -250,12 +250,16 @@ class SilverTransformOperator(BaseOperator):
                     if is_scd2:
                         pk_col = scd2_pk_map[dst_table]
                         # Drop indexes for the specific table to speed up SCD2
-                        if dst_table == "silver.title_basics":
-                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_tconst")
-                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_current")
-                        elif dst_table == "silver.name_basics":
-                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_nconst")
-                            pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_current")
+                        # (recreated after load; if failure occurs mid-way, indexes are rebuilt)
+                        try:
+                            if dst_table == "silver.title_basics":
+                                pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_tconst")
+                                pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_current")
+                            elif dst_table == "silver.name_basics":
+                                pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_nconst")
+                                pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_current")
+                        except Exception:
+                            pass  # non-fatal; indexes will be recreated
                         # Temp tables must be unqualified (no schema prefix)
                         stg_table = f"stg_{dst_table.replace('.', '_')}"
 
@@ -530,7 +534,14 @@ class SilverTransformOperator(BaseOperator):
             raise
         finally:
             conn.close()
-            # A1: Clean up DuckDB temp files
+            # Clean up temp CSV files
+            try:
+                import glob
+                for csv_file in glob.glob("/tmp/silver_*.csv"):
+                    os.remove(csv_file)
+            except Exception:
+                pass
+            # Clean up DuckDB temp files
             try:
                 import shutil
                 temp_dir = "/opt/airflow/output/duckdb_temp/"

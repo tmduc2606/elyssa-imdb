@@ -77,12 +77,6 @@ class TestDAGStructure:
         assert "gold_dbt_run" in content
         assert "gold_dbt_test" in content
 
-    def test_dag_has_neo4j_task(self):
-        path = os.path.join(DAGS_DIR, 'imdb_pipeline_dag.py')
-        with open(path) as f:
-            content = f.read()
-        assert "neo4j_sync" in content
-
     def test_dag_has_dq_task(self):
         path = os.path.join(DAGS_DIR, 'imdb_pipeline_dag.py')
         with open(path) as f:
@@ -117,7 +111,6 @@ class TestOperators:
             'bronze_operator.py',
             'silver_operator.py',
             'dbt_operator.py',
-            'neo4j_operator.py',
             'dq_operator.py',
             'freshness_operator.py',
         ]
@@ -167,7 +160,7 @@ class TestOperators:
                     f"{op_file} missing super().__init__ or apply_defaults"
 
     def test_operators_handle_errors(self):
-        for op_file in ['bronze_operator.py', 'silver_operator.py', 'dbt_operator.py', 'neo4j_operator.py', 'dq_operator.py']:
+        for op_file in ['bronze_operator.py', 'silver_operator.py', 'dbt_operator.py', 'dq_operator.py']:
             path = os.path.join(OPERATORS_DIR, op_file)
             with open(path) as f:
                 content = f.read()

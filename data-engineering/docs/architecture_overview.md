@@ -35,24 +35,21 @@ The DE pipeline follows the **Bronze → Silver → Gold** medallion pattern:
 
 | Component | Technology | Version |
 |-----------|-----------|---------|
-| Processing | Apache Spark (PySpark) | 4.1.2 |
+| Processing | DuckDB | 1.x |
 | Warehouse | PostgreSQL + TimescaleDB | 16 / 2.14 |
-| Graph DB | Neo4j | 5.x |
 | Orchestration | Apache Airflow | 3.0.4 |
 | Transformation | dbt (Postgres adapter) | 1.10.2 |
-| Data Quality | Great Expectations | 1.18.1 |
+| Data Quality | Custom Python + dbt tests | — |
 | Object Storage | RustFS (S3-compatible) | latest |
-| Analytics | DuckDB | 1.5.4 |
+| Analytics | DuckDB | 1.x |
 | Containerization | Docker Compose | — |
 
 ## Data Flow
 
 ```
-IMDb .tsv.gz → [Bronze Ingestion (PySpark)] → Parquet
-PostgreSQL CDC → [DB Reader (DuckDB/Spark)] → Parquet
-Parquet → [Silver ETL (Spark)] → PostgreSQL (SCD2)
+IMDb .tsv.gz → [Bronze Ingestion (DuckDB)] → Parquet
+Parquet → [Silver ETL (DuckDB→PostgreSQL COPY)] → PostgreSQL (SCD2)
 Silver → [dbt run] → Gold Marts (PostgreSQL)
-Gold → [Neo4j Sync] → Graph DB
 Gold → [DQ Checks] → data_quality_log
 ```
 

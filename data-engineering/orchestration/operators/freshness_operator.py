@@ -42,10 +42,9 @@ class FreshnessCheckOperator(BaseOperator):
         log.log_stage(stage="freshness_check", batch_id=batch_id, status="started",
                       message=f"SLA threshold: {self.sla_hours}h")
 
-        # Resolve freshness script path
-        freshness_script = "/opt/airflow/scripts/freshness.py"
+        freshness_script = "/opt/airflow/data-engineering/scripts/freshness.py"
         if not os.path.isfile(freshness_script):
-            alt = "/opt/airflow/data-engineering/scripts/freshness.py"
+            alt = "/opt/airflow/scripts/freshness.py"
             if os.path.isfile(alt):
                 freshness_script = alt
 

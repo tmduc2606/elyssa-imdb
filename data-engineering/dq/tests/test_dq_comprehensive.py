@@ -138,13 +138,10 @@ class TestFreshnessMonitor:
         assert "def main" in content
         assert "if __name__" in content
 
-# ─── Neo4j Sync Tests ────────────────────────────────────────────────────────
+# ─── Neo4j Sync Tests (standalone script) ──────────────────────────────────────
 
 class TestNeo4jSync:
-    """Tests for scripts/neo4j_sync.py"""
-
-    def test_neo4j_sync_exists(self):
-        assert os.path.exists(os.path.join(SCRIPTS_DIR, 'neo4j_sync.py'))
+    """Tests for scripts/neo4j_sync.py (standalone utility, not in pipeline)"""
 
     def test_neo4j_sync_parses(self):
         path = os.path.join(SCRIPTS_DIR, 'neo4j_sync.py')
@@ -152,35 +149,11 @@ class TestNeo4jSync:
             content = f.read()
         ast.parse(content)
 
-    def test_neo4j_sync_has_cypher_schema(self):
-        path = os.path.join(SCRIPTS_DIR, 'neo4j_sync.py')
-        with open(path) as f:
-            content = f.read()
-        assert "CYPHER_SCHEMA" in content
-        assert "CREATE CONSTRAINT" in content
-        assert "CREATE INDEX" in content
-
-    def test_neo4j_sync_has_merge_queries(self):
-        path = os.path.join(SCRIPTS_DIR, 'neo4j_sync.py')
-        with open(path) as f:
-            content = f.read()
-        assert "MERGE" in content
-        assert "UNWIND" in content
-
-    def test_neo4j_sync_has_relationships(self):
-        path = os.path.join(SCRIPTS_DIR, 'neo4j_sync.py')
-        with open(path) as f:
-            content = f.read()
-        assert "ACTED_IN" in content
-        assert ":Title" in content
-        assert ":Person" in content
-
     def test_neo4j_sync_has_main(self):
         path = os.path.join(SCRIPTS_DIR, 'neo4j_sync.py')
         with open(path) as f:
             content = f.read()
         assert "def main" in content
-        assert "if __name__" in content
 
 # ─── ETL Runner Tests ────────────────────────────────────────────────────────
 

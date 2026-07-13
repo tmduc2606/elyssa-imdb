@@ -1,16 +1,15 @@
 """
 Elyssa-IMDb Pipeline — Main DAG
 
-Orchestrates: Sensor → Bronze ingestion → Silver ETL → Gold dbt → Neo4j sync → DQ checks
+Orchestrates: Sensor → Bronze ingestion → Silver ETL → Gold dbt → DQ checks
 Execution order:
   0. imdb_sensor           (detect new .tsv files)
   1. bronze_ingest          (DuckDB TSV→Parquet, with quarantine)
   2. silver_transform       (DuckDB→CSV→psycopg2 COPY, parent+child normalization)
   3. gold_dbt_run           (dbt run for staging → intermediate → marts)
   4. gold_dbt_test          (dbt test for Gold validation)
-  5. neo4j_sync             (sync silver tables to Neo4j graph)
-  6. dq_checks              (null-rate, referential integrity, row-count)
-  7. freshness_monitor      (check last_updated freshness SLA)
+  5. dq_checks              (null-rate, referential integrity, row-count)
+  6. freshness_monitor      (check last_updated freshness SLA)
 """
 
 import json
@@ -30,7 +29,6 @@ from airflow.operators.python import PythonOperator
 from operators.bronze_operator import BronzeIngestOperator
 from operators.silver_operator import SilverTransformOperator
 from operators.dbt_operator import DbtRunOperator
-from operators.neo4j_operator import Neo4jSyncOperator
 from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
 from operators.imdb_sensor import IMDbDataSensor
@@ -80,25 +78,21 @@ def _on_failure_callback(context):
     log_url = task_instance.get_log_url() if task_instance else ""
 
     severity = "HIGH" if task_id in ["bronze_ingest", "silver_transform"] else "MEDIUM"
-    print(f"[ALERT:{severity}] DAG={dag_id} Task={task_id} FAILED")
-    print(f"[ALERT] Exception: {exception}")
-    print(f"[ALERT] Log: {log_url}")
+    log_msg = f"[ALERT:{severity}] DAG={dag_id} Task={task_id} FAILED | Exception: {exception} | Log: {log_url}"
+    print(log_msg)
 
 
 def _on_retry_callback(context):
     """Warn on retry — early signal of transient failures."""
     task_instance = context.get("task_instance")
     if task_instance:
-        print(
-            f"[ALERT:WARN] Task {task_instance.task_id} retrying "
-            f"(attempt {task_instance.try_number})"
-        )
+        print(f"[ALERT:WARN] Task {task_instance.task_id} retrying (attempt {task_instance.try_number})")
 
 
 default_args = {
     "owner": "de-team",
     "depends_on_past": False,
-    "email_on_failure": True,
+    "email_on_failure": False,
     "email_on_retry": False,
     "retries": _retry_cfg.get("max_retries", 4),
     "retry_delay": timedelta(seconds=_retry_cfg.get("base_delay_s", 60)),
@@ -112,11 +106,11 @@ default_args = {
 with DAG(
     dag_id="imdb_pipeline",
     default_args=default_args,
-    description="Elyssa IMDb Sensor → Bronze → Silver → Gold → Neo4j → DQ pipeline",
+    description="Elyssa IMDb Sensor → Bronze → Silver → Gold → DQ pipeline",
     schedule=None,
     start_date=datetime(2026, 6, 1),
     catchup=False,
-    tags=["imdb", "bronze", "silver", "gold", "neo4j"],
+    tags=["imdb", "bronze", "silver", "gold"],
 ) as dag:
 
     start = EmptyOperator(task_id="pipeline_start")
@@ -177,15 +171,6 @@ with DAG(
         dbt_target="prod",
     )
 
-    # ─── Neo4j ────────────────────────────────────────────────────────────
-    neo4j_sync = Neo4jSyncOperator(
-        task_id="neo4j_sync",
-        neo4j_uri="bolt://neo4j:7687",
-        neo4j_user="neo4j",
-        neo4j_password="elyssa_neo_2026",
-        tables_to_sync=["title_basics", "name_basics", "title_principal"],
-    )
-
     # ─── Data Quality (halts on threshold violations) ─────────────────────
     dq_checks = DataQualityOperator(
         task_id="dq_checks",
@@ -209,11 +194,10 @@ with DAG(
     end = EmptyOperator(task_id="pipeline_end")
 
     # ─── DAG Structure ────────────────────────────────────────────────────
-    # Sensor → bronze → quarantine_check → silver → gold → neo4j → dq → freshness → end
+    # Sensor → bronze → quarantine_check → silver → gold → dq → freshness → end
     # gold_dbt_test depends on gold_dbt_run (tests run against fresh Gold tables)
-    # db_ingest REMOVED from critical path (Phase 1 optimization A3) — was a no-op copy
+    # Neo4j sync removed from critical path (Phase 1 hardware limitation)
     start >> imdb_sensor >> bronze_ingest >> bronze_done
     bronze_done >> quarantine_check >> silver_transform
-    silver_transform >> gold_dbt_run >> [gold_dbt_test, neo4j_sync]
-    gold_dbt_test >> dq_checks
-    neo4j_sync >> dq_checks >> freshness_check >> end
+    silver_transform >> gold_dbt_run >> gold_dbt_test
+    gold_dbt_test >> dq_checks >> freshness_check >> end

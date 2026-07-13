@@ -9,7 +9,7 @@ docker/.env
 /docs/
 
 # ─── Documentation (not source code — agent planning docs excluded) ─
-data-engineering/docs/
+data-engineering/docs/*
 # EXCEPT: These portfolio documentation files are tracked:
 !data-engineering/docs/architecture_overview.md
 !data-engineering/docs/etl_pipeline.md
@@ -118,6 +118,9 @@ bronze/
 data-engineering/bronze/db_parquet/
 data-engineering/bronze/logs/
 data-engineering/logs/
+
+# ─── Orphaned data artifacts in scripts/ (exported parquet copies) ─
+data-engineering/scripts/*.parquet
 
 # ─── dbt artifacts (compiled output, downloaded packages) ─────────
 data-engineering/gold/target/

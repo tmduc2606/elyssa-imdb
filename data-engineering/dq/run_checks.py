@@ -62,13 +62,7 @@ DEFAULT_CHECKS = [
 
 
 def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: str):
-    """
-    Data Quality Check Runner
-
-    Reads DQ config, executes checks against Silver PostgreSQL,
-    and logs results to silver.data_quality_log and silver.quarantine.
-    This version runs checks in parallel using a ThreadPoolExecutor.
-    """
+    """Execute checks from config, log results to data_quality_log and quarantine."""
     import psycopg2
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import datetime, timezone
@@ -133,13 +127,13 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 else:
                     value = 0.0
                 passed = value <= threshold
-                if not passed:
-                    cursor.execute(f"""
-                        INSERT INTO silver.data_quality_log
-                            (check_name, table_name, metric_name, metric_value, threshold, passed, batch_id, logged_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                    """, (f"{name}_alert", table, "row_count_deviation",
-                          value, alert_threshold_pct / 100.0, False, None))
+            if not passed:
+                cursor.execute(f"""
+                    INSERT INTO silver.data_quality_log
+                        (check_name, table_name, metric_name, metric_value, threshold, passed, batch_id, logged_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                """, (f"{name}_alert", table, "row_count_deviation",
+                      value, alert_threshold_pct / 100.0, False, batch_id))
             else:
                 return {"name": name, "passed": False, "value": 0.0, "threshold": threshold, "error": "Unknown metric"}
             if metric != "row_count_variance":
@@ -149,25 +143,35 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 INSERT INTO silver.data_quality_log
                     (check_name, table_name, metric_name, metric_value, threshold, passed, batch_id, logged_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-            """, (name, table, metric, value, threshold, passed, None))
+            """, (name, table, metric, value, threshold, passed, batch_id))
             status = "PASS" if passed else "FAIL"
-            # We will return the result for logging/printing in the main thread
+            conn.commit()
             return {"name": name, "passed": passed, "value": value, "threshold": threshold, "error": None}
         except Exception as e:
-            if conn:
-                conn.rollback()
-            if cursor:
-                cursor.execute("""
-                    INSERT INTO silver.quarantine
-                        (table_name, check_name, error_message, quarantined_at)
-                    VALUES (%s, %s, %s, NOW())
-                """, (table, name, str(e)))
+            try:
+                if conn:
+                    conn.rollback()
+                if cursor and conn and not conn.closed:
+                    cursor.execute("""
+                        INSERT INTO silver.quarantine
+                            (table_name, check_name, error_message, quarantined_at)
+                        VALUES (%s, %s, %s, NOW())
+                    """)
+                    conn.commit()
+            except Exception:
+                pass
             return {"name": name, "passed": False, "value": 0.0, "threshold": threshold, "error": str(e)}
         finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
+            try:
+                if cursor:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
 
     all_passed = True
     # Use ThreadPoolExecutor with max_workers=3 (or number of checks, whichever is smaller)

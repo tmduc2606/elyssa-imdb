@@ -1,6 +1,6 @@
 # Elyssa-IMDb — Data Engineering Pipeline
 
-End-to-end IMDb pipeline: **Bronze** (Parquet) → **Silver** (PostgreSQL 3NF/SCD2) → **Gold** (dbt star-schema marts) → **Neo4j** (graph sync).
+End-to-end IMDb pipeline: **Bronze** (Parquet) → **Silver** (PostgreSQL 3NF/SCD2) → **Gold** (dbt star-schema marts).
 
 ---
 
@@ -10,7 +10,7 @@ End-to-end IMDb pipeline: **Bronze** (Parquet) → **Silver** (PostgreSQL 3NF/SC
 |-------------|---------|-------|
 | Docker | 24+ | With `docker compose` plugin |
 | Disk space | ~20 GB free | Source TSVs (~10 GB) + Parquet (~5 GB) + Docker images (~6 GB) |
-| RAM | 16 GB+ | Docker Desktop resource limit (PostgreSQL 2 GB shm, Neo4j 6 GB heap+cache) |
+| RAM | 16 GB+ | Docker Desktop resource limit (PostgreSQL 2 GB shm) |
 
 ---
 
@@ -87,7 +87,7 @@ docker exec elyssa-airflow airflow dags trigger imdb_pipeline
 4. Toggle the **Pause/Unpause** switch to unpause (grey = unpaused)
 5. Click the **Play** button (▶) → **Trigger DAG**
 
-Pipeline tasks: `sensor → bronze_ingest → quarantine_check → silver_transform → gold_dbt_run → [gold_dbt_test, neo4j_sync] → dq_checks → freshness_check`
+Pipeline tasks: `sensor → bronze_ingest → quarantine_check → silver_transform → gold_dbt_run → gold_dbt_test → dq_checks → freshness_check`
 
 ### 5. Monitor
 
@@ -145,9 +145,7 @@ docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT batch_
 # Gold: dbt source freshness
 docker exec elyssa-airflow dbt source freshness --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold
 
-# Neo4j: node + relationship counts
-docker exec elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026 "MATCH (n) RETURN labels(n), count(*);"
-docker exec elyssa-neo4j cypher-shell -u neo4j -p elyssa_neo_2026 "MATCH ()-[r]->() RETURN type(r), count(*);"
+
 ```
 
 ---
@@ -188,9 +186,8 @@ docker builder prune -f && docker compose up -d --build
 
 ```
 IMDb .tsv.gz → [Bronze: DuckDB ingestion] → Parquet on disk
-Parquet → [Silver: PySpark ETL] → PostgreSQL (14 tables, SCD2)
+Parquet → [Silver: DuckDB→PostgreSQL COPY] → PostgreSQL 3NF/BCNF (14 tables, SCD2)
 PostgreSQL → [Gold: dbt] → Star-schema marts (6 tables, 4 views)
-PostgreSQL → [Neo4j Sync] → Graph DB (Title, Person nodes + ACTED_IN relationships)
 PostgreSQL → [DQ Checks] → data_quality_log
 ```
 
@@ -202,7 +199,7 @@ PostgreSQL → [DQ Checks] → data_quality_log
 |---------|-----|-------------|
 | Airflow | http://localhost:8081 | `admin` / generated password |
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
-| Neo4j Browser | http://localhost:7475 | `neo4j` / `elyssa_neo_2026` |
+
 | RustFS Console | http://localhost:9101 | `elyssa` / `elyssa_s3_2026` |
 
 ---
@@ -213,6 +210,12 @@ PostgreSQL → [DQ Checks] → data_quality_log
 |----------|-------------|
 | `data-engineering/docs/phase1_summary.md` | Unified Phase 1 summary — row counts, performance, fixes, architecture decisions |
 | `data-engineering/docs/architecture_overview.md` | Medallion architecture, tech stack, SCD2 logic |
+| `data-engineering/docs/etl_pipeline.md` | DAG flow, retry policies, failure handling |
+| `data-engineering/docs/schema_dictionary.md` | Silver + Gold schema reference (all columns, types) |
+| `data-engineering/docs/data_quality_tests.md` | Test coverage and how to run |
+| `data-engineering/docs/disaster_recovery.md` | RPO/RTO, backup/restore procedures |
+| `data-engineering/docs/blueprint_database_ingestion.md` | Phase 2A blueprint |
+| `data-engineering/docs/pipeline-optimization-blueprint.md` | Optimization roadmap |
 | `data-engineering/docs/etl_pipeline.md` | DAG flow, retry policies, failure handling |
 | `data-engineering/docs/schema_dictionary.md` | Silver + Gold schema reference (all columns, types) |
 | `data-engineering/docs/data_quality_tests.md` | Test coverage and how to run |

@@ -1,30 +1,24 @@
 """
 Neo4j Graph Sync — Syncs Silver PostgreSQL tables to Neo4j.
 
-Creates nodes for titles, persons, and relationships for cast/crew.
-Uses MERGE for idempotency with small batches and retry logic
-to handle memory pressure on large datasets.
+Merges node tables (fast with UNIQUE constraints), creates relationships
+(CREATE, ~100x faster than MERGE on 12M+ existing edges). Duplicate
+relationships are cleaned up post-sync via a dedup query.
 """
 
 import argparse
 import time
-from datetime import datetime
 
 BATCH_SIZE = 500
+BATCH_SIZE_RELS = 300
 MAX_RETRIES = 3
 RETRY_DELAY_S = 5
-
-SYNC_START = None
 
 CYPHER_SCHEMA = """
 CREATE CONSTRAINT IF NOT EXISTS FOR (t:Title) REQUIRE t.tconst IS UNIQUE;
 CREATE CONSTRAINT IF NOT EXISTS FOR (p:Person) REQUIRE p.nconst IS UNIQUE;
 CREATE INDEX IF NOT EXISTS FOR (t:Title) ON (t.title_type);
 CREATE INDEX IF NOT EXISTS FOR (p:Person) ON (p.primary_name);
-"""
-
-CYPHER_CLEANUP = """
-MATCH (n) DETACH DELETE n
 """
 
 CYPHER_SYNC_TITLE = """
@@ -50,11 +44,19 @@ SET p.primary_name = row.primary_name,
     p.updated_at = datetime()
 """
 
+CYPHER_DEDUP = """
+MATCH (p:Person)-[r:ACTED_IN]->(t:Title)
+WITH p, t, collect(r) AS rels
+WHERE size(rels) > 1
+UNWIND tail(rels) AS dup
+DELETE dup
+"""
+
 CYPHER_SYNC_ACTED_IN = """
 UNWIND $batch AS row
 MATCH (p:Person {nconst: row.nconst})
 MATCH (t:Title {tconst: row.tconst})
-MERGE (p)-[r:ACTED_IN]->(t)
+CREATE (p)-[r:ACTED_IN]->(t)
 SET r.category = row.category,
     r.job = row.job,
     r.characters = row.characters
@@ -121,13 +123,15 @@ def sync_table(uri, user, password, table_name):
         "title_principal": CYPHER_SYNC_ACTED_IN,
     }
 
+    batch_size = BATCH_SIZE_RELS if table_name == "title_principal" else BATCH_SIZE
+
     pg_conn = psycopg2.connect(
         host="postgres", port=5432, dbname="elyssa_warehouse",
         user="elyssa", password="elyssa_pg_2026"
     )
     try:
         with pg_conn.cursor(name=f"neo4j_sync_{table_name}", cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.itersize = BATCH_SIZE
+            cur.itersize = batch_size
             cur.execute(TABLE_QUERIES[table_name])
             batch = []
             driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -135,7 +139,7 @@ def sync_table(uri, user, password, table_name):
                 total_synced = 0
                 for row in cur:
                     batch.append(_convert_row(dict(row)))
-                    if len(batch) >= BATCH_SIZE:
+                    if len(batch) >= batch_size:
                         run_with_retry(session, CYPHER_MAP[table_name], batch, table_name)
                         total_synced += len(batch)
                         print(f"[Neo4j] {table_name}: {total_synced:,} rows synced", end="\r")
@@ -160,31 +164,32 @@ def main():
     tables = args.tables.split(",") if args.tables else []
 
     from neo4j import GraphDatabase
-    driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
 
-    # Clean up stale data from previous failed runs
-    with driver.session() as session:
-        print("[Neo4j] Cleaning up stale graph data...")
-        session.run(CYPHER_CLEANUP)
-        # Wait for cleanup to propagate before creating constraints
-        time.sleep(2)
-
-    # Create schema constraints and indexes
-    with driver.session() as session:
+    # Schema (uses tmp connection, closes after)
+    _schema_driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+    with _schema_driver.session() as session:
         for stmt in CYPHER_SCHEMA.strip().split(";"):
             if stmt.strip():
                 try:
                     session.run(stmt.strip())
                 except Exception as e:
                     print(f"[Neo4j] Schema note: {e}")
-    driver.close()
+    _schema_driver.close()
 
     for table in tables:
         if table.strip():
             sync_table(args.uri, args.user, args.password, table.strip())
 
+    # Dedup any duplicate ACTED_IN relationships (from CREATE on existing data)
+    if "title_principal" in tables:
+        _dedup_driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+        with _dedup_driver.session() as session:
+            print("[Neo4j] Deduplicating ACTED_IN relationships...")
+            result = session.run(CYPHER_DEDUP)
+            stats = result.consume()
+            print(f"[Neo4j] Dedup complete: {stats.counters.contains_updates}")
+        _dedup_driver.close()
+
 
 if __name__ == "__main__":
-    global SYNC_START
-    SYNC_START = datetime.now()
     main()
