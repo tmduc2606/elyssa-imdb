@@ -156,7 +156,7 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                         INSERT INTO silver.quarantine
                             (table_name, check_name, error_message, quarantined_at)
                         VALUES (%s, %s, %s, NOW())
-                    """)
+                    """, (table, name, str(e)))
                     conn.commit()
             except Exception:
                 pass

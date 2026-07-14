@@ -27,6 +27,7 @@ services:
       POSTGRES_DB: elyssa_warehouse
     command: >
       postgres
+        -c config_file=/etc/postgresql/custom.conf
         -c shared_preload_libraries=timescaledb
         -c max_connections=200
         -c shared_buffers=512MB
@@ -46,6 +47,7 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./docker/postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./docker/postgres/custom.conf:/etc/postgresql/custom.conf:ro
     networks:
       - elyssa-net
     restart: unless-stopped

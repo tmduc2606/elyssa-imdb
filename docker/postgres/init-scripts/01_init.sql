@@ -21,27 +21,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA silver GRANT ALL ON TABLES TO elyssa;
 --       in this same elyssa_warehouse database.
 
 -- Create graph sync tracking table (used by Airflow Neo4j sync)
-CREATE TABLE IF NOT EXISTS public.graph_sync_status (
-    sync_id        SERIAL PRIMARY KEY,
-    sync_name      VARCHAR(100) NOT NULL UNIQUE,
-    last_sync_ts   TIMESTAMPTZ,
-    rows_synced    INTEGER DEFAULT 0,
-    status         VARCHAR(20) DEFAULT 'pending',
-    created_at     TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create data quality log table
-CREATE TABLE IF NOT EXISTS public.data_quality_log (
-    log_id         SERIAL PRIMARY KEY,
-    check_name     VARCHAR(200) NOT NULL,
-    table_name     VARCHAR(200),
-    metric_name    VARCHAR(100),
-    metric_value   NUMERIC,
-    threshold      NUMERIC,
-    passed         BOOLEAN,
-    logged_at     TIMESTAMPTZ DEFAULT NOW()
-);
+-- NOTE: moved to silver schema in 02_silver_schema.sql
+-- Legacy public schema tables are intentionally not created here.
+-- See 02_silver_schema.sql for full silver schema definition.
 
 -- Comment for documentation
-COMMENT ON TABLE public.graph_sync_status IS 'Tracks Neo4j sync completion timestamps';
-COMMENT ON TABLE public.data_quality_log IS 'Stores daily data quality check results';
+COMMENT ON SCHEMA silver IS 'Silver layer — canonical 3NF/BCNF enterprise model with SCD2';
+COMMENT ON SCHEMA gold IS 'Gold layer — denormalized star-schema marts';
