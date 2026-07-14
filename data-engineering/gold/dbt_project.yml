@@ -1,0 +1,32 @@
+name: 'imdb_gold'
+version: '1.0'
+config-version: 2
+profile: 'imdb_gold'
+
+model-paths: ['models']
+test-paths: ['tests']
+analysis-paths: ['analyses']
+macro-paths: ['macros']
+seed-paths: ['seeds']
+snapshot-paths: ['snapshots']
+
+target-path: 'target'
+clean-targets:
+  - 'target'
+  - 'dbt_packages'
+
+models:
+  imdb_gold:
+    staging:
+      +materialized: view
+      +schema: stg
+    intermediate:
+      +materialized: ephemeral
+      +schema: int
+      +pre_hook: "SET work_mem = '512MB'"
+      +post_hook: "SET work_mem = DEFAULT"
+    marts:
+      +materialized: table
+      +schema: gold
+      episodic_content:
+        +materialized: table

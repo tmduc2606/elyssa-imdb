@@ -1,0 +1,25 @@
+# Elyssa-IMDb | Data Engineering | Python Dependencies
+# Stack: DuckDB, PostgreSQL/TimescaleDB, dbt, Neo4j, Airflow
+# NOTE: apache-airflow 3.3.0 is pre-installed in base image — do NOT pin
+
+# ─── Processing ────────────────────────────────────────────────────
+duckdb==1.1.3
+pyarrow==18.1.0
+
+# ─── Database Drivers ─────────────────────────────────────────────
+psycopg2-binary==2.9.10
+neo4j==5.27.0
+
+# ─── Transformation (dbt — pin core+adapter together) ─────────────
+dbt-core==1.11.11
+dbt-postgres==1.10.2
+
+# ─── Data Quality ─────────────────────────────────────────────────
+great-expectations==1.18.2
+
+# ─── Data Manipulation ────────────────────────────────────────────
+pandas==2.2.3
+
+# ─── Config / Utilities ───────────────────────────────────────────
+pyyaml==6.0.3
+python-dotenv==1.0.1

@@ -1,0 +1,24 @@
+# Elyssa-IMDb | Data Engineering Stack — Docker Images
+# RustFS — S3-compatible object storage for Bronze layer (Parquet)
+
+# ─── RustFS ────────────────────────────────────────────────────────
+# Purpose: Bronze layer raw storage — append-only Parquet, Snappy-compressed
+# Port: 9000 (S3 API), 9001 (admin console)
+FROM rustfs/rustfs:latest
+
+# Environment
+ENV RUSTFS_ACCESS_KEY=elyssa \
+    RUSTFS_SECRET_KEY=elyssa_s3_2026 \
+    RUSTFS_REGION=us-east-1 \
+    RUSTFS_CONSOLE_ADDRESS=":9001"
+
+# Create Bronze bucket at startup
+# RustFS runs as non-root; use bash to execute script without chmod
+COPY docker/rustfs/entrypoint.sh /tmp/entrypoint.sh
+
+ENTRYPOINT ["/bin/sh", "/tmp/entrypoint.sh"]
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=10 --start-period=30s \
+    CMD pgrep -x rustfs > /dev/null || exit 1
+
+EXPOSE 9000 9001

@@ -1,0 +1,18 @@
+# Elyssa-IMDb | Centralized path configuration
+# Single source of truth for all bronze/silver/gold paths across operators.
+
+bronze:
+  output_path: /opt/airflow/output/bronze/
+  quarantine_path: /opt/airflow/output/bronze/quarantine/
+
+silver:
+  source_dir: /opt/airflow/data-engineering/duke/gate0/source/
+
+gold:
+  project_dir: /opt/airflow/data-engineering/gold
+
+database:
+  host: postgres
+  port: 5432
+  name: elyssa_warehouse
+  user: elyssa

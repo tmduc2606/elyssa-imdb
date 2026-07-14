@@ -1,0 +1,182 @@
+# Elyssa-IMDb | Docker Compose — Full DE Stack
+# Ports are remapped on the host side to prevent conflicts with local services.
+#
+# Service        Internal    Host Mapping    Purpose
+# ─────────────  ──────────  ─────────────  ──────────────────────────
+# postgres       5432        54321           Silver/Gold warehouse
+# neo4j          7474/7687   7475/7688        Graph database
+# rustfs         9000/9001   9100/9101       S3-compatible Bronze storage
+# airflow        8080        8081            DAG orchestrator
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose up -d postgres # Start only PostgreSQL
+
+services:
+  # ─── PostgreSQL + TimescaleDB ───────────────────────────────────
+  postgres:
+    image: elyssa-postgres:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    container_name: elyssa-postgres
+    environment:
+      POSTGRES_USER: elyssa
+      POSTGRES_PASSWORD: elyssa_pg_2026
+      POSTGRES_DB: elyssa_warehouse
+    command: >
+      postgres
+        -c shared_preload_libraries=timescaledb
+        -c max_connections=200
+        -c shared_buffers=512MB
+        -c work_mem=128MB
+        -c maintenance_work_mem=256MB
+        -c wal_level=replica
+        -c max_wal_size=4GB
+        -c effective_cache_size=1536MB
+        -c checkpoint_completion_target=0.9
+        -c random_page_cost=1.1
+        -c effective_io_concurrency=200
+        -c log_min_duration_statement=1000
+        -c timezone=UTC
+    shm_size: '2g'
+    ports:
+      - "54321:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ─── Neo4j ──────────────────────────────────────────────────────
+  neo4j:
+    image: elyssa-neo4j:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.neo4j
+    container_name: elyssa-neo4j
+    environment:
+      NEO4J_AUTH: "neo4j/elyssa_neo_2026"
+      NEO4J_server_memory_heap_max__size: "2G"
+      NEO4J_server_memory_pagecache_size: "4G"
+    ports:
+      - "7475:7474"   # HTTP
+      - "7688:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ─── RustFS (S3-compatible) ─────────────────────────────────────
+  rustfs:
+    image: elyssa-rustfs:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.rustfs
+    container_name: elyssa-rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: elyssa
+      RUSTFS_SECRET_KEY: elyssa_s3_2026
+      RUSTFS_REGION: us-east-1
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    ports:
+      - "9100:9000"   # S3 API
+      - "9101:9001"   # Admin Console
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ─── DuckDB (Ephemeral Analytics Engine) ────────────────────────
+  # Runs in-memory; reads Parquet directly from Bronze S3-compatible storage.
+  # No persistent volume — ephemeral by design per approved blueprint.
+  duckdb:
+    image: elyssa-duckdb:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.duckdb
+    container_name: elyssa-duckdb
+    environment:
+      DUCKDB_THREADS: "4"
+      DUCKDB_MEMORY_LIMIT_MB: "2048"
+    networks:
+      - elyssa-net
+    restart: "no"  # Ephemeral: run on demand, not persistent
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ─── Apache Airflow ─────────────────────────────────────────────
+  airflow:
+    image: elyssa-airflow:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
+    container_name: elyssa-airflow
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
+      AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
+      AIRFLOW__CORE__PARALLELISM: "8"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
+      AIRFLOW__CORE__LOG_FILENAME_TEMPLATE: "{{ti.dag_id}}/{{ti.task_id}}/{{ts}}/{{try_number}}.log"
+    ports:
+      - "8081:8080"
+    volumes:
+      - airflow_data:/opt/airflow
+      - ./data-engineering:/opt/airflow/data-engineering:rw
+      - ./data-engineering/orchestration/dags:/opt/airflow/dags:ro
+      - ./data-engineering/orchestration/operators:/opt/airflow/operators:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+volumes:
+  pg_data:
+    name: elyssa_pg_data
+  neo4j_data:
+    name: elyssa_neo4j_data
+  neo4j_logs:
+    name: elyssa_neo4j_logs
+  rustfs_data:
+    name: elyssa_rustfs_data
+  airflow_data:
+    name: elyssa_airflow_data
+
+networks:
+  elyssa-net:
+    name: elyssa-net
+    driver: bridge

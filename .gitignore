@@ -1,0 +1,142 @@
+# ─── Project ───────────────────────────────────────────────────────
+# Environment secrets (never commit actual .env)
+.env
+.env.local
+docker/.env
+
+# Root docs folder — proposal, references, contracts
+# (Trailing /docs/ matches any depth; prefix / restricts to root)
+/docs/
+
+# ─── Documentation (not source code — agent planning docs excluded) ─
+data-engineering/docs/*
+# EXCEPT: These portfolio documentation files are tracked:
+!data-engineering/docs/architecture_overview.md
+!data-engineering/docs/etl_pipeline.md
+!data-engineering/docs/schema_dictionary.md
+!data-engineering/docs/data_quality_tests.md
+!data-engineering/docs/disaster_recovery.md
+!data-engineering/docs/phase1_summary.md
+!data-engineering/docs/blueprint_database_ingestion.md
+!data-engineering/docs/pipeline-optimization-blueprint.md
+
+# Binary office documents (agent reports, proposals)
+*.docx
+
+# ─── Agent Instructions & OpenCode Integration ─────────────────────
+# Not source code — excluded from tracking on all branches
+.opencode/
+.git/opencode/
+data-engineering/AGENTS.md
+data-engineering/agents/
+data-engineering/skills/
+data-engineering/presets/
+data-engineering/hooks/
+data-engineering/starter-packs/
+data-engineering/templates/
+data-engineering/duke/
+
+# ─── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+data-science/figures/
+data-science/scripts/
+
+# Testing / Linting
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Node / Frontend (Web App module) ─────────────────────────────
+node_modules/
+.next/
+.nuxt/
+.cache/
+
+# ─── Debug / Report / Assessment Artifacts ────────────────────────
+*.log
+*.tmp
+*.bak
+*.dump
+reports/
+assessments/
+debug/
+*.profraw
+*.profdata
+
+# ─── Data / ML Artifacts (Data Science module) ────────────────────
+# Model checkpoints & serialized objects
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+*.pkl.zst
+mlruns/
+mlartifacts/
+wandb/
+
+# Raw data outputs & feature caches
+*.parquet
+*.csv
+*.tsv
+*.tsv.gz
+*.db
+*.db.wal
+
+# ─── Docker ────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# Accidental nested build artifacts (from running compose inside docker/)
+docker/docker/
+docker/data-engineering/
+
+# ─── DE module virtual env ─────────────────────────────────────────
+data-engineering/.venv/
+
+# ─── Ingestion / pipeline runtime logs & parquet output ───────────
+bronze/
+data-engineering/bronze/db_parquet/
+data-engineering/bronze/logs/
+data-engineering/logs/
+
+# ─── Orphaned data artifacts in scripts/ (exported parquet copies) ─
+data-engineering/scripts/*.parquet
+
+# ─── dbt artifacts (compiled output, downloaded packages) ─────────
+data-engineering/gold/target/
+data-engineering/gold/dbt_packages/
+data-engineering/gold/logs/
+
+# ─── OS / IDE ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.cursor/
+.windsurf/
+*.sublime-project
+*.sublime-workspace

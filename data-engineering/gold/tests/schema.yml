@@ -1,0 +1,105 @@
+version: 2
+
+models:
+  - name: dim_title
+    description: "Title dimension with enriched attributes"
+    meta:
+      owner: "de-team"
+      lineage:
+        sources: ["silver.title_basics", "silver.title_rating", "silver.title_episode"]
+        transform: "int_title_details"
+    columns:
+      - name: tconst
+        tests: [unique, not_null]
+        meta:
+          lineage_source: "silver.title_basics.tconst"
+      - name: primary_title
+        tests: [not_null]
+        meta:
+          lineage_source: "silver.title_basics.primary_title"
+      - name: title_type
+        tests: [not_null]
+        meta:
+          lineage_source: "silver.title_basics.title_type"
+      - name: start_year
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1874
+                max_value: 2030
+              config:
+                severity: warn
+        meta:
+          lineage_source: "silver.title_basics.start_year"
+      - name: average_rating
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 10.0
+        meta:
+          lineage_source: "silver.title_rating.average_rating"
+      - name: num_votes
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+        meta:
+          lineage_source: "silver.title_rating.num_votes"
+      - name: runtime_minutes
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 1000
+              config:
+                severity: warn
+        meta:
+          lineage_source: "silver.title_basics.runtime_minutes"
+
+  - name: dim_person
+    description: "Person dimension with demographic attributes"
+    columns:
+      - name: nconst
+        tests: [unique, not_null]
+      - name: primary_name
+        tests: [not_null]
+      - name: birth_year
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1800
+                max_value: 2030
+              config:
+                severity: warn
+
+  - name: fact_title_rating
+    description: "Title rating fact at grain (title_key, snapshot_date)"
+    columns:
+      - name: title_key
+        tests: [not_null]
+      - name: snapshot_date
+        tests: [not_null]
+      - name: average_rating
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0.0
+                max_value: 10.0
+      - name: num_votes
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: fact_title_principal
+    description: "Principal fact at grain (title_key, name_key, character_key)"
+    columns:
+      - name: title_key
+        tests: [not_null]
+      - name: name_key
+        tests: [not_null]
+      - name: character_name
+        tests: []
+      - name: category
+        tests: [not_null]

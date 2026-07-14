@@ -1,0 +1,19 @@
+# Elyssa-IMDb | Data Engineering Stack — Docker Images
+# Base images for local development & CI/CD pipelines.
+# Each service uses explicit version pins for reproducibility.
+
+# ─── PostgreSQL + TimescaleDB ─────────────────────────────────────
+# Purpose: Silver/Gold warehouse, star-schema marts, SCD2 tables
+# Port: 5432 (mapped to 54321 on host to avoid conflicts)
+FROM postgres:16
+
+# Install TimescaleDB extension
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-16-timescaledb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+    CMD pg_isready -U elyssa -d elyssa_warehouse || exit 1
+
+EXPOSE 5432

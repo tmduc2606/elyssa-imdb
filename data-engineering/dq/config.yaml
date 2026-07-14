@@ -1,0 +1,57 @@
+checks:
+  - name: null_rate_title_basics
+    table: silver.title_basics
+    metric: null_rate
+    column: primary_title
+    threshold: 0.0
+    severity: error
+
+  - name: null_rate_title_rating
+    table: silver.title_rating
+    metric: null_rate
+    column: average_rating
+    threshold: 0.0
+    severity: error
+
+  - name: orphan_title_episode
+    table: silver.title_episode
+    metric: orphan_rate
+    fk_column: parent_tconst
+    pk_table: silver.title_basics
+    pk_column: tconst
+    threshold: 0.01
+    severity: warn
+
+  - name: row_count_title_basics
+    table: silver.title_basics
+    metric: row_count_variance
+    expected_min: 1000000
+    expected_count: 12600000
+    threshold: 0.2
+    alert_threshold_pct: 20
+    severity: error
+
+  - name: row_count_name_basics
+    table: silver.name_basics
+    metric: row_count_variance
+    expected_min: 1000000
+    expected_count: 15400000
+    threshold: 0.2
+    alert_threshold_pct: 20
+    severity: error
+
+  - name: row_count_title_episode
+    table: silver.title_episode
+    metric: row_count_variance
+    expected_min: 1000000
+    expected_count: 9700000
+    threshold: 0.2
+    alert_threshold_pct: 20
+    severity: error
+
+  - name: null_rate_title_episode
+    table: silver.title_episode
+    metric: null_rate
+    column: parent_tconst
+    threshold: 0.0
+    severity: error

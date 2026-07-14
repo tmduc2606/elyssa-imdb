@@ -1,0 +1,10 @@
+import duckdb
+conn = duckdb.connect(":memory:")
+r = conn.execute("SELECT COUNT(*) FROM read_parquet('/opt/airflow/output/bronze/title.ratings.parquet') WHERE \"tconst\" = '\\N' OR \"averageRating\" = '\\N' OR \"numVotes\" = '\\N'").fetchone()
+print(f"Ratings with \\N: {r[0]}")
+r2 = conn.execute("SELECT COUNT(*) FROM read_parquet('/opt/airflow/output/bronze/title.ratings.parquet') WHERE \"tconst\" = '\\N'").fetchone()
+print(f"tconst=\\N: {r2[0]}")
+r3 = conn.execute("SELECT COUNT(*) FROM read_parquet('/opt/airflow/output/bronze/title.ratings.parquet') WHERE \"averageRating\" = '\\N'").fetchone()
+print(f"averageRating=\\N: {r3[0]}")
+r4 = conn.execute("SELECT COUNT(*) FROM read_parquet('/opt/airflow/output/bronze/title.ratings.parquet') WHERE \"numVotes\" = '\\N'").fetchone()
+print(f"numVotes=\\N: {r4[0]}")
