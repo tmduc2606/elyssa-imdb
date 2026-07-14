@@ -191,21 +191,21 @@ class BenchmarkRunner:
 
     def benchmark_schema_validation(self, n_titles: int) -> Dict[str, Any]:
         """Benchmark schema validation"""
-        from bronze.config import SOURCE_SCHEMAS, get_column_list
+        from bronze.config import SOURCE_CONFIG
 
         times = []
 
         for _ in range(100):
             start = time.perf_counter()
-            for table in SOURCE_SCHEMAS:
-                get_column_list(table)
+            for table_name, config in SOURCE_CONFIG.items():
+                _ = config['columns']  # Access column list
             elapsed = time.perf_counter() - start
             times.append(elapsed)
 
         return {
             "layer": "bronze",
             "operation": "schema_validation",
-            "n_lookups": 100 * len(SOURCE_SCHEMAS),
+            "n_lookups": 100 * len(SOURCE_CONFIG),
             "times": times,
             "avg_ms": round(statistics.mean(times) * 1000, 2),
             "min_ms": round(min(times) * 1000, 2),

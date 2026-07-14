@@ -37,7 +37,7 @@ class TestDbtProject:
             config = yaml.safe_load(f)
         models = config['models']['imdb_gold']
         assert models['staging']['+materialized'] == 'view'
-        assert models['intermediate']['+materialized'] == 'view'
+        assert models['intermediate']['+materialized'] == 'ephemeral'
         assert models['marts']['+materialized'] == 'table'
 
 # ─── Source Definition Tests ──────────────────────────────────────────────────

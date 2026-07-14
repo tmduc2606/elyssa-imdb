@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS silver.title_basics (
     is_current      BOOLEAN NOT NULL DEFAULT TRUE,
     batch_id        VARCHAR(20),
     ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_title_basics_tconst UNIQUE (tconst)
+    CONSTRAINT uq_title_basics_current UNIQUE (tconst, is_current)
 );
 CREATE INDEX IF NOT EXISTS idx_title_basics_tconst ON silver.title_basics(tconst);
 CREATE INDEX IF NOT EXISTS idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE;
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS silver.name_basics (
     is_current   BOOLEAN NOT NULL DEFAULT TRUE,
     batch_id     VARCHAR(20),
     ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_name_basics_nconst UNIQUE (nconst)
+    CONSTRAINT uq_name_basics_current UNIQUE (nconst, is_current)
 );
 CREATE INDEX IF NOT EXISTS idx_name_basics_nconst ON silver.name_basics(nconst);
 CREATE INDEX IF NOT EXISTS idx_name_basics_current ON silver.name_basics(is_current) WHERE is_current = TRUE;

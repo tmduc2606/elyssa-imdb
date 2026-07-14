@@ -106,3 +106,16 @@ sources:
           - name: region
           - name: language
           - name: is_original_title
+
+      - name: data_quality_log
+        description: "Data quality check results"
+        columns:
+          - name: log_id
+          - name: check_name
+          - name: table_name
+          - name: metric_name
+          - name: metric_value
+          - name: threshold
+          - name: passed
+          - name: batch_id
+          - name: logged_at
