@@ -57,6 +57,10 @@ ENV/
 data-science/figures/
 data-science/scripts/
 
+# Data Science docs — only track the EDA report
+data-science/docs/*
+!data-science/docs/phase2_eda_report.md
+
 # Testing / Linting
 .pytest_cache/
 .mypy_cache/
