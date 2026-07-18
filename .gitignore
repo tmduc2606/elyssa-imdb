@@ -27,10 +27,21 @@ data-engineering/docs/*
 # Not source code — excluded from tracking on all branches
 .opencode/
 .git/opencode/
+# Agent instructions — never committed
+AGENTS.md
+*/AGENTS.md
 data-engineering/AGENTS.md
-data-engineering/agents/
+data-science/AGENTS.md
+
+# Agent skills
 data-engineering/skills/
 data-science/skills/
+
+# Agent contracts
+data-science/contracts/
+
+# DE agent artifacts
+data-engineering/agents/
 data-engineering/presets/
 data-engineering/hooks/
 data-engineering/starter-packs/
