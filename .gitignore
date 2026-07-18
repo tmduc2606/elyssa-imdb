@@ -40,6 +40,11 @@ data-science/skills/
 # Agent contracts
 data-science/contracts/
 
+# Web Application agent files
+web-application/AGENTS.md
+web-application/skills/
+web-application/contracts/
+
 # DE agent artifacts
 data-engineering/agents/
 data-engineering/presets/
