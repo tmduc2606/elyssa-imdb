@@ -30,6 +30,7 @@ data-engineering/docs/*
 data-engineering/AGENTS.md
 data-engineering/agents/
 data-engineering/skills/
+data-science/skills/
 data-engineering/presets/
 data-engineering/hooks/
 data-engineering/starter-packs/
@@ -106,6 +107,11 @@ wandb/
 *.tsv.gz
 *.db
 *.db.wal
+*.npy
+
+# Processed marts output (notebook-generated artifacts)
+data-science/marts/
+catboost_info/
 
 # ─── Docker ────────────────────────────────────────────────────────
 docker-compose.override.yml
