@@ -1,0 +1,110 @@
+# Elyssa Gold API Schema — Placeholder
+# This file will be replaced with the actual schema from the API gateway.
+
+type Title {
+  id: ID!
+  primaryTitle: String!
+  originalTitle: String
+  titleType: String!
+  startYear: Int
+  endYear: Int
+  runtimeMinutes: Int
+  genres: [String!]!
+  averageRating: Float
+  numVotes: Int
+  posterUrl: String
+  parentTconst: String
+  seriesTitle: String
+  seasonNumber: Int
+  episodeNumber: Int
+  cast(limit: Int): [TitlePrincipal!]!
+  crew(limit: Int): [TitlePrincipal!]!
+  similar(limit: Int): [TitleSummary!]!
+  episodes(limit: Int): [EpisodeContent!]!
+}
+
+type TitleSummary {
+  id: ID!
+  primaryTitle: String!
+  averageRating: Float
+  posterUrl: String
+  startYear: Int
+  genres: [String!]
+}
+
+type TitlePrincipal {
+  person: PersonSummary!
+  character: String
+  ordering: Int!
+  category: String!
+  job: String
+}
+
+type PersonSummary {
+  id: ID!
+  primaryName: String!
+  posterUrl: String
+}
+
+type Person {
+  id: ID!
+  primaryName: String!
+  birthYear: Int
+  deathYear: Int
+  primaryProfession: [String!]!
+  posterUrl: String
+  knownForTitles(limit: Int): [TitleSummary!]!
+  filmography(limit: Int): [FilmographyEntry!]!
+  collaborators(limit: Int): [Collaborator!]!
+}
+
+type FilmographyEntry {
+  title: TitleSummary!
+  category: String!
+  character: String
+  year: Int
+}
+
+type Collaborator {
+  person: PersonSummary!
+  collaborationCount: Int!
+}
+
+type EpisodeContent {
+  seasonNumber: Int
+  episodeNumber: Int
+  title: TitleSummary!
+}
+
+type RatingSnapshot {
+  snapshotDate: String!
+  averageRating: Float!
+  numVotes: Int!
+}
+
+type SearchResult {
+  items: [Searchable!]!
+  total: Int!
+  hasMore: Boolean!
+  cursor: String
+}
+
+union Searchable = Title | Person
+
+type BrowseResult {
+  items: [TitleSummary!]!
+  total: Int!
+  hasMore: Boolean!
+  cursor: String
+}
+
+type Query {
+  title(tconst: ID!): Title!
+  person(nconst: ID!): Person!
+  search(query: String!, first: Int, after: String): SearchResult!
+  browse(genres: [String!], decade: Int, titleType: String, minRating: Float, sortBy: String, first: Int, after: String): BrowseResult!
+  trending(limit: Int): [TitleSummary!]!
+  topRated(limit: Int): [TitleSummary!]!
+  featured(limit: Int): [TitleSummary!]!
+  titleRatings(tconst: ID!, days: Int): [RatingSnapshot!]!
+}

@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@custom-variant motion-safe {
+  @media (prefers-reduced-motion: no-preference) {
+    &:where(&) {}
+  }
+}
+
+@custom-variant motion-reduce {
+  @media (prefers-reduced-motion: reduce) {
+    &:where(&) {}
+  }
+}
+
+@theme {
+  --color-canvas: #ffffff;
+  --color-surface: #f9f9f8;
+  --color-text: #111111;
+  --color-text-muted: #787774;
+
+  --color-accent-red-bg: #fdebec;
+  --color-accent-red-text: #9f2f2d;
+  --color-accent-blue-bg: #e1f3fe;
+  --color-accent-blue-text: #1f6c9f;
+  --color-accent-green-bg: #edf3ec;
+  --color-accent-green-text: #346538;
+  --color-accent-yellow-bg: #fbf3db;
+  --color-accent-yellow-text: #956400;
+
+  --color-background: #ffffff;
+  --color-foreground: #111111;
+  --color-muted: #787774;
+  --color-card: #f9f9f8;
+  --color-card-foreground: #111111;
+  --color-border: #eaeaea;
+  --color-primary: #111111;
+  --color-primary-foreground: #ffffff;
+
+  --color-ring: #787774;
+}
+
+@theme inline {
+  --font-display: "Playfair Display", serif;
+  --font-body: "Geist", sans-serif;
+  --font-mono: "Geist Mono", monospace;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  --leading-body: 1.6;
+  --tracking-display: -0.02em;
+  --tracking-display-lg: -0.04em;
+  --tracking-badge: 0.05em;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-body);
+    line-height: var(--leading-body);
+    color: var(--color-text);
+    background-color: var(--color-canvas);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html.dark {
+    --color-canvas: #1a1a1a;
+    --color-surface: #222222;
+    --color-text: #eaeaea;
+    --color-text-muted: #8a8a8a;
+
+    --color-accent-red-bg: #2d1b1b;
+    --color-accent-red-text: #e8a0a0;
+    --color-accent-blue-bg: #1b2d3d;
+    --color-accent-blue-text: #a0c4e8;
+    --color-accent-green-bg: #1b2d1b;
+    --color-accent-green-text: #a0e8a0;
+    --color-accent-yellow-bg: #2d2d1b;
+    --color-accent-yellow-text: #e8e8a0;
+
+    --color-background: #1a1a1a;
+    --color-foreground: #eaeaea;
+    --color-muted: #8a8a8a;
+    --color-card: #222222;
+    --color-card-foreground: #eaeaea;
+    --color-border: #333333;
+    --color-primary: #ffffff;
+    --color-primary-foreground: #111111;
+
+    --color-ring: #555555;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-text);
+    outline-offset: 2px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: var(--tracking-display);
+    line-height: 1.2;
+  }
+
+  h1 { letter-spacing: var(--tracking-display-lg); }
+
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+@layer utilities {
+  .bg-ambient {
+    background-image: radial-gradient(ellipse at 50% 0%, rgba(0,0,0,0.03) 0%, transparent 70%);
+    pointer-events: none;
+  }
+}

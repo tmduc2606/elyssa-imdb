@@ -1,0 +1,11 @@
+# Elyssa
+
+Elyssa is an IMDb-like movie and TV database frontend application.
+
+## Pages
+
+- [Home](/) - Featured titles, trending, and top rated
+- [Browse](/browse) - Browse all titles with filters
+- [Search](/search) - Search for titles and people
+- [Title Detail](/title/tt0000001) - View title information, cast, and ratings
+- [Person Detail](/person/nm0000001) - View person filmography and biography
