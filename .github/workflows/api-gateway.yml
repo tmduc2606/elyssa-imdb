@@ -1,0 +1,45 @@
+name: API Gateway
+
+on:
+  push:
+    branches: [main, phase-4]
+    paths:
+      - "web-application/api/**"
+      - ".github/workflows/api-gateway.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "web-application/api/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-application/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create data directory
+        run: mkdir -p ../../data-science/marts/processed
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check app/ tests/ 2>&1 || true
