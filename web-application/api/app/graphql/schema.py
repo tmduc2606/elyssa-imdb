@@ -2,157 +2,63 @@ from __future__ import annotations
 
 import strawberry
 
-
-@strawberry.type
-class Title:
-    id: str
-    primary_title: str
-    original_title: str | None = None
-    title_type: str | None = None
-    start_year: int | None = None
-    end_year: int | None = None
-    runtime_minutes: int | None = None
-    genres: list[str] = strawberry.field(default_factory=list)
-    average_rating: float | None = None
-    num_votes: int | None = None
-    poster_url: str | None = None
-
-
-@strawberry.type
-class PersonSummary:
-    id: str
-    primary_name: str
-    poster_url: str | None = None
-
-
-@strawberry.type
-class CastMember:
-    person: PersonSummary
-    character: str | None = None
-    ordering: int | None = None
-
-
-@strawberry.type
-class CrewMember:
-    person: PersonSummary
-    category: str | None = None
-    job: str | None = None
-
-
-@strawberry.type
-class TitleSummary:
-    id: str
-    primary_title: str
-    average_rating: float | None = None
-    poster_url: str | None = None
-    start_year: int | None = None
-    genres: list[str] = strawberry.field(default_factory=list)
-
-
-@strawberry.type
-class EpisodeContent:
-    season_number: int | None = None
-    episode_number: int | None = None
-    title: TitleSummary | None = None
-
-
-@strawberry.type
-class RatingSnapshot:
-    snapshot_date: str
-    average_rating: float
-    num_votes: int
-
-
-@strawberry.type
-class TitleDetail(Title):
-    cast: list[CastMember] = strawberry.field(default_factory=list)
-    crew: list[CrewMember] = strawberry.field(default_factory=list)
-    episodes: list[EpisodeContent] = strawberry.field(default_factory=list)
-    similar: list[TitleSummary] = strawberry.field(default_factory=list)
-    ratings: list[RatingSnapshot] = strawberry.field(default_factory=list)
-
-
-@strawberry.type
-class Person:
-    id: str
-    primary_name: str
-    birth_year: int | None = None
-    death_year: int | None = None
-    primary_profession: list[str] = strawberry.field(default_factory=list)
-    poster_url: str | None = None
-    known_for_titles: list[TitleSummary] = strawberry.field(default_factory=list)
-    filmography: list[FilmographyEntry] = strawberry.field(default_factory=list)
-    collaborators: list[Collaborator] = strawberry.field(default_factory=list)
-
-
-@strawberry.type
-class FilmographyEntry:
-    title: TitleSummary
-    category: str | None = None
-    character: str | None = None
-    year: int | None = None
-
-
-@strawberry.type
-class Collaborator:
-    person: PersonSummary
-    collaboration_count: int | None = None
-    titles: list[TitleSummary] = strawberry.field(default_factory=list)
-
-
-@strawberry.type
-class PaginatedTitles:
-    items: list[TitleSummary]
-    total: int
-    has_more: bool
-    cursor: str | None = None
+from app.graphql.resolvers import (
+    resolve_browse,
+    resolve_homepage,
+    resolve_person,
+    resolve_search,
+    resolve_title,
+    resolve_title_ratings,
+)
+from app.graphql.types import (
+    HomePageData,
+    PaginatedTitles,
+    Person,
+    RatingSnapshot,
+    TitleDetail,
+)
 
 
 @strawberry.type
 class Query:
     @strawberry.field
-    async def title(self, tconst: str) -> TitleDetail | None:
-        return None
+    def title(self, tconst: str) -> TitleDetail | None:
+        return resolve_title(tconst)
 
     @strawberry.field
-    async def person(self, nconst: str) -> Person | None:
-        return None
+    def person(self, nconst: str) -> Person | None:
+        return resolve_person(nconst)
 
     @strawberry.field
-    async def search(
-        self, query: str, first: int = 50, after: str | None = None
+    def search(
+        self, query: str, first: int | None = 50, after: str | None = None
     ) -> PaginatedTitles | None:
-        return None
+        items = resolve_search(query, first or 50)
+        return PaginatedTitles(items=items, total=len(items), has_more=False, cursor=None)
 
     @strawberry.field
-    async def browse(
+    def browse(
         self,
         genres: list[str] | None = None,
         decade: int | None = None,
         title_type: str | None = None,
         min_rating: float | None = None,
         sort_by: str | None = None,
-        first: int = 100,
+        first: int | None = 100,
         after: str | None = None,
     ) -> PaginatedTitles | None:
-        return None
+        items = resolve_browse(genres, decade, title_type, min_rating, sort_by, first or 100)
+        return PaginatedTitles(items=items, total=len(items), has_more=False, cursor=None)
 
     @strawberry.field
-    async def homepage(self) -> HomePageData | None:
-        return None
+    def homepage(self) -> HomePageData | None:
+        return resolve_homepage()
 
     @strawberry.field
-    async def title_ratings(
+    def title_ratings(
         self, tconst: str, days: int | None = None
     ) -> list[RatingSnapshot] | None:
-        return None
-
-
-@strawberry.type
-class HomePageData:
-    trending: list[TitleSummary]
-    top_rated: list[TitleSummary]
-    featured: list[TitleSummary]
+        return resolve_title_ratings(tconst)
 
 
 schema = strawberry.Schema(query=Query)
