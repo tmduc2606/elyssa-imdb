@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from functools import lru_cache
 
 import duckdb
 
+from app.cache.memory import get_cache
 from app.config import get_settings
 from app.graphql.types import (
     CastMember,
@@ -41,15 +44,21 @@ def _get_con() -> duckdb.DuckDBPyConnection:
 
 
 def resolve_title(tconst: str) -> TitleDetail | None:
+    cache = get_cache()
+    cache_key = f"title:{tconst}"
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return cached_data
     con = _get_con()
     row = con.execute(
         "SELECT * FROM base_features WHERE tconst = ?", [tconst]
     ).fetchone()
     if row is None:
+        cache.set(cache_key, None, ttl=60)
         return None
     cols = [d[0] for d in con.description]
     data = dict(zip(cols, row))
-    return TitleDetail(
+    result = TitleDetail(
         id=data["tconst"],
         primary_title=data["primary_title"],
         original_title=None,
@@ -67,6 +76,8 @@ def resolve_title(tconst: str) -> TitleDetail | None:
         similar=_resolve_similar(tconst, data.get("genre_list", "")),
         ratings=[],
     )
+    cache.set(cache_key, result, ttl=300)
+    return result
 
 
 def _resolve_similar(tconst: str, genre_list: str, limit: int = 12) -> list[TitleSummary]:
@@ -195,6 +206,10 @@ def resolve_browse(
 
 
 def resolve_homepage() -> HomePageData:
+    cache = get_cache()
+    cached_data = cache.get("homepage")
+    if cached_data is not None:
+        return cached_data
     con = _get_con()
     trending = []
     top_rated = []
@@ -235,11 +250,13 @@ def resolve_homepage() -> HomePageData:
             )
         )
 
-    return HomePageData(
+    result = HomePageData(
         trending=trending,
         top_rated=top_rated,
         featured=trending[:10] if trending else [],
     )
+    cache.set("homepage", result, ttl=120)
+    return result
 
 
 def resolve_title_ratings(tconst: str) -> list[RatingSnapshot]:
