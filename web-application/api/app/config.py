@@ -18,7 +18,9 @@ class Settings(BaseSettings):
         Path(__file__).resolve().parents[3] / "data-science" / "marts" / "processed"
     )
 
-    database_url: str = "sqlite:///./data/elyssa.db"
+    database_url: str = "sqlite:///" + str(
+        Path(__file__).resolve().parent.parent / "data" / "elyssa.db"
+    )
     jwt_secret: str = "dev-secret-change-in-production-32bytes!"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 15

@@ -4,6 +4,9 @@
 .env.local
 docker/.env
 
+# Runtime data artifacts (SQLite DB, etc.)
+/data/
+
 # Root docs folder — proposal, references, contracts
 # (Trailing /docs/ matches any depth; prefix / restricts to root)
 /docs/

@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+cache_dir = ".pytest_cache"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
