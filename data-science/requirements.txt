@@ -1,42 +1,42 @@
 # ==============================================================================
-# Elyssa IMDb – Phase 2: Duke's Manual Data Science
-# Requirements compiled from:
-#   - phase_2_duke_manual_feature_engineering.ipynb
-#   - phase_2_duke_manual_modeling.ipynb
-#   - phase_2_duke_manual_analytics.ipynb
+# Elyssa IMDb — Phase 3: Production Data Science
+# Pinned versions from .venv (Python 3.13.13, AMD Athlon 200GE, CPU-only)
 # ==============================================================================
 
 # --- Data & Analytics Core ---
-duckdb>=1.1.0
-pandas>=2.2.0
-numpy>=1.26.0
+duckdb==1.5.4
+pandas==2.3.3
+numpy==2.4.6
 pycountry>=24.6.1
+polars>=1.0.0
+scipy==1.18.0
+PyYAML==6.0.3
 
 # --- Visualisation ---
-matplotlib>=3.8.0
-seaborn>=0.13.0
-plotly>=5.22.0
+matplotlib==3.11.0
+seaborn==0.13.2
+plotly==6.9.0
 
 # --- Machine Learning ---
-scikit-learn>=1.5.0
-xgboost>=2.1.0
-catboost>=1.2.5
-scikit-surprise>=1.1.4
-shap>=0.46.0
-optuna>=4.0.0
+scikit-learn==1.9.0
+xgboost==3.3.0
+catboost==1.2.10
+scikit-surprise==1.1.5
+shap==0.52.0
+optuna==4.9.0
 
 # --- Deep Learning ---
-torch>=2.5.0
-tensorflow>=2.21.0
+torch==2.13.0
+tensorflow==2.21.0
 
 # --- NLP / Transformers ---
-transformers>=4.44.0
+transformers==5.14.1
 
 # --- Experiment Tracking ---
-mlflow>=2.16.0
+mlflow==3.14.0
 
 # --- Serialisation ---
-joblib>=1.4.0
+joblib==1.5.3
 
 # --- Jupyter Lab ---
-ipykernel >= 7.3.0
+ipykernel>=7.3.0

@@ -37,15 +37,15 @@ data-science/AGENTS.md
 data-engineering/skills/
 data-science/skills/
 
-# Agent contracts (but track the portfolio .md files)
+# Agent contracts — excluded from all branches
 data-science/contracts/*
-!data-science/contracts/gold-to-ds.md
-!data-science/contracts/ds-to-web.md
 
 # Web Application agent files
 web-application/AGENTS.md
 web-application/skills/
 web-application/contracts/
+web-application/references/
+web-application/docs/
 
 # DE agent artifacts
 data-engineering/agents/

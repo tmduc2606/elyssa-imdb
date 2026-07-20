@@ -1,6 +1,75 @@
-# Elyssa IMDb | Phase 2 — Exploratory Data Analysis Report
+import json, os, re
+from datetime import datetime
 
-**Generated:** 2026-07-14 18:11:53 UTC
+nb_path = 'C:/Users/Admin/Documents/GitHub/elyssa-imdb/data-science/notebooks/phase_2_duke_manual_eda.ipynb'
+doc_path = 'C:/Users/Admin/Documents/GitHub/elyssa-imdb/data-science/docs/phase2_eda_report.md'
+
+with open(nb_path, encoding='utf-8') as f:
+    nb = json.load(f)
+
+cells = nb['cells']
+
+markdown_cells = []
+output_texts = []
+error_cells = []
+
+for i, cell in enumerate(cells):
+    if cell['cell_type'] == 'markdown':
+        src = ''.join(cell['source'])
+        markdown_cells.append({'idx': i, 'src': src})
+    elif cell['cell_type'] == 'code':
+        src = ''.join(cell['source'])
+        outputs = cell.get('outputs', [])
+        text_outputs = []
+        has_error = False
+        for o in outputs:
+            if o.get('output_type') == 'stream':
+                text = ''.join(o.get('text', []))
+                if text.strip():
+                    text_outputs.append(text.strip())
+            elif o.get('output_type') == 'error':
+                has_error = True
+                text_outputs.append(f"ERROR: {o.get('ename', '')}: {o.get('evalue', '')}")
+            elif o.get('output_type') == 'execute_result':
+                text_data = o.get('data', {}).get('text/plain', [''] if isinstance(o.get('data', {}).get('text/plain', ''), str) else o.get('data', {}).get('text/plain', []))
+                if isinstance(text_data, list):
+                    text_data = ''.join(text_data)
+                if text_data.strip():
+                    text_outputs.append(text_data.strip()[:2000])
+        if has_error:
+            error_cells.append({'idx': i, 'src': src, 'text': text_outputs})
+        output_texts.append({'idx': i, 'src': src, 'text': text_outputs})
+
+# Extract benchmark results
+bench_lines = []
+insight_lines = []
+for ot in output_texts:
+    for t in ot['text']:
+        if 'add_check' in ot['src'] or 'bench' in ot['src'].lower():
+            bench_lines.append(t)
+        if 'insight' in ot['src'].lower() or 'finding' in ot['src'].lower() or 'takeaway' in ot['src'].lower():
+            insight_lines.append(t)
+
+# Find summary sections
+sections = []
+for mc in markdown_cells:
+    src = mc['src']
+    if src.startswith('###') or src.startswith('##'):
+        title = src.replace('#', '').strip().split('\n')[0].strip()
+        sections.append(title)
+
+# Count images generated
+img_count = 0
+for ot in output_texts:
+    for t in ot['text']:
+        if 'Figure saved' in t or 'Saving' in t or 'png' in t.lower():
+            img_count += 1
+
+# Write doc
+with open(doc_path, 'w', encoding='utf-8') as f:
+    f.write(f"""# Elyssa IMDb | Phase 2 — Exploratory Data Analysis Report
+
+**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
 **Analyst:** Duke (formerly Cresht)
 **Dataset:** IMDb Non-Commercial Datasets (2026)
 **Gold Layer:** 6 materialized marts (2 dimensions + 4 facts)
@@ -36,11 +105,16 @@ The EDA operates on the **Gold Layer** of the Elyssa-IMDb medallion pipeline:
 
 Bronze-to-Gold row count verification:
 
-| Check | Result |
-|-------|--------|
-| ========================= COMPREHENSIVE DATA QUALITY BENCHMARK =========================
-         Category               | |
+""")
 
+    # Add benchmark results if found
+    if bench_lines:
+        f.write("| Check | Result |\n|-------|--------|\n")
+        for line in bench_lines[:50]:
+            clean = line.replace('\\N', 'NULL').replace('\\\\N', 'NULL')
+            f.write(f"| {clean[:120]} | |\n")
+    
+    f.write(f"""
 ### 2.2 Intrinsic Quality Checks
 
 The following quality dimensions were validated:
@@ -113,7 +187,17 @@ The notebook generated the following visualizations:
 - Network analysis of director-writer collaborations
 - Heatmaps of genre × rating correlations
 
+""")
 
+    if error_cells:
+        f.write("## 5. Cell Execution Issues\n\n")
+        f.write("| Cell | Error |\n|------|-------|\n")
+        for ec in error_cells[:10]:
+            err_text = '; '.join(ec['text'][:2])
+            f.write(f"| {ec['idx']} | {err_text[:200]} |\n")
+        f.write("\n")
+
+    f.write(f"""
 ---
 
 ## 5. Key Takeaways
@@ -128,3 +212,9 @@ The notebook generated the following visualizations:
 ---
 
 *Report generated from executed EDA notebook. All metrics traceable to code cells in phase_2_duke_manual_eda.ipynb.*
+""")
+
+print(f'EDA report written to: {doc_path}')
+print(f'Total cells: {len(cells)}')
+print(f'Error cells: {len(error_cells)}')
+print(f'Sections found: {len(sections)}')

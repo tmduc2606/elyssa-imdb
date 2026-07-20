@@ -1,0 +1,20 @@
+development:
+  development_mode: true
+  sample_percent: 5
+  optuna_trials: 5
+  max_epochs: 15
+  log_level: DEBUG
+
+staging:
+  development_mode: false
+  sample_percent: 20
+  optuna_trials: 10
+  max_epochs: 30
+  log_level: INFO
+
+production:
+  development_mode: false
+  sample_percent: 100
+  optuna_trials: 20
+  max_epochs: 50
+  log_level: WARNING

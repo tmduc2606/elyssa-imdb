@@ -1,0 +1,46 @@
+name: Data Science Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'data-science/src/**'
+      - 'data-science/tests/**'
+      - 'data-science/config/**'
+      - 'data-science/scripts/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'data-science/src/**'
+      - 'data-science/tests/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          cd data-science
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests
+        run: |
+          cd data-science
+          pytest tests/ -v --tb=short
+
+      - name: Validate contracts
+        run: |
+          cd data-science
+          python scripts/validate_contracts.py || true

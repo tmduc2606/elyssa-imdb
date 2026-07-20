@@ -1,0 +1,95 @@
+project:
+  name: elyssa-imdb
+  version: "3.0.0"
+  hardware:
+    cpu_threads: 4
+    ram_gb: 16
+    gpu: false
+
+paths:
+  marts_dir: "../marts"
+  processed_dir: "../marts/processed"
+  figures_dir: "../figures"
+  contracts_dir: "../contracts"
+
+development_mode:
+  enabled: true
+  sample_percent: 5
+  random_seed: 42
+
+temporal_splits:
+  train_year_max: 2014
+  val_year_min: 2015
+  val_year_max: 2018
+  test_year_min: 2019
+
+features:
+  tabular_columns:
+    - start_year
+    - runtime_minutes
+    - num_persons
+    - unique_persons
+    - actor_count
+    - actress_count
+    - director_count
+    - writer_count
+    - producer_count
+    - composer_count
+    - editor_count
+    - cinematographer_count
+    - self_count
+    - series_episode_count
+    - series_avg_episode_rating
+    - min_season
+    - max_season
+    - genre_cnt
+    - avg_genre_year_rating
+    - avg_genre_year_votes
+    - avg_genre_year_popularity
+    - dir_avg_career_len
+    - dir_max_career_len
+    - dir_avg_experience
+    - dir_avg_recent_activity
+    - wri_avg_career_len
+    - wri_max_career_len
+    - wri_avg_experience
+    - wri_avg_recent_activity
+  text_embedding_model: distilbert-base-uncased
+  text_embedding_dim: 768
+  rating_excluded_features:
+    - average_rating
+    - num_votes
+
+models:
+  genre:
+    gmu:
+      hidden_dim: 256
+      dropout: 0.3
+      optuna_trials: 5
+      max_epochs: 30
+      patience: 5
+    bilstm:
+      embedding_dim: 128
+      lstm_units: 64
+      max_epochs: 20
+  rating:
+    catboost:
+      optuna_trials: 5
+      max_iterations: 400
+      max_depth: 6
+      early_stopping_rounds: 50
+  recommender:
+    svd_factors: 100
+    ncf_embedding_dim: 64
+    ncf_layers: [64, 32, 16]
+
+evaluation:
+  quality_gates:
+    rating_rmse_max: 0.55
+    genre_macro_f1_min: 0.60
+    inference_latency_max_ms: 100
+    cold_start_precision_min: 0.01
+
+mlflow:
+  tracking_uri: "sqlite:///mlflow.db"
+  experiment_prefix: "elyssa_phase3"
