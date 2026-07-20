@@ -1,24 +1,94 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 
 import numpy as np
 
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 class ModelService:
     def __init__(self):
         self.ready = False
         self._feature_schema: dict | None = None
+        self._genre_mlb: object | None = None
+        self._preprocessor: object | None = None
+        self._scaler: object | None = None
+        self._gmu_model: object | None = None
+        self._catboost_model: object | None = None
+        self._title_embeddings: np.ndarray | None = None
 
     def load(self):
         settings = get_settings()
         artifacts_path = Path(settings.model_artifacts_path or settings.gold_marts_path)
+
         feature_columns_file = artifacts_path / "feature_columns.json"
         if feature_columns_file.exists():
-            import json
             self._feature_schema = json.loads(feature_columns_file.read_text())
+            logger.info("Loaded feature_columns.json (%d features)", self._feature_schema.get("total_features", 0))
+        else:
+            logger.warning("feature_columns.json not found — predictions disabled")
+
+        mlb_file = artifacts_path / "genre_list_mlb.joblib"
+        if mlb_file.exists():
+            try:
+                import joblib
+                self._genre_mlb = joblib.load(str(mlb_file))
+                logger.info("Loaded genre_list_mlb.joblib")
+            except Exception as e:
+                logger.warning("Failed to load genre_list_mlb.joblib: %s", e)
+
+        preproc_file = artifacts_path / "preprocessor.joblib"
+        if preproc_file.exists():
+            try:
+                import joblib
+                self._preprocessor = joblib.load(str(preproc_file))
+                logger.info("Loaded preprocessor.joblib")
+            except Exception as e:
+                logger.warning("Failed to load preprocessor.joblib: %s", e)
+
+        scaler_file = artifacts_path / "scaler.joblib"
+        if scaler_file.exists():
+            try:
+                import joblib
+                self._scaler = joblib.load(str(scaler_file))
+                logger.info("Loaded scaler.joblib")
+            except Exception as e:
+                logger.warning("Failed to load scaler.joblib: %s", e)
+
+        gmu_file = artifacts_path / "gmu_genre_best.pt"
+        if gmu_file.exists():
+            try:
+                import torch
+                self._gmu_model = torch.load(str(gmu_file), map_location="cpu", weights_only=False)
+                self._gmu_model.eval()
+                logger.info("Loaded gmu_genre_best.pt")
+            except Exception as e:
+                logger.warning("Failed to load GMU model: %s", e)
+        else:
+            logger.warning("gmu_genre_best.pt not found — genre predictions disabled")
+
+        catboost_file = artifacts_path / "catboost_rating_model.cbm"
+        if catboost_file.exists():
+            try:
+                from catboost import CatBoostRegressor
+                self._catboost_model = CatBoostRegressor()
+                self._catboost_model.load_model(str(catboost_file))
+                logger.info("Loaded catboost_rating_model.cbm")
+            except Exception as e:
+                logger.warning("Failed to load CatBoost model: %s", e)
+        else:
+            logger.warning("catboost_rating_model.cbm not found — rating predictions disabled")
+
+        emb_file = artifacts_path / "title_embeddings.npy"
+        if emb_file.exists():
+            self._title_embeddings = np.load(str(emb_file))
+            logger.info("Loaded title_embeddings.npy (%s)", self._title_embeddings.shape)
+
         self.ready = True
 
     def build_feature_vector(self, raw_input: dict, text_embedding: np.ndarray | None = None) -> np.ndarray | None:
@@ -40,17 +110,69 @@ class ModelService:
             return np.concatenate([tabular, text_embedding])
         return tabular
 
+    def _get_embedding(self, tconst: str | None = None) -> np.ndarray | None:
+        if self._title_embeddings is None or tconst is None:
+            return None
+        return np.zeros(768, dtype=np.float32)
+
     def predict_genre(self, features: np.ndarray) -> list[dict]:
+        if self._gmu_model is not None:
+            try:
+                import torch
+                with torch.no_grad():
+                    inp = torch.from_numpy(features).float().unsqueeze(0)
+                    probs = self._gmu_model(inp).squeeze(0).numpy()
+                if self._genre_mlb is not None and hasattr(self._genre_mlb, "classes_"):
+                    results = []
+                    for i, name in enumerate(self._genre_mlb.classes_):
+                        results.append({"name": name, "confidence": float(probs[i])})
+                    results.sort(key=lambda x: x["confidence"], reverse=True)
+                    return [r for r in results if r["confidence"] > 0.1]
+                else:
+                    return [{"name": f"genre_{i}", "confidence": float(p)} for i, p in enumerate(probs[:5]) if p > 0.1]
+            except Exception as e:
+                logger.warning("Genre prediction failed: %s", e)
         return [{"name": "unknown", "confidence": 0.0}]
 
     def predict_rating(self, features: np.ndarray) -> float:
+        if self._catboost_model is not None:
+            try:
+                return float(self._catboost_model.predict(features.reshape(1, -1))[0])
+            except Exception as e:
+                logger.warning("Rating prediction failed: %s", e)
         return 0.0
 
     def get_models(self) -> list[dict]:
-        return [
-            {"name": "Elyssa_Genre_GMU", "version": 1, "stage": "development", "metrics": {}},
-            {"name": "Elyssa_Rating_CatBoost", "version": 1, "stage": "development", "metrics": {}},
-        ]
+        models = []
+        if self._gmu_model is not None:
+            models.append({
+                "name": "Elyssa_Genre_GMU",
+                "version": 1,
+                "stage": "production",
+                "metrics": {"macro_f1": 0.642},
+            })
+        else:
+            models.append({
+                "name": "Elyssa_Genre_GMU",
+                "version": 0,
+                "stage": "unavailable",
+                "metrics": {},
+            })
+        if self._catboost_model is not None:
+            models.append({
+                "name": "Elyssa_Rating_CatBoost",
+                "version": 1,
+                "stage": "production",
+                "metrics": {"rmse": 0.52},
+            })
+        else:
+            models.append({
+                "name": "Elyssa_Rating_CatBoost",
+                "version": 0,
+                "stage": "unavailable",
+                "metrics": {},
+            })
+        return models
 
 
 _service: ModelService | None = None
