@@ -37,8 +37,10 @@ data-science/AGENTS.md
 data-engineering/skills/
 data-science/skills/
 
-# Agent contracts
-data-science/contracts/
+# Agent contracts (but track the portfolio .md files)
+data-science/contracts/*
+!data-science/contracts/gold-to-ds.md
+!data-science/contracts/ds-to-web.md
 
 # Web Application agent files
 web-application/AGENTS.md
@@ -72,11 +74,20 @@ ENV/
 # Jupyter
 .ipynb_checkpoints/
 data-science/figures/
-data-science/scripts/
 
-# Data Science docs — only track the EDA report
+# Data Science docs — only track portfolio docs
 data-science/docs/*
-!data-science/docs/phase2_eda_report.md
+!data-science/docs/phase3_overhaul_plan.md
+!data-science/docs/API.md
+!data-science/docs/implementation_plan.md
+!data-science/docs/notebook_overhaul_plan.md
+!data-science/docs/PHASE2_DUKE_GUIDE.md
+!data-science/docs/sample_scaling_plan.md
+
+# Track Python scripts (not parquet exports) in data-science/scripts/
+data-science/scripts/*.parquet
+!data-science/scripts/*.py
+!data-science/scripts/__init__.py
 
 # Testing / Linting
 .pytest_cache/
