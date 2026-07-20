@@ -166,6 +166,31 @@ services:
         max-size: "100m"
         max-file: "5"
 
+  # ─── Web Application API — FastAPI + GraphQL ─────────────────
+  api:
+    image: elyssa-api:latest
+    build:
+      context: web-application/api
+      dockerfile: Dockerfile
+    container_name: elyssa-api
+    environment:
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_DEBUG: "false"
+      ELYSSA_REDIS_ENABLED: "false"
+      ELYSSA_RATE_LIMIT_PER_MINUTE: "200"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data-science/marts/processed:/data/marts/processed:ro
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
 volumes:
   pg_data:
     name: elyssa_pg_data
