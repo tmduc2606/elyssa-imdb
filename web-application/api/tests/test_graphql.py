@@ -37,6 +37,16 @@ def test_graphql_homepage():
     assert len(data["featured"]) > 0
 
 
+def test_graphql_top_level_trending():
+    q = '{ trending(limit: 5) { id primaryTitle titleType averageRating numVotes } }'
+    r = client.post("/graphql", json={"query": q})
+    assert r.status_code == 200
+    data = r.json()["data"]["trending"]
+    assert len(data) == 5
+    assert "titleType" in data[0]
+    assert "numVotes" in data[0]
+
+
 def test_graphql_search():
     q = '{ search(query: "Star") { items { id primaryTitle averageRating } total } }'
     r = client.post("/graphql", json={"query": q})

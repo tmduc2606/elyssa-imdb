@@ -175,13 +175,36 @@ services:
     container_name: elyssa-api
     environment:
       ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
       ELYSSA_DEBUG: "false"
-      ELYSSA_REDIS_ENABLED: "false"
+      ELYSSA_REDIS_ENABLED: "true"
+      ELYSSA_REDIS_URL: redis://redis:6379/0
       ELYSSA_RATE_LIMIT_PER_MINUTE: "200"
     ports:
       - "8000:8000"
     volumes:
       - ./data-science/marts/processed:/data/marts/processed:ro
+      - api_data:/data
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ─── Redis Cache ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: elyssa-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     networks:
       - elyssa-net
     restart: unless-stopped
@@ -202,6 +225,10 @@ volumes:
     name: elyssa_rustfs_data
   airflow_data:
     name: elyssa_airflow_data
+  redis_data:
+    name: elyssa_redis_data
+  api_data:
+    name: elyssa_api_data
 
 networks:
   elyssa-net:

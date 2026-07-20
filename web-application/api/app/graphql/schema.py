@@ -9,6 +9,9 @@ from app.graphql.resolvers import (
     resolve_search,
     resolve_title,
     resolve_title_ratings,
+    resolve_trending,
+    resolve_top_rated,
+    resolve_featured,
 )
 from app.graphql.types import (
     HomePageData,
@@ -16,6 +19,7 @@ from app.graphql.types import (
     Person,
     RatingSnapshot,
     TitleDetail,
+    TitleSummary,
 )
 
 
@@ -55,9 +59,21 @@ class Query:
         return resolve_homepage()
 
     @strawberry.field
+    def trending(self, limit: int | None = 20) -> list[TitleSummary]:
+        return resolve_trending(limit or 20)
+
+    @strawberry.field
+    def top_rated(self, limit: int | None = 20) -> list[TitleSummary]:
+        return resolve_top_rated(limit or 20)
+
+    @strawberry.field
+    def featured(self, limit: int | None = 10) -> list[TitleSummary]:
+        return resolve_featured(limit or 10)
+
+    @strawberry.field
     def title_ratings(
         self, tconst: str, days: int | None = None
-    ) -> list[RatingSnapshot] | None:
+    ) -> list[RatingSnapshot]:
         return resolve_title_ratings(tconst)
 
 

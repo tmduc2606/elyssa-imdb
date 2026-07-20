@@ -89,7 +89,7 @@ def _resolve_similar(tconst: str, genre_list: str, limit: int = 12) -> list[Titl
         f"genre_list ILIKE '%{g}%'" for g in genres[:3]
     )
     sql = f"""
-        SELECT tconst, primary_title, average_rating, start_year, genre_list
+        SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
         FROM base_features
         WHERE tconst != ?
           AND ({genre_conditions})
@@ -102,11 +102,9 @@ def _resolve_similar(tconst: str, genre_list: str, limit: int = 12) -> list[Titl
     for r in rows:
         results.append(
             TitleSummary(
-                id=r[0],
-                primary_title=r[1],
-                average_rating=r[2],
-                start_year=r[3],
-                genres=_genres_list(r[4]),
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
             )
         )
     return results
@@ -120,7 +118,7 @@ def resolve_search(query: str, first: int = 50) -> list[TitleSummary]:
     con = _get_con()
     like = f"%{query}%"
     rows = con.execute(
-        """SELECT tconst, primary_title, average_rating, start_year, genre_list
+        """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
            FROM base_features
            WHERE primary_title ILIKE ?
            ORDER BY num_votes DESC
@@ -131,11 +129,9 @@ def resolve_search(query: str, first: int = 50) -> list[TitleSummary]:
     for r in rows:
         results.append(
             TitleSummary(
-                id=r[0],
-                primary_title=r[1],
-                average_rating=r[2],
-                start_year=r[3],
-                genres=_genres_list(r[4]),
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
             )
         )
     return results
@@ -184,7 +180,7 @@ def resolve_browse(
     elif sort_by == "title":
         sort_col = "primary_title ASC"
 
-    sql = f"""SELECT tconst, primary_title, average_rating, start_year, genre_list
+    sql = f"""SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
               FROM base_features {where}
               ORDER BY {sort_col}
               LIMIT ?"""
@@ -195,14 +191,70 @@ def resolve_browse(
     for r in rows:
         results.append(
             TitleSummary(
-                id=r[0],
-                primary_title=r[1],
-                average_rating=r[2],
-                start_year=r[3],
-                genres=_genres_list(r[4]),
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
             )
         )
     return results
+
+
+def resolve_trending(limit: int = 20) -> list[TitleSummary]:
+    cache = get_cache()
+    cached_data = cache.get(f"trending:{limit}")
+    if cached_data is not None:
+        return cached_data
+    con = _get_con()
+    rows = con.execute(
+        """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
+           FROM base_features
+           WHERE average_rating IS NOT NULL AND num_votes > 100
+           ORDER BY num_votes DESC
+           LIMIT ?""",
+        [limit],
+    ).fetchall()
+    results = []
+    for r in rows:
+        results.append(
+            TitleSummary(
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
+            )
+        )
+    cache.set(f"trending:{limit}", results, ttl=120)
+    return results
+
+
+def resolve_top_rated(limit: int = 20) -> list[TitleSummary]:
+    cache = get_cache()
+    cached_data = cache.get(f"top_rated:{limit}")
+    if cached_data is not None:
+        return cached_data
+    con = _get_con()
+    rows = con.execute(
+        """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
+           FROM base_features
+           WHERE average_rating IS NOT NULL AND num_votes > 1000
+           ORDER BY average_rating DESC
+           LIMIT ?""",
+        [limit],
+    ).fetchall()
+    results = []
+    for r in rows:
+        results.append(
+            TitleSummary(
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
+            )
+        )
+    cache.set(f"top_rated:{limit}", results, ttl=120)
+    return results
+
+
+def resolve_featured(limit: int = 10) -> list[TitleSummary]:
+    return resolve_trending(limit)[:limit]
 
 
 def resolve_homepage() -> HomePageData:
@@ -215,7 +267,7 @@ def resolve_homepage() -> HomePageData:
     top_rated = []
 
     rows = con.execute(
-        """SELECT tconst, primary_title, average_rating, start_year, genre_list
+        """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
            FROM base_features
            WHERE average_rating IS NOT NULL AND num_votes > 100
            ORDER BY num_votes DESC
@@ -224,16 +276,14 @@ def resolve_homepage() -> HomePageData:
     for r in rows:
         trending.append(
             TitleSummary(
-                id=r[0],
-                primary_title=r[1],
-                average_rating=r[2],
-                start_year=r[3],
-                genres=_genres_list(r[4]),
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
             )
         )
 
     rows = con.execute(
-        """SELECT tconst, primary_title, average_rating, start_year, genre_list
+        """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
            FROM base_features
            WHERE average_rating IS NOT NULL AND num_votes > 1000
            ORDER BY average_rating DESC
@@ -242,11 +292,9 @@ def resolve_homepage() -> HomePageData:
     for r in rows:
         top_rated.append(
             TitleSummary(
-                id=r[0],
-                primary_title=r[1],
-                average_rating=r[2],
-                start_year=r[3],
-                genres=_genres_list(r[4]),
+                id=r[0], primary_title=r[1], title_type=r[2],
+                average_rating=r[3], start_year=r[4], num_votes=r[5],
+                genres=_genres_list(r[6]),
             )
         )
 

@@ -1,44 +1,50 @@
 from __future__ import annotations
 
+import uuid
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 client = TestClient(app)
 
+TEST_EMAIL = f"test_{uuid.uuid4().hex[:8]}@example.com"
+TEST_PASSWORD = "testpass123"
+TEST_DISPLAY = "Test User"
+
 
 def test_register():
     r = client.post("/auth/register", json={
-        "email": "testuser@example.com",
-        "password": "testpass123",
-        "display_name": "Test User",
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD,
+        "display_name": TEST_DISPLAY,
     })
     assert r.status_code == 200, r.text[:200]
     data = r.json()
-    assert data["user"]["email"] == "testuser@example.com"
+    assert data["user"]["email"] == TEST_EMAIL
+    assert "accessToken" in data
 
 
 def test_register_duplicate():
     r = client.post("/auth/register", json={
-        "email": "testuser@example.com",
-        "password": "testpass123",
-        "display_name": "Test User",
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD,
+        "display_name": TEST_DISPLAY,
     })
     assert r.status_code == 409
 
 
 def test_login():
     r = client.post("/auth/login", json={
-        "email": "testuser@example.com",
-        "password": "testpass123",
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD,
     })
     assert r.status_code == 200, r.text[:200]
-    assert "access_token" in r.json()
+    assert "accessToken" in r.json()
 
 
 def test_login_bad_password():
     r = client.post("/auth/login", json={
-        "email": "testuser@example.com",
+        "email": TEST_EMAIL,
         "password": "wrongpass",
     })
     assert r.status_code == 401
@@ -46,13 +52,13 @@ def test_login_bad_password():
 
 def test_me():
     r = client.post("/auth/login", json={
-        "email": "testuser@example.com",
-        "password": "testpass123",
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD,
     })
-    token = r.json()["access_token"]
+    token = r.json()["accessToken"]
     r2 = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200
-    assert r2.json()["email"] == "testuser@example.com"
+    assert r2.json()["email"] == TEST_EMAIL
 
 
 def test_me_unauthorized():
@@ -62,10 +68,10 @@ def test_me_unauthorized():
 
 def test_watchlist():
     r = client.post("/auth/login", json={
-        "email": "testuser@example.com",
-        "password": "testpass123",
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD,
     })
-    token = r.json()["access_token"]
+    token = r.json()["accessToken"]
     headers = {"Authorization": f"Bearer {token}"}
 
     r2 = client.get("/auth/watchlist", headers=headers)

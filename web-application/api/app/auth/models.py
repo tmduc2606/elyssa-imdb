@@ -1,11 +1,46 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 import bcrypt
 
-_in_memory_users: dict[str, dict] = {}
-_in_memory_watchlists: dict[str, list[dict]] = {}
+from app.config import get_settings
+
+_local = threading.local()
+
+
+def _get_db() -> sqlite3.Connection:
+    if not hasattr(_local, "conn") or _local.conn is None:
+        settings = get_settings()
+        db_path = settings.database_url.replace("sqlite:///", "")
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        _local.conn = sqlite3.connect(db_path)
+        _local.conn.row_factory = sqlite3.Row
+        _local.conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        _local.conn.execute("""
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                tconst TEXT NOT NULL,
+                title_data TEXT DEFAULT '{}',
+                added_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, tconst)
+            )
+        """)
+        _local.conn.commit()
+    return _local.conn
 
 
 def hash_password(password: str) -> str:
@@ -17,52 +52,88 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_user(email: str, password: str, display_name: str) -> dict:
-    user_id = f"user_{len(_in_memory_users) + 1}"
+    db = _get_db()
+    existing = db.execute("SELECT id FROM users WHERE email = ?", [email]).fetchone()
+    if existing:
+        raise ValueError("Email already registered")
+    import uuid
+    user_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
-    user = {
-        "id": user_id,
-        "email": email,
-        "display_name": display_name,
-        "password_hash": hash_password(password),
-        "created_at": now,
-    }
-    _in_memory_users[email] = user
-    _in_memory_watchlists[user_id] = []
-    return {k: v for k, v in user.items() if k != "password_hash"}
+    pw_hash = hash_password(password)
+    db.execute(
+        "INSERT INTO users (id, email, display_name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+        [user_id, email, display_name, pw_hash, now],
+    )
+    db.commit()
+    return {"id": user_id, "email": email, "display_name": display_name, "created_at": now}
 
 
 def get_user_by_email(email: str) -> dict | None:
-    return _in_memory_users.get(email)
+    db = _get_db()
+    row = db.execute(
+        "SELECT id, email, display_name, password_hash, created_at FROM users WHERE email = ?",
+        [email],
+    ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
 
 
 def get_user_by_id(user_id: str) -> dict | None:
-    for u in _in_memory_users.values():
-        if u["id"] == user_id:
-            return {k: v for k, v in u.items() if k != "password_hash"}
-    return None
+    db = _get_db()
+    row = db.execute(
+        "SELECT id, email, display_name, created_at FROM users WHERE id = ?",
+        [user_id],
+    ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
 
 
 def get_watchlist(user_id: str) -> list[dict]:
-    return _in_memory_watchlists.get(user_id, [])
+    db = _get_db()
+    import json
+    rows = db.execute(
+        "SELECT id, tconst, title_data, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
+        [user_id],
+    ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["title"] = json.loads(d.pop("title_data"))
+        except (json.JSONDecodeError, TypeError):
+            d["title"] = {}
+        result.append(d)
+    return result
 
 
 def add_to_watchlist(user_id: str, tconst: str, title: dict | None = None) -> dict:
-    wl = _in_memory_watchlists.setdefault(user_id, [])
-    existing = next((x for x in wl if x["tconst"] == tconst), None)
+    db = _get_db()
+    import json
+    import uuid
+    existing = db.execute(
+        "SELECT id, tconst, title_data, added_at FROM watchlist WHERE user_id = ? AND tconst = ?",
+        [user_id, tconst],
+    ).fetchone()
     if existing:
-        return existing
-    entry = {
-        "id": f"wl_{len(wl) + 1}",
-        "tconst": tconst,
-        "title": title or {},
-        "added_at": datetime.now(timezone.utc).isoformat(),
-    }
-    wl.append(entry)
-    return entry
+        return dict(existing)
+    entry_id = str(uuid.uuid4())[:12]
+    now = datetime.now(timezone.utc).isoformat()
+    title_data = json.dumps(title or {})
+    db.execute(
+        "INSERT INTO watchlist (id, user_id, tconst, title_data, added_at) VALUES (?, ?, ?, ?, ?)",
+        [entry_id, user_id, tconst, title_data, now],
+    )
+    db.commit()
+    return {"id": entry_id, "tconst": tconst, "title": title or {}, "added_at": now}
 
 
 def remove_from_watchlist(user_id: str, entry_id: str) -> bool:
-    wl = _in_memory_watchlists.get(user_id, [])
-    before = len(wl)
-    _in_memory_watchlists[user_id] = [x for x in wl if x["id"] != entry_id]
-    return len(_in_memory_watchlists[user_id]) < before
+    db = _get_db()
+    cur = db.execute(
+        "DELETE FROM watchlist WHERE user_id = ? AND id = ?",
+        [user_id, entry_id],
+    )
+    db.commit()
+    return cur.rowcount > 0

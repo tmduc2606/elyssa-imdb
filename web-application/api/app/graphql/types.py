@@ -30,6 +30,8 @@ class CastMember:
     person: PersonSummary
     character: str | None = None
     ordering: int | None = None
+    category: str | None = None
+    job: str | None = None
 
 
 @strawberry.type
@@ -43,9 +45,11 @@ class CrewMember:
 class TitleSummary:
     id: str
     primary_title: str
-    average_rating: float | None = None
-    poster_url: str | None = None
+    title_type: str | None = None
     start_year: int | None = None
+    average_rating: float | None = None
+    num_votes: int | None = None
+    poster_url: str | None = None
     genres: list[str] = strawberry.field(default_factory=list)
 
 

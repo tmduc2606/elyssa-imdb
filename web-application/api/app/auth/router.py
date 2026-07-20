@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from app.auth.models import (
     add_to_watchlist,
@@ -20,7 +20,11 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     email: str
     password: str
-    display_name: str
+    display_name: str | None = None
+    displayName: str | None = None
+
+    def get_display_name(self) -> str:
+        return self.displayName or self.display_name or self.email.split("@")[0]
 
 
 class LoginRequest(BaseModel):
@@ -35,9 +39,11 @@ class WatchlistAddRequest(BaseModel):
 
 @router.post("/register")
 async def register(body: RegisterRequest, response: Response):
-    if get_user_by_email(body.email):
+    display_name = body.get_display_name()
+    try:
+        user = create_user(body.email, body.password, display_name)
+    except ValueError:
         raise HTTPException(409, "Email already registered")
-    user = create_user(body.email, body.password, body.display_name)
     access_token = create_access_token(user["id"])
     refresh_token = create_refresh_token(user["id"])
     response.set_cookie(
@@ -48,7 +54,7 @@ async def register(body: RegisterRequest, response: Response):
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
-    return {"access_token": access_token, "user": user}
+    return {"accessToken": access_token, "user": user}
 
 
 @router.post("/login")
@@ -66,11 +72,17 @@ async def login(body: LoginRequest, response: Response):
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
-    return {"access_token": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
+    return {"accessToken": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
 
 
 @router.post("/logout")
 async def logout(response: Response):
+    response.delete_cookie("refresh_token")
+    return {"ok": True}
+
+
+@router.get("/logout")
+async def logout_get(response: Response):
     response.delete_cookie("refresh_token")
     return {"ok": True}
 
