@@ -37,8 +37,8 @@ class Query:
     def search(
         self, query: str, first: int | None = 50, after: str | None = None
     ) -> PaginatedTitles | None:
-        items = resolve_search(query, first or 50)
-        return PaginatedTitles(items=items, total=len(items), has_more=False, cursor=None)
+        items, total, has_more, cursor = resolve_search(query, first or 50, after)
+        return PaginatedTitles(items=items, total=total, has_more=has_more, cursor=cursor)
 
     @strawberry.field
     def browse(
@@ -51,8 +51,10 @@ class Query:
         first: int | None = 100,
         after: str | None = None,
     ) -> PaginatedTitles | None:
-        items = resolve_browse(genres, decade, title_type, min_rating, sort_by, first or 100)
-        return PaginatedTitles(items=items, total=len(items), has_more=False, cursor=None)
+        items, total, has_more, cursor = resolve_browse(
+            genres, decade, title_type, min_rating, sort_by, first or 100, after
+        )
+        return PaginatedTitles(items=items, total=total, has_more=has_more, cursor=cursor)
 
     @strawberry.field
     def homepage(self) -> HomePageData | None:

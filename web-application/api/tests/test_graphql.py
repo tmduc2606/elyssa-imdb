@@ -75,10 +75,57 @@ def test_graphql_browse():
 
 
 def test_graphql_person():
-    q = '{ person(nconst: "nm0000001") { id primaryName } }'
+    q = """{ person(nconst: "nm0000108") { id primaryName birthYear deathYear primaryProfession knownForTitles { id primaryTitle } } }"""
+    r = client.post("/graphql", json={"query": q})
+    assert r.status_code == 200
+    data = r.json()["data"]["person"]
+    assert data is not None
+    assert data["id"] == "nm0000108"
+    assert len(data["primaryName"]) > 0
+
+
+def test_graphql_person_not_found():
+    q = '{ person(nconst: "nm9999999") { id primaryName } }'
     r = client.post("/graphql", json={"query": q})
     assert r.status_code == 200
     assert r.json()["data"]["person"] is None
+
+
+def test_graphql_title_cast_crew():
+    q = """{ title(tconst: "tt28262612") { id primaryTitle cast(limit: 5) { person { id primaryName } character category ordering } crew { person { id primaryName } category job } } }"""
+    r = client.post("/graphql", json={"query": q})
+    assert r.status_code == 200
+    data = r.json()["data"]["title"]
+    assert data is not None
+    assert data["id"] == "tt28262612"
+
+
+def test_graphql_title_ratings():
+    q = '{ titleRatings(tconst: "tt28262612") { snapshotDate averageRating numVotes } }'
+    r = client.post("/graphql", json={"query": q})
+    assert r.status_code == 200
+    data = r.json()["data"]["titleRatings"]
+    assert isinstance(data, list)
+
+
+def test_graphql_search_pagination():
+    q = '{ search(query: "Star", first: 3) { items { id primaryTitle } total hasMore cursor } }'
+    r = client.post("/graphql", json={"query": q})
+    assert r.status_code == 200
+    data = r.json()["data"]["search"]
+    assert data["total"] > 0
+    assert len(data["items"]) > 0
+    if data["hasMore"]:
+        assert data["cursor"] is not None
+
+
+def test_graphql_browse_pagination():
+    q = '{ browse(genres: ["Action"], first: 3) { items { id primaryTitle } total hasMore cursor } }'
+    r = client.post("/graphql", json={"query": q})
+    assert r.status_code == 200
+    data = r.json()["data"]["browse"]
+    assert data["total"] > 0
+    assert len(data["items"]) <= 3
 
 
 def test_rate_limit_headers():
