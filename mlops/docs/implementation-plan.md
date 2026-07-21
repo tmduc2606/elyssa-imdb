@@ -381,22 +381,37 @@ CMD ["nginx", "-g", "daemon off;"]
 
 ```
 mlops/infra/
+├── backend.tf                  # S3 state backend + provider config
 ├── envs/
 │   ├── dev/
+│   │   ├── main.tf             # Module calls (dev config)
+│   │   ├── variables.tf        # Input variables
+│   │   └── outputs.tf          # Output values
+│   ├── staging/
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   └── outputs.tf
-│   ├── staging/
 │   └── prod/
+│       ├── main.tf
+│       ├── variables.tf
+│       └── outputs.tf
 ├── modules/
 │   ├── compute/
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
+│   │   ├── main.tf             # ECS cluster, task definitions, services
+│   │   ├── variables.tf        # environment, instance_type, desired_count, vpc_id, subnet_ids
+│   │   └── outputs.tf          # cluster_id, api_dns_name, mlflow_dns_name
 │   ├── storage/
+│   │   ├── main.tf             # S3 buckets (gold, mlflow, backups)
+│   │   ├── variables.tf        # environment, lifecycle_rules_enabled
+│   │   └── outputs.tf          # gold_marts_bucket, mlflow_artifacts_bucket, backup_bucket_name
 │   ├── networking/
+│   │   ├── main.tf             # VPC, subnets, IGW, route tables
+│   │   ├── variables.tf        # environment, vpc_cidr
+│   │   └── outputs.tf          # vpc_id, public_subnet_ids, private_subnet_ids
 │   └── monitoring/
-└── backend.tf
+│       ├── main.tf             # CloudWatch log groups, alarms
+│       ├── variables.tf        # environment, alerting_enabled
+│       └── outputs.tf          # cloudwatch_log_group_*, grafana_dns_name
 ```
 
 ### 5.2 Core Resources (AWS Example)
@@ -989,45 +1004,75 @@ networks:
 ## Appendix A: File Inventory
 
 ```
-mlops/
-├── README.md                          # Master documentation
-├── docs/
-│   └── implementation-plan.md         # This file
-├── docker-compose.yml                 # Full dev environment
-├── docker/
-│   ├── Dockerfile.api                 # Updated API Dockerfile
-│   ├── Dockerfile.frontend            # Frontend Dockerfile
-│   ├── Dockerfile.model               # Model serving Dockerfile
-│   └── nginx.conf                     # Frontend nginx config
-├── infra/
-│   ├── envs/
-│   │   ├── dev/main.tf
-│   │   ├── staging/main.tf
-│   │   └── prod/main.tf
-│   └── modules/
-│       ├── compute/main.tf
-│       ├── storage/main.tf
-│       ├── networking/main.tf
-│       └── monitoring/main.tf
-├── airflow/
-│   └── dags/
-│       ├── retraining_pipeline.py     # Weekly retraining
-│       └── drift_detection.py         # Drift monitoring
-├── monitoring/
-│   ├── prometheus/
-│   │   ├── prometheus.yml
-│   │   └── alert-rules.yml
-│   └── grafana/
-│       └── dashboards/
-│           ├── pipeline-overview.json
-│           └── model-performance.json
-├── runbooks/
-│   ├── node-failure.md
-│   ├── model-rollback.md
-│   ├── database-restore.md
-│   └── quarterly-drill.md
-└── checklists/
-    ├── mlops-1-to-5.md
-    ├── mlops-6-to-10.md
-    └── mlops-11-to-15.md
+elyssa-imdb/
+├── .github/workflows/
+│   ├── ci-de.yml                 # Data Engineering CI
+│   ├── ci-ds.yml                 # Data Science CI
+│   ├── ci-web.yml                # Web Application CI
+│   ├── cd.yml                    # Continuous Deployment
+│   └── trivy-scan.yml            # Security scanning
+├── data-science/
+│   ├── contracts/
+│   │   ├── gold-to-ds.md         # DE → DS contract
+│   │   └── ds-to-web.md          # DS → Web contract
+│   └── scripts/
+│       └── feature_statistics.py # Drift baseline generator
+├── web-application/
+│   ├── contracts/
+│   │   ├── gold-to-api.md        # DE → API contract
+│   │   └── api-to-frontend.md    # API → Frontend contract
+│   └── api/requirements.txt      # +structlog, +prometheus-instrumentator
+├── mlops/
+│   ├── README.md                 # Master MLOps documentation
+│   ├── docs/
+│   │   └── implementation-plan.md
+│   ├── docker-compose.yml        # Full dev environment
+│   ├── docker/
+│   │   ├── Dockerfile.api        # API (multi-stage, non-root)
+│   │   ├── Dockerfile.frontend   # React SPA (multi-stage, nginx)
+│   │   ├── Dockerfile.model      # Model serving (PyTorch/CatBoost)
+│   │   └── nginx.conf            # Frontend reverse proxy
+│   ├── infra/
+│   │   ├── backend.tf            # Terraform state backend
+│   │   ├── envs/
+│   │   │   ├── dev/              # main.tf + variables.tf + outputs.tf
+│   │   │   ├── staging/          # main.tf + variables.tf + outputs.tf
+│   │   │   └── prod/             # main.tf + variables.tf + outputs.tf
+│   │   └── modules/
+│   │       ├── compute/          # main.tf + variables.tf + outputs.tf
+│   │       ├── storage/          # main.tf + variables.tf + outputs.tf
+│   │       ├── networking/       # main.tf + variables.tf + outputs.tf
+│   │       └── monitoring/       # main.tf + variables.tf + outputs.tf
+│   ├── airflow/
+│   │   └── dags/
+│   │       ├── retraining_pipeline.py  # Weekly retraining
+│   │       └── drift_detection.py      # Daily drift monitoring
+│   ├── drills/
+│   │   ├── surge.py              # 200% data surge test
+│   │   ├── adversarial.py        # Malformed request test
+│   │   └── latency.py            # p95 latency baseline
+│   ├── monitoring/
+│   │   ├── prometheus/
+│   │   │   ├── prometheus.yml
+│   │   │   └── alert-rules.yml   # 7 alert rules
+│   │   └── grafana/
+│   │       ├── dashboards/
+│   │       │   ├── dashboard-provider.yml
+│   │       │   ├── pipeline-overview.json
+│   │       │   └── model-performance.json
+│   │       └── datasources/
+│   │           └── prometheus.yml
+│   ├── runbooks/
+│   │   ├── node-failure.md
+│   │   ├── model-rollback.md
+│   │   ├── database-restore.md
+│   │   └── quarterly-drill.md
+│   └── checklists/
+│       ├── mlops-1-to-5.md
+│       ├── mlops-6-to-10.md
+│       └── mlops-11-to-15.md
+└── Makefile                      # +mlops-up/down/build targets
+```
+
+**Total: 65 files** (33 in initial commit + 32 in gap-closure commit)
 ```
