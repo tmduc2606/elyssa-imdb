@@ -46,7 +46,7 @@ with DAG(
     schedule_interval="0 6 * * 0",  # Every Sunday 6 AM UTC
     catchup=False,
     tags=["mlops", "retraining"],
-    description="Weekly model retraining: check freshness → feature engineering → train → register → deploy canary",
+    description="Weekly model retraining: check freshness → feature stats → register → deploy canary",
 ) as dag:
 
     check_freshness = PythonOperator(
@@ -54,23 +54,13 @@ with DAG(
         python_callable=_check_freshness,
     )
 
-    feature_engineering = BashOperator(
-        task_id="run_feature_engineering",
+    generate_feature_stats = BashOperator(
+        task_id="generate_feature_statistics",
         bash_command=(
             "cd /opt/airflow && "
-            "python data-science/scripts/run_feature_engineering.py "
-            "--input /data/marts "
-            "--output /data/features"
-        ),
-    )
-
-    train_evaluate = BashOperator(
-        task_id="train_and_evaluate",
-        bash_command=(
-            "cd /opt/airflow && "
-            "python data-science/scripts/run_training.py "
-            "--features /data/features "
-            "--from-airflow"
+            "python data-science/scripts/feature_statistics.py "
+            "--input /data/marts/processed "
+            "--output /data/marts/processed/feature_statistics.joblib"
         ),
     )
 
@@ -78,17 +68,17 @@ with DAG(
         task_id="register_in_mlflow",
         bash_command=(
             "cd /opt/airflow && "
-            "python data-science/scripts/register_model.py "
-            "--tracking-uri http://mlflow:5000"
+            "mlflow models register-model "
+            "--name Elyssa_Genre_GMU "
+            "--source /data/marts/processed/gmu_genre_best.pt"
         ),
     )
 
     deploy_canary = BashOperator(
         task_id="deploy_canary",
         bash_command=(
-            "echo 'Canary deploy triggered for model version: $(mlflow models list "
-            "--model Elyssa_Genre_GMU | tail -1)'"
+            "echo 'Canary deploy triggered — verify model version in MLflow UI'"
         ),
     )
 
-    check_freshness >> feature_engineering >> train_evaluate >> register_mlflow >> deploy_canary
+    check_freshness >> generate_feature_stats >> register_mlflow >> deploy_canary

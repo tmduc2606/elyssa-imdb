@@ -94,8 +94,8 @@ services:
   api:
     image: elyssa-api:latest
     build:
-      context: ../web-application/api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: mlops/docker/Dockerfile.api
     container_name: elyssa-api
     environment:
       ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
@@ -123,8 +123,8 @@ services:
   frontend:
     image: elyssa-frontend:latest
     build:
-      context: ../web-application/client
-      dockerfile: ../../mlops/docker/Dockerfile.frontend
+      context: ..
+      dockerfile: mlops/docker/Dockerfile.frontend
     container_name: elyssa-frontend
     ports:
       - "3000:80"

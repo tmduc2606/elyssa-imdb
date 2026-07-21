@@ -1,0 +1,45 @@
+name: Web CI
+on:
+  push:
+    paths: ["web-application/**"]
+  pull_request:
+    paths: ["web-application/**"]
+
+jobs:
+  api-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r web-application/api/requirements.txt
+      - run: pytest web-application/api/tests/ -q --tb=short
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+        working-directory: web-application/client
+      - run: npm run lint
+        working-directory: web-application/client
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+        working-directory: web-application/client
+      - run: npm run build
+        working-directory: web-application/client
+
+  image-scan:
+    needs: [api-test, frontend-lint, frontend-build]
+    uses: ./.github/workflows/trivy-scan.yml

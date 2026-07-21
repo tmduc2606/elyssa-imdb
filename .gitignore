@@ -46,9 +46,14 @@ data-science/contracts/*
 # Web Application agent files
 web-application/AGENTS.md
 web-application/skills/
-web-application/contracts/
 web-application/references/
 web-application/docs/
+
+# Track API-to-frontend and gold-to-api contracts
+!web-application/contracts/
+web-application/contracts/*
+!web-application/contracts/gold-to-api.md
+!web-application/contracts/api-to-frontend.md
 
 # DE agent artifacts
 data-engineering/agents/
