@@ -65,9 +65,13 @@ class ModelService:
         if gmu_file.exists():
             try:
                 import torch
-                self._gmu_model = torch.load(str(gmu_file), map_location="cpu", weights_only=False)
-                self._gmu_model.eval()
-                logger.info("Loaded gmu_genre_best.pt")
+                loaded = torch.load(str(gmu_file), map_location="cpu", weights_only=False)
+                if hasattr(loaded, "eval"):
+                    self._gmu_model = loaded
+                    self._gmu_model.eval()
+                    logger.info("Loaded gmu_genre_best.pt")
+                else:
+                    logger.warning("gmu_genre_best.pt is a state dict (needs DS model class) — genre predictions use fallback")
             except Exception as e:
                 logger.warning("Failed to load GMU model: %s", e)
         else:
