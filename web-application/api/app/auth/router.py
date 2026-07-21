@@ -75,6 +75,21 @@ async def login(body: LoginRequest, response: Response):
     return {"accessToken": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
 
 
+@router.post("/refresh")
+async def refresh(request: Request, response: Response):
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(401, "Missing refresh token")
+    payload = decode_token(refresh_token)
+    if payload is None or payload.get("type") != "refresh":
+        raise HTTPException(401, "Invalid or expired refresh token")
+    user = get_user_by_id(payload["sub"])
+    if user is None:
+        raise HTTPException(404, "User not found")
+    access_token = create_access_token(user["id"])
+    return {"accessToken": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
+
+
 @router.post("/logout")
 async def logout(response: Response):
     response.delete_cookie("refresh_token")

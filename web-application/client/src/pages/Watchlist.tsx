@@ -1,10 +1,9 @@
 import { PageHeader } from "@/components/composites/PageHeader";
 import { WatchlistGrid } from "@/components/features/watchlist/WatchlistGrid";
-import type { WatchlistItem } from "@/lib/types";
+import { useWatchlist } from "@/hooks/useWatchlist";
 
 export function Watchlist() {
-  const items: WatchlistItem[] = [];
-  const isLoading = false;
+  const { items, isLoading } = useWatchlist();
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">

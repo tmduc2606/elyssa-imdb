@@ -1,9 +1,16 @@
+import { useRef } from "react";
 import { Clock, Calendar } from "lucide-react";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
 import { cn, formatRuntime, formatYear } from "@/lib/utils";
 import { RatingBadge } from "@/components/composites/RatingBadge";
 import { GenreTags } from "@/components/composites/GenreTags";
 import { WatchlistButton } from "@/components/composites/WatchlistButton";
 import type { Title } from "@/lib/types";
+
+gsap.registerPlugin(ScrollTrigger);
 
 interface TitleHeroProps {
   title: Title;
@@ -11,9 +18,29 @@ interface TitleHeroProps {
 }
 
 export function TitleHero({ title, className }: TitleHeroProps) {
+  const posterRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    if (!posterRef.current) return;
+    gsap.fromTo(
+      posterRef.current,
+      { y: 0 },
+      {
+        y: -30,
+        ease: "none",
+        scrollTrigger: {
+          trigger: posterRef.current.parentElement,
+          start: "top top",
+          end: "bottom top",
+          scrub: 1,
+        },
+      },
+    );
+  }, []);
+
   return (
     <div className={cn("flex flex-col gap-6 md:flex-row", className)}>
-      <div className="w-full shrink-0 md:w-64">
+      <div ref={posterRef} className="w-full shrink-0 md:w-64">
         <div className="aspect-[2/3] overflow-hidden rounded-xl bg-muted">
           {title.posterUrl ? (
             <img

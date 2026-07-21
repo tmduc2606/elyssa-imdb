@@ -2,12 +2,13 @@ import {
   createContext,
   useContext,
   useState,
+  useEffect,
   useCallback,
   useMemo,
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { setAccessToken } from "@/lib/urql";
+import { setAccessToken, getAccessToken } from "@/lib/urql";
 import { AUTH_URL } from "@/lib/constants";
 import type { User } from "@/lib/types";
 
@@ -38,8 +39,38 @@ async function authFetch<T>(path: string, body?: unknown): Promise<T> {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const tryRestore = async () => {
+      const token = getAccessToken();
+      if (token) {
+        try {
+          const u = await authFetch<User>("/me");
+          setUser(u);
+          return;
+        } catch {
+          // Token expired — try refresh below
+        }
+      }
+      try {
+        const res = await fetch(`${AUTH_URL}/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error("No session");
+        const { accessToken } = await res.json();
+        setAccessToken(accessToken);
+        const u = await authFetch<User>("/me");
+        setUser(u);
+      } catch {
+        setAccessToken(null);
+        setUser(null);
+      }
+    };
+    tryRestore().finally(() => setIsLoading(false));
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);

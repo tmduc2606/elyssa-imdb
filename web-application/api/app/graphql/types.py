@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import strawberry
+
+if TYPE_CHECKING:
+    pass
 
 
 @strawberry.type
@@ -16,6 +21,10 @@ class Title:
     average_rating: float | None = None
     num_votes: int | None = None
     poster_url: str | None = None
+    parent_tconst: str | None = None
+    series_title: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
 
 
 @strawberry.type
@@ -69,11 +78,27 @@ class RatingSnapshot:
 
 @strawberry.type
 class TitleDetail(Title):
-    cast: list[CastMember] = strawberry.field(default_factory=list)
-    crew: list[CrewMember] = strawberry.field(default_factory=list)
-    episodes: list[EpisodeContent] = strawberry.field(default_factory=list)
-    similar: list[TitleSummary] = strawberry.field(default_factory=list)
     ratings: list[RatingSnapshot] = strawberry.field(default_factory=list)
+
+    @strawberry.field
+    def cast(self, limit: int = 20) -> list[CastMember]:
+        from app.graphql.resolvers import _resolve_cast as rc
+        return rc(self.id, limit)
+
+    @strawberry.field
+    def crew(self) -> list[CrewMember]:
+        from app.graphql.resolvers import _resolve_crew as rc
+        return rc(self.id)
+
+    @strawberry.field
+    def episodes(self, limit: int = 100) -> list[EpisodeContent]:
+        from app.graphql.resolvers import _resolve_episodes as re
+        return re(self.id, limit)
+
+    @strawberry.field
+    def similar(self, limit: int = 12) -> list[TitleSummary]:
+        from app.graphql.resolvers import _resolve_similar as rs
+        return rs(self.id, self.genres, limit)
 
 
 @strawberry.type

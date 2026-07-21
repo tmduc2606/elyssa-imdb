@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router";
 import { useTheme } from "next-themes";
-import { Search, Menu, Moon, Sun } from "lucide-react";
+import { Search, Menu, Moon, Sun, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,6 +17,13 @@ import {
   SheetTitle,
   SheetHeader,
 } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/hooks/useAuth";
 
 const navLinks = [
   { label: "Browse", to: "/browse" },
@@ -27,6 +34,7 @@ export function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
+  const { user, isAuthenticated, logout } = useAuth();
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const isActive = (to: string) => {
@@ -95,14 +103,34 @@ export function Header() {
             {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate("/auth/login")}
-            className="hidden sm:inline-flex"
-          >
-            Sign in
-          </Button>
+          {isAuthenticated ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger className="hidden sm:inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium hover:bg-muted">
+                <User className="size-4" />
+                <span className="max-w-[120px] truncate">{user?.displayName ?? user?.email}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => navigate("/watchlist")}>
+                  Watchlist
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/account")}>
+                  Account
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => logout()}>
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate("/auth/login")}
+              className="hidden sm:inline-flex"
+            >
+              Sign in
+            </Button>
+          )}
 
           <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetTrigger
@@ -127,13 +155,38 @@ export function Header() {
                     {link.label}
                   </Link>
                 ))}
-                <Link
-                  to="/auth/login"
-                  className="text-lg"
-                  onClick={() => setSheetOpen(false)}
-                >
-                  Sign in
-                </Link>
+                {isAuthenticated ? (
+                  <>
+                    <Link
+                      to="/watchlist"
+                      className="text-lg"
+                      onClick={() => setSheetOpen(false)}
+                    >
+                      Watchlist
+                    </Link>
+                    <Link
+                      to="/account"
+                      className="text-lg"
+                      onClick={() => setSheetOpen(false)}
+                    >
+                      Account
+                    </Link>
+                    <button
+                      className="text-left text-lg"
+                      onClick={() => { setSheetOpen(false); logout(); }}
+                    >
+                      Sign out
+                    </button>
+                  </>
+                ) : (
+                  <Link
+                    to="/auth/login"
+                    className="text-lg"
+                    onClick={() => setSheetOpen(false)}
+                  >
+                    Sign in
+                  </Link>
+                )}
               </nav>
             </SheetContent>
           </Sheet>

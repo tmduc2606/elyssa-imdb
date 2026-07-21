@@ -1,17 +1,47 @@
+import { useRef } from "react";
 import { Link } from "react-router";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 import { RatingBadge } from "@/components/composites/RatingBadge";
 import type { TitleSummary } from "@/lib/types";
+
+gsap.registerPlugin(ScrollTrigger);
 
 interface FeaturedCarouselProps {
   titles: TitleSummary[];
 }
 
 export function FeaturedCarousel({ titles }: FeaturedCarouselProps) {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useGSAP(() => {
+    const cards = sectionRef.current?.querySelectorAll("[data-animate]");
+    if (!cards?.length) return;
+    gsap.fromTo(
+      cards,
+      { opacity: 0, y: 40 },
+      {
+        opacity: 1,
+        y: 0,
+        duration: 0.6,
+        stagger: 0.1,
+        ease: "power2.out",
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: "top 85%",
+          toggleActions: "play none none reverse",
+        },
+      },
+    );
+  }, [titles]);
+
   if (titles.length === 0) return null;
 
   return (
     <section
+      ref={sectionRef}
       aria-label="Featured titles"
       aria-roledescription="carousel"
       className="relative overflow-hidden rounded-xl bg-surface"
@@ -27,6 +57,7 @@ export function FeaturedCarousel({ titles }: FeaturedCarouselProps) {
             role="listitem"
             aria-roledescription="slide"
             aria-label={`Slide ${index + 1}: ${title.primaryTitle}`}
+            data-animate
             className="group relative min-w-[280px] snap-start overflow-hidden rounded-lg border border-border"
           >
             <div className="aspect-[16/9] bg-muted">

@@ -105,6 +105,9 @@ node_modules/
 .next/
 .nuxt/
 .cache/
+*.tsbuildinfo
+test-results/
+playwright-report/
 
 # ─── Debug / Report / Assessment Artifacts ────────────────────────
 *.log

@@ -132,7 +132,7 @@ interface HomePageData {
 }
 
 export function useTitleDetail(tconst: string) {
-  return useGoldQuery<TitleDetail>({
+  return useGoldQuery<{ title: TitleDetail }>({
     query: TITLE_DETAIL_QUERY,
     variables: { tconst },
     queryKey: ["title", tconst],
@@ -142,7 +142,7 @@ export function useTitleDetail(tconst: string) {
 }
 
 export function usePersonDetail(nconst: string) {
-  return useGoldQuery<PersonDetail>({
+  return useGoldQuery<{ person: PersonDetail }>({
     query: PERSON_DETAIL_QUERY,
     variables: { nconst },
     queryKey: ["person", nconst],
