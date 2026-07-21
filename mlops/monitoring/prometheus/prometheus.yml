@@ -1,0 +1,40 @@
+# Prometheus configuration for Elyssa-IMDb
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - "alert-rules.yml"
+
+scrape_configs:
+  - job_name: "elyssa-api"
+    static_configs:
+      - targets: ["api:8000"]
+    metrics_path: "/metrics"
+
+  - job_name: "elyssa-airflow"
+    static_configs:
+      - targets: ["airflow:8080"]
+    metrics_path: "/metrics"
+
+  - job_name: "elyssa-mlflow"
+    static_configs:
+      - targets: ["mlflow:5000"]
+    metrics_path: "/api/2.0/mlflow/metrics"
+
+  - job_name: "elyssa-postgres"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: "elyssa-redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

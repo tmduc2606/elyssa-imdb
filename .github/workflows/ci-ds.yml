@@ -1,0 +1,47 @@
+name: DS CI
+on:
+  push:
+    paths: ["data-science/**"]
+  pull_request:
+    paths: ["data-science/**"]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check data-science/
+
+  verify-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install joblib scikit-learn==1.8.0
+      - run: |
+          python -c "
+          from joblib import load
+          import json
+          load('data-science/marts/processed/preprocessor.joblib')
+          load('data-science/marts/processed/genre_list_mlb.joblib')
+          load('data-science/marts/processed/scaler.joblib')
+          json.load(open('data-science/marts/processed/feature_columns.json'))
+          json.load(open('data-science/marts/processed/model_inventory.json'))
+          print('All artifacts verified')
+          "
+
+  validate-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pyarrow pandas
+      - run: python data-science/scripts/validate_contracts.py

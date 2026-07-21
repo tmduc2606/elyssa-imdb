@@ -14,3 +14,5 @@ joblib>=1.4.0
 scikit-learn>=1.8,<1.9
 torch>=2.0.0
 catboost>=1.2
+structlog>=24.0.0
+prometheus-fastapi-instrumentator>=7.0.0

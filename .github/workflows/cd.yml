@@ -1,0 +1,40 @@
+name: CD
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/tmduc2606
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API
+        run: |
+          docker compose -f mlops/docker-compose.yml build api
+          docker tag elyssa-api:latest ${{ env.IMAGE_PREFIX }}/elyssa-api:${{ github.sha }}
+          docker tag elyssa-api:latest ${{ env.IMAGE_PREFIX }}/elyssa-api:latest
+          docker push ${{ env.IMAGE_PREFIX }}/elyssa-api:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}/elyssa-api:latest
+
+      - name: Build and push Frontend
+        run: |
+          docker compose -f mlops/docker-compose.yml build frontend
+          docker tag elyssa-frontend:latest ${{ env.IMAGE_PREFIX }}/elyssa-frontend:${{ github.sha }}
+          docker tag elyssa-frontend:latest ${{ env.IMAGE_PREFIX }}/elyssa-frontend:latest
+          docker push ${{ env.IMAGE_PREFIX }}/elyssa-frontend:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}/elyssa-frontend:latest

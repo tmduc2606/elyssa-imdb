@@ -1,0 +1,65 @@
+groups:
+  - name: elyssa-alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.*"}[5m]) / rate(http_requests_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API error rate > 1% for 5 minutes"
+          description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency > 500ms"
+          description: "p95 latency is {{ $value }}s on {{ $labels.instance }}"
+
+      - alert: AirflowPipelineFailure
+        expr: airflow_dag_status{status="failed"} > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Airflow DAG {{ $labels.dag_id }} failed"
+          description: "DAG {{ $labels.dag_id }} task {{ $labels.task_id }} failed"
+
+      - alert: ModelDriftDetected
+        expr: model_drift_kl_divergence > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model drift threshold exceeded for feature {{ $labels.feature }}"
+          description: "KL divergence = {{ $value }}"
+
+      - alert: DataStaleness
+        expr: time() - gold_mart_max_snapshot_timestamp_seconds > 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gold mart {{ $labels.mart_name }} not updated in 24+ hours"
+          description: "Last update was {{ $value | humanizeDuration }} ago"
+
+      - alert: RedisCacheMissSpike
+        expr: rate(redis_cache_miss_total[5m]) / rate(redis_cache_total[5m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis cache miss rate > 50%"
+          description: "Cache miss rate is {{ $value | humanizePercentage }}"
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.instance }} has been unreachable for 1 minute"

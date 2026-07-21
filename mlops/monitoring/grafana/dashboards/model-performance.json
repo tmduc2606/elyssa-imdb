@@ -1,0 +1,55 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "Model Performance",
+  "version": 1,
+  "timezone": "utc",
+  "panels": [
+    {
+      "title": "Genre Macro F1 Over Time",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "mlflow_metric{model_name=\"Elyssa_Genre_GMU\", metric=\"val_macro_f1\"}",
+          "legendFormat": "val macro f1"
+        },
+        {
+          "expr": "mlflow_metric{model_name=\"Elyssa_Genre_GMU\", metric=\"test_macro_f1\"}",
+          "legendFormat": "test macro f1"
+        }
+      ]
+    },
+    {
+      "title": "Rating RMSE Over Time",
+      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "mlflow_metric{model_name=\"Elyssa_Rating_CatBoost\", metric=\"test_rmse\"}",
+          "legendFormat": "test rmse"
+        }
+      ]
+    },
+    {
+      "title": "Feature Distribution Drift",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "model_drift_kl_divergence"
+        }
+      ]
+    },
+    {
+      "title": "Prediction Confidence Distribution",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "prediction_confidence"
+        }
+      ]
+    }
+  ]
+}
