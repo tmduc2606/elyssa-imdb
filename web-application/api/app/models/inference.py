@@ -64,14 +64,9 @@ class ModelService:
         gmu_file = artifacts_path / "gmu_genre_best.pt"
         if gmu_file.exists():
             try:
-                import torch
-                loaded = torch.load(str(gmu_file), map_location="cpu", weights_only=False)
-                if hasattr(loaded, "eval"):
-                    self._gmu_model = loaded
-                    self._gmu_model.eval()
-                    logger.info("Loaded gmu_genre_best.pt")
-                else:
-                    logger.warning("gmu_genre_best.pt is a state dict (needs DS model class) — genre predictions use fallback")
+                from app.models.gmu import load_gmu_from_state_dict
+                self._gmu_model = load_gmu_from_state_dict(str(gmu_file))
+                logger.info("Loaded gmu_genre_best.pt")
             except Exception as e:
                 logger.warning("Failed to load GMU model: %s", e)
         else:
@@ -173,8 +168,17 @@ class ModelService:
             try:
                 import torch
                 with torch.no_grad():
-                    inp = torch.from_numpy(features).float().unsqueeze(0)
-                    probs = self._gmu_model(inp).squeeze(0).numpy()
+                    # GMU expects separate tab (26) and text (768) inputs.
+                    # build_feature_vector concatenates them: [tab(26), text(768)] = 794
+                    # When no text embedding is provided, features is tab-only (26-dim).
+                    tab_dim = len(self._feature_schema.get("tabular_features", [])) if self._feature_schema else 26
+                    if len(features) > tab_dim:
+                        tab = torch.from_numpy(features[:tab_dim]).float().unsqueeze(0)
+                        text = torch.from_numpy(features[tab_dim:]).float().unsqueeze(0)
+                    else:
+                        tab = torch.from_numpy(features).float().unsqueeze(0)
+                        text = torch.zeros(768).float().unsqueeze(0)
+                    probs = torch.sigmoid(self._gmu_model(tab, text)).squeeze(0).numpy()
                 if self._genre_mlb is not None and hasattr(self._genre_mlb, "classes_"):
                     results = []
                     for i, name in enumerate(self._genre_mlb.classes_):
