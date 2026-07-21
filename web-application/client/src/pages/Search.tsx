@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from "react-router";
 import { SearchAutocomplete } from "@/components/features/search/SearchAutocomplete";
 import { SearchResultsGrid } from "@/components/features/search/SearchResultsGrid";
 import { FacetedFilters } from "@/components/features/search/FacetedFilters";
-import type { TitleSummary } from "@/lib/types";
+import { useSearch } from "@/api/gold";
 
 export function Search() {
   const [searchParams] = useSearchParams();
@@ -12,8 +12,8 @@ export function Search() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState<string | null>(null);
 
-  const results: TitleSummary[] = [];
-  const isLoading = false;
+  const { data, isLoading } = useSearch(query);
+  const results = data?.search?.items ?? [];
 
   const handleSearch = useCallback(
     (q: string) => {

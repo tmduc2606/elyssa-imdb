@@ -102,6 +102,7 @@ node_modules/
 .next/
 .nuxt/
 .cache/
+*.tsbuildinfo
 
 # ─── Debug / Report / Assessment Artifacts ────────────────────────
 *.log

@@ -95,3 +95,25 @@ def test_watchlist_unauthorized():
     assert r.status_code == 401
     r = client.delete("/auth/watchlist/tt1234567")
     assert r.status_code == 401
+
+
+def test_refresh_with_cookie():
+    r = client.post("/auth/login", json={
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD,
+    })
+    assert r.status_code == 200
+    assert "refresh_token" in r.cookies
+
+    r2 = client.post("/auth/refresh")
+    assert r2.status_code == 200, r2.text[:200]
+    data = r2.json()
+    assert "accessToken" in data
+    assert data["user"]["email"] == TEST_EMAIL
+
+
+def test_refresh_without_cookie():
+    client.cookies.clear()
+    r = client.post("/auth/refresh")
+    assert r.status_code == 401, f"Expected 401 got {r.status_code}: {r.text[:200]}"
+    assert "Missing refresh token" in r.text

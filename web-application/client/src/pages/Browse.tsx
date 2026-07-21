@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { PageHeader } from "@/components/composites/PageHeader";
 import { BrowseFilters } from "@/components/features/browse/BrowseFilters";
 import { TitleGrid } from "@/components/features/browse/TitleGrid";
-import type { TitleSummary } from "@/lib/types";
+import { useBrowse } from "@/api/gold";
 
 export function Browse() {
   const { slug, year } = useParams();
@@ -13,8 +13,12 @@ export function Browse() {
   const [decade, setDecade] = useState<number | null>(year ? Number(year) : null);
   const [sortBy, setSortBy] = useState("rating");
 
-  const titles: TitleSummary[] = [];
-  const isLoading = false;
+  const { data, isLoading } = useBrowse({
+    genres: selectedGenres,
+    decade,
+    sortBy,
+  });
+  const titles = data?.browse?.items ?? [];
 
   const title = year
     ? `${year}s`

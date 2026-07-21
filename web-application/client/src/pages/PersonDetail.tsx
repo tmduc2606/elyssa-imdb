@@ -5,25 +5,34 @@ import { KnownForGrid } from "@/components/features/person/KnownForGrid";
 import { FilmographyList } from "@/components/features/person/FilmographyList";
 import { CareerTimeline } from "@/components/features/person/CareerTimeline";
 import { CollaborationNetwork } from "@/components/features/person/CollaborationNetwork";
-import type { Person, TitleSummary, FilmographyEntry, Collaborator, CareerYear } from "@/lib/types";
-
-const placeholderPerson: Person = {
-  id: "",
-  primaryName: "",
-  birthYear: null,
-  deathYear: null,
-  primaryProfession: [],
-  knownForTitles: [],
-  posterUrl: null,
-};
+import { SkeletonGrid } from "@/components/composites/SkeletonGrid";
+import { usePersonDetail } from "@/api/gold";
 
 export function PersonDetail() {
   const { nconst } = useParams();
-  const person = placeholderPerson;
-  const knownFor: TitleSummary[] = [];
-  const filmography: FilmographyEntry[] = [];
-  const collaborators: Collaborator[] = [];
-  const timeline: CareerYear[] = [];
+  const { data, isLoading } = usePersonDetail(nconst ?? "");
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <SkeletonGrid count={6} />
+      </div>
+    );
+  }
+
+  if (!data?.person) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <p className="text-muted">Person not found.</p>
+      </div>
+    );
+  }
+
+  const person = data.person;
+  const knownFor = person.knownForTitles ?? [];
+  const filmography = person.filmography ?? [];
+  const collaborators = person.collaborators ?? [];
+  const timeline = person.careerTimeline ?? [];
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">

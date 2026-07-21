@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 from functools import lru_cache
 
@@ -10,14 +8,8 @@ import duckdb
 from app.cache.memory import get_cache
 from app.config import get_settings
 from app.graphql.types import (
-    CastMember,
-    Collaborator,
-    CrewMember,
-    EpisodeContent,
-    FilmographyEntry,
     HomePageData,
     Person,
-    PersonSummary,
     RatingSnapshot,
     TitleDetail,
     TitleSummary,

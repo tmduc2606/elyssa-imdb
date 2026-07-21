@@ -1,16 +1,12 @@
 import { PageHeader } from "@/components/composites/PageHeader";
 import { ProfileForm } from "@/components/features/account/ProfileForm";
 import { Settings } from "@/components/features/account/Settings";
-import type { User } from "@/lib/types";
-
-const placeholderUser: User = {
-  id: "",
-  email: "user@example.com",
-  displayName: "User",
-};
+import { useAuth } from "@/hooks/useAuth";
 
 export function Account() {
-  const user = placeholderUser;
+  const { user } = useAuth();
+
+  if (!user) return null;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">

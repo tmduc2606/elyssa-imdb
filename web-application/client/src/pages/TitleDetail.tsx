@@ -6,33 +6,35 @@ import { EpisodeTable } from "@/components/features/title/EpisodeTable";
 import { SimilarTitlesRow } from "@/components/features/title/SimilarTitlesRow";
 import { RatingTimelineChart } from "@/components/features/title/RatingTimelineChart";
 import { TitleStatsPanel } from "@/components/features/title/TitleStatsPanel";
-import type { Title, TitlePrincipal, RatingSnapshot, TitleSummary, EpisodeContent } from "@/lib/types";
-
-const placeholderTitle: Title = {
-  id: "",
-  primaryTitle: "",
-  originalTitle: null,
-  titleType: "movie",
-  startYear: null,
-  endYear: null,
-  runtimeMinutes: null,
-  genres: [],
-  averageRating: null,
-  numVotes: null,
-  posterUrl: null,
-  parentTconst: null,
-  seriesTitle: null,
-  seasonNumber: null,
-  episodeNumber: null,
-};
+import { SkeletonGrid } from "@/components/composites/SkeletonGrid";
+import { useTitleDetail, useTitleRatings } from "@/api/gold";
 
 export function TitleDetail() {
   const { tconst } = useParams();
-  const title = placeholderTitle;
-  const cast: TitlePrincipal[] = [];
-  const episodes: EpisodeContent[] = [];
-  const similar: TitleSummary[] = [];
-  const ratings: RatingSnapshot[] = [];
+  const { data, isLoading } = useTitleDetail(tconst ?? "");
+  const { data: ratingsData } = useTitleRatings(tconst ?? "");
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <SkeletonGrid count={6} />
+      </div>
+    );
+  }
+
+  if (!data?.title) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <p className="text-muted">Title not found.</p>
+      </div>
+    );
+  }
+
+  const title = data.title;
+  const cast = title.cast ?? [];
+  const episodes = title.episodes ?? [];
+  const similar = title.similar ?? [];
+  const ratings = ratingsData?.titleRatings ?? [];
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
