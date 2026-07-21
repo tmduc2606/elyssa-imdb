@@ -1,7 +1,7 @@
 # Elyssa-IMDb | Makefile
 # Build targets with Docker cache pruning to prevent bloat.
 
-.PHONY: build build-all prune up down clean
+.PHONY: build build-all prune up down clean mlops-up mlops-down mlops-build
 
 # Build all services (prunes build cache first)
 build:
@@ -33,3 +33,18 @@ down:
 clean:
 	docker builder prune -a -f
 	docker compose down -v
+
+# ─── MLOps targets ──────────────────────────────────────────
+
+# Start MLOps full dev environment
+mlops-up:
+	docker compose -f mlops/docker-compose.yml up -d
+
+# Stop MLOps environment
+mlops-down:
+	docker compose -f mlops/docker-compose.yml down
+
+# Build MLOps environment
+mlops-build:
+	docker builder prune -f
+	docker compose -f mlops/docker-compose.yml build

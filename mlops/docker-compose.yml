@@ -1,0 +1,264 @@
+# Elyssa-IMDb | MLOps Docker Compose — Full Development Environment
+# Extends the root compose with MLflow, Prometheus, Grafana, Frontend.
+#
+# Usage:
+#   docker compose -f mlops/docker-compose.yml up -d
+
+services:
+  # ─── PostgreSQL (shared with root compose) ──────────────────────────
+  postgres:
+    image: elyssa-postgres:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.postgres
+    container_name: elyssa-postgres
+    environment:
+      POSTGRES_USER: elyssa
+      POSTGRES_PASSWORD: elyssa_pg_2026
+      POSTGRES_DB: elyssa_warehouse
+    command: >
+      postgres
+        -c config_file=/etc/postgresql/custom.conf
+        -c shared_preload_libraries=timescaledb
+        -c max_connections=200
+    shm_size: '2g'
+    ports:
+      - "54321:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ../docker/postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+      - ../docker/postgres/custom.conf:/etc/postgresql/custom.conf:ro
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elyssa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── RustFS (S3-compatible Bronze Storage) ──────────────────────────
+  rustfs:
+    image: elyssa-rustfs:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rustfs
+    container_name: elyssa-rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: elyssa
+      RUSTFS_SECRET_KEY: elyssa_s3_2026
+      RUSTFS_REGION: us-east-1
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── Redis Cache ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: elyssa-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── MLflow Tracking Server ─────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.18.0
+    container_name: elyssa-mlflow
+    command: >
+      mlflow server
+        --host 0.0.0.0
+        --port 5000
+        --backend-store-uri postgresql://elyssa:elyssa_pg_2026@postgres:5432/mlflow
+        --default-artifact-root /mlflow-artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow-artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── API Gateway (FastAPI + GraphQL) ────────────────────────────────
+  api:
+    image: elyssa-api:latest
+    build:
+      context: ../web-application/api
+      dockerfile: Dockerfile
+    container_name: elyssa-api
+    environment:
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
+      ELYSSA_DEBUG: "false"
+      ELYSSA_REDIS_ENABLED: "true"
+      ELYSSA_REDIS_URL: redis://redis:6379/0
+      ELYSSA_RATE_LIMIT_PER_MINUTE: "200"
+      ELYSSA_MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports:
+      - "8000:8000"
+    volumes:
+      - gold_marts:/data/marts/processed:ro
+      - api_data:/data
+    depends_on:
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_started
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── Frontend (React SPA) ───────────────────────────────────────────
+  frontend:
+    image: elyssa-frontend:latest
+    build:
+      context: ../web-application/client
+      dockerfile: ../../mlops/docker/Dockerfile.frontend
+    container_name: elyssa-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── Airflow ────────────────────────────────────────────────────────
+  airflow:
+    image: elyssa-airflow:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.airflow
+    container_name: elyssa-airflow
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
+      AIRFLOW__CORE__PARALLELISM: "8"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
+    ports:
+      - "8081:8080"
+    volumes:
+      - airflow_data:/opt/airflow
+      - ../data-engineering:/opt/airflow/data-engineering:rw
+      - ../data-engineering/orchestration/dags:/opt/airflow/dags:ro
+      - ../mlops/airflow/dags:/opt/airflow/mlops-dags:ro
+      - ../data-science:/opt/airflow/data-science:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── Prometheus ─────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: elyssa-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── Grafana ────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: elyssa-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: elyssa_grafana_2026
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── PostgreSQL Exporter ────────────────────────────────────────────
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: elyssa-pg-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+  # ─── Redis Exporter ─────────────────────────────────────────────────
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: elyssa-redis-exporter
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    ports:
+      - "9121:9121"
+    depends_on:
+      - redis
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+    name: elyssa_pg_data
+  rustfs_data:
+    name: elyssa_rustfs_data
+  redis_data:
+    name: elyssa_redis_data
+  mlflow_data:
+    name: elyssa_mlflow_data
+  api_data:
+    name: elyssa_api_data
+  airflow_data:
+    name: elyssa_airflow_data
+  prometheus_data:
+    name: elyssa_prometheus_data
+  grafana_data:
+    name: elyssa_grafana_data
+  gold_marts:
+    name: elyssa_gold_marts
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/../data-science/marts/
+      o: bind
+
+networks:
+  elyssa-net:
+    name: elyssa-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
