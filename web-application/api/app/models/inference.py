@@ -21,6 +21,7 @@ class ModelService:
         self._gmu_model: object | None = None
         self._catboost_model: object | None = None
         self._title_embeddings: np.ndarray | None = None
+        self._model_inventory: dict | None = None
 
     def load(self):
         settings = get_settings()
@@ -89,9 +90,57 @@ class ModelService:
             self._title_embeddings = np.load(str(emb_file))
             logger.info("Loaded title_embeddings.npy (%s)", self._title_embeddings.shape)
 
+        inv_file = artifacts_path / "model_inventory.json"
+        if inv_file.exists():
+            try:
+                raw = json.loads(inv_file.read_text())
+                self._model_inventory = {m["name"]: m for m in raw}
+                logger.info("Loaded model_inventory.json (%d models)", len(self._model_inventory))
+            except Exception as e:
+                logger.warning("Failed to load model_inventory.json: %s", e)
+        else:
+            logger.info("model_inventory.json not found — versions will default to 1")
+
         self.ready = True
 
+    def _version_from_inventory(self, model_name: str) -> int:
+        if self._model_inventory and model_name in self._model_inventory:
+            return 1
+        return 1
+
     def build_feature_vector(self, raw_input: dict, text_embedding: np.ndarray | None = None) -> np.ndarray | None:
+        if self._feature_schema is None:
+            return None
+
+        if self._preprocessor is not None:
+            try:
+                import pandas as pd
+                preprocessor = self._preprocessor
+                numeric_cols = list(preprocessor.transformers_[0][2])
+                categorical_cols = list(preprocessor.transformers_[1][2]) if len(preprocessor.transformers_) > 1 else []
+
+                data = {}
+                for col in numeric_cols:
+                    val = raw_input.get(col)
+                    import math
+                    data[col] = val if val is not None and not (isinstance(val, float) and math.isnan(val)) else None
+                for col in categorical_cols:
+                    val = raw_input.get(col)
+                    data[col] = val if val is not None else "missing"
+
+                raw_df = pd.DataFrame([data])
+                features = preprocessor.transform(raw_df)
+                features = np.asarray(features).flatten().astype(np.float32)
+
+                if text_embedding is not None:
+                    return np.concatenate([features, text_embedding])
+                return features
+            except Exception as e:
+                logger.warning("Preprocessor transform failed: %s — falling back to manual", e)
+
+        return self._build_feature_vector_manual(raw_input, text_embedding)
+
+    def _build_feature_vector_manual(self, raw_input: dict, text_embedding: np.ndarray | None = None) -> np.ndarray | None:
         if self._feature_schema is None:
             return None
         tab_cols = self._feature_schema["tabular_features"]
@@ -145,11 +194,15 @@ class ModelService:
     def get_models(self) -> list[dict]:
         models = []
         if self._gmu_model is not None:
+            version = self._version_from_inventory("genre_gmu")
+            metrics = {}
+            if self._model_inventory and "genre_gmu" in self._model_inventory:
+                metrics = self._model_inventory["genre_gmu"].get("metrics", {})
             models.append({
                 "name": "Elyssa_Genre_GMU",
-                "version": 1,
+                "version": version or 1,
                 "stage": "production",
-                "metrics": {"macro_f1": 0.642},
+                "metrics": metrics,
             })
         else:
             models.append({
@@ -159,11 +212,15 @@ class ModelService:
                 "metrics": {},
             })
         if self._catboost_model is not None:
+            version = self._version_from_inventory("rating_catboost")
+            metrics = {}
+            if self._model_inventory and "rating_catboost" in self._model_inventory:
+                metrics = self._model_inventory["rating_catboost"].get("metrics", {})
             models.append({
                 "name": "Elyssa_Rating_CatBoost",
-                "version": 1,
+                "version": version or 1,
                 "stage": "production",
-                "metrics": {"rmse": 0.52},
+                "metrics": metrics,
             })
         else:
             models.append({

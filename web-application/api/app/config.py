@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     jwt_refresh_days: int = 7
 
     redis_url: str = "redis://localhost:6379/0"
-    redis_enabled: bool = False
+    redis_enabled: bool = True
 
     model_artifacts_path: str = ""
 
