@@ -30,6 +30,63 @@ class BronzeIngestOperator(BaseOperator):
         "name.basics": 6,
     }
 
+    # Explicit column schemas for DuckDB read_csv — eliminates type inference overhead
+    BRONZE_SCHEMAS = {
+        "title.basics": {
+            "tconst": "VARCHAR",
+            "titleType": "VARCHAR",
+            "primaryTitle": "VARCHAR",
+            "originalTitle": "VARCHAR",
+            "isAdult": "VARCHAR",
+            "startYear": "VARCHAR",
+            "endYear": "VARCHAR",
+            "runtimeMinutes": "VARCHAR",
+            "genres": "VARCHAR",
+        },
+        "title.akas": {
+            "titleId": "VARCHAR",
+            "ordering": "VARCHAR",
+            "title": "VARCHAR",
+            "region": "VARCHAR",
+            "language": "VARCHAR",
+            "types": "VARCHAR",
+            "attributes": "VARCHAR",
+            "isOriginalTitle": "VARCHAR",
+        },
+        "title.crew": {
+            "tconst": "VARCHAR",
+            "directors": "VARCHAR",
+            "writers": "VARCHAR",
+        },
+        "title.episode": {
+            "tconst": "VARCHAR",
+            "parentTconst": "VARCHAR",
+            "seasonNumber": "VARCHAR",
+            "episodeNumber": "VARCHAR",
+        },
+        "title.principals": {
+            "tconst": "VARCHAR",
+            "ordering": "VARCHAR",
+            "nconst": "VARCHAR",
+            "category": "VARCHAR",
+            "job": "VARCHAR",
+            "characters": "VARCHAR",
+        },
+        "title.ratings": {
+            "tconst": "VARCHAR",
+            "averageRating": "VARCHAR",
+            "numVotes": "VARCHAR",
+        },
+        "name.basics": {
+            "tconst": "VARCHAR",
+            "primaryName": "VARCHAR",
+            "birthYear": "VARCHAR",
+            "deathYear": "VARCHAR",
+            "primaryProfession": "VARCHAR",
+            "knownForTitles": "VARCHAR",
+        },
+    }
+
     def __init__(
         self,
         source_tables: List[str],
@@ -156,8 +213,15 @@ class BronzeIngestOperator(BaseOperator):
                 except Exception:
                     pass
 
+                schema_def = self.BRONZE_SCHEMAS.get(table, {})
+                if schema_def:
+                    cols_str = ", ".join(f"'{k}' '{v}'" for k, v in schema_def.items())
+                    read_csv_sql = f"read_csv(?, columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+                else:
+                    read_csv_sql = "read_csv(?, delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+
                 row_count = conn.execute(
-                    "SELECT COUNT(*) FROM read_csv(? , delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')",
+                    f"SELECT COUNT(*) FROM {read_csv_sql}",
                     [file_path]
                 ).fetchone()[0]
 
@@ -177,10 +241,10 @@ class BronzeIngestOperator(BaseOperator):
                 self.log.info(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
 
                 conn.execute(
-                    "COPY ("
-                    "  SELECT *, ? AS _source_file, ? AS _source_table, ? AS _batch_id, ? AS _ingested_at, ? AS _row_count, ? AS _file_checksum "
-                    "  FROM read_csv(?, delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
-                    ") TO ? (FORMAT PARQUET, COMPRESSION snappy)",
+                    f"COPY ("
+                    f"  SELECT *, ? AS _source_file, ? AS _source_table, ? AS _batch_id, ? AS _ingested_at, ? AS _row_count, ? AS _file_checksum "
+                    f"  FROM {read_csv_sql}"
+                    f") TO ? (FORMAT PARQUET, COMPRESSION snappy)",
                     [file_path, table, batch_id, now_ts, row_count, file_checksum, file_path, output_path]
                 )
 

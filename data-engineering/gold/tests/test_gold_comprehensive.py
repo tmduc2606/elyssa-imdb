@@ -213,7 +213,7 @@ class TestSchemaTests:
         with open(path) as f:
             config = yaml.safe_load(f)
         assert config['version'] == 2
-        assert len(config['models']) == 3
+        assert len(config['models']) == 5
 
     def test_schema_tests_cover_all_marts(self):
         path = os.path.join(GOLD_DIR, 'tests', 'schema.yml')
@@ -222,6 +222,8 @@ class TestSchemaTests:
         model_names = [m['name'] for m in config['models']]
         assert 'dim_title' in model_names
         assert 'dim_person' in model_names
+        assert 'fact_title_rating' in model_names
+        assert 'fact_title_principal' in model_names
         assert 'fact_performance' in model_names
 
     def test_dim_title_has_pk_test(self):

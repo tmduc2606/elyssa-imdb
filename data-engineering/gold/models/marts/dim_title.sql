@@ -1,3 +1,9 @@
+{{ config(
+    materialized='incremental',
+    unique_key='tconst',
+    on_schema_change='append_new_columns'
+) }}
+
 SELECT
     tconst,
     title_type,
@@ -32,3 +38,9 @@ SELECT
     language_list,
     aka_count
 FROM {{ ref('int_title_details') }}
+{% if is_incremental() %}
+  WHERE tconst IN (
+    SELECT DISTINCT tconst FROM {{ ref('int_title_details') }}
+    WHERE ingested_at > (SELECT max(ingested_at) FROM {{ this }})
+  )
+{% endif %}

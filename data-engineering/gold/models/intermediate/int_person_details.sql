@@ -27,7 +27,9 @@ SELECT
         ELSE NULL
     END AS age_at_death,
     pr.profession_list,
-    kf.known_for_titles
+    kf.known_for_titles,
+    pb.batch_id,
+    pb.ingested_at
 FROM person_base pb
 LEFT JOIN professions pr ON pb.nconst = pr.nconst
 LEFT JOIN known_for kf ON pb.nconst = kf.nconst

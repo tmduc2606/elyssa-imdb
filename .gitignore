@@ -159,6 +159,8 @@ wandb/
 
 # Processed marts output (notebook-generated artifacts)
 data-science/marts/
+# EXCEPT: export manifest is tracked for audit trail
+!data-science/marts/full/_MANIFEST.json
 catboost_info/
 
 # ─── Docker ────────────────────────────────────────────────────────

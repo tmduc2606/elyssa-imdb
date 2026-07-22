@@ -69,6 +69,16 @@ FK_CHECKS = [
         """,
         "threshold": 0,
     },
+    {
+        "name": "fact_performance_nconst_exists_in_dim_person",
+        "sql": """
+            SELECT COUNT(*) AS orphan_count
+            FROM gold.fact_performance p
+            LEFT JOIN gold.dim_person d ON p.nconst = d.nconst
+            WHERE d.nconst IS NULL
+        """,
+        "threshold": 0,
+    },
 ]
 
 def run_fk_checks(spark) -> list[dict]:

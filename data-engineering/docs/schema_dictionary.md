@@ -120,6 +120,16 @@
 | known_for_order | SMALLINT | NO | Order 1–4 (PK part 2) |
 | tconst | VARCHAR(20) | NO | Title identifier |
 
+### Known Delta: Bronze name_basics vs Gold dim_person
+
+**Delta:** 89 rows (Bronze 15,448,238 → Gold 15,448,149)
+
+**Root cause:** SCD2 deduplication in the Silver layer. Rows where all SCD2 merge columns (`primary_name`, `birth_year`, `death_year`) are identical to the current record produce no effective change and are filtered during the SCD2 close+insert cycle. These 89 persons had duplicate entries in the raw IMDb data with identical merge-column values across all versions.
+
+**Impact:** Negligible — the 89 persons represent <0.0006% of the dataset and would have no distinguishing features for analytics or ML modeling.
+
+**Design intent:** This is intentional SCD2 behaviour. The pipeline preserves history only when meaningful changes occur. If a different behaviour is desired (e.g., preserve all raw rows regardless of changes), the SCD2 merge condition in `silver/upsert.py` would need to be modified.
+
 ### Governance Tables
 - `data_quality_log` — DQ check results (check_name, metric_value, passed, logged_at)
 - `quarantine` — Rejected records (table_name, error_message, raw_record JSONB)

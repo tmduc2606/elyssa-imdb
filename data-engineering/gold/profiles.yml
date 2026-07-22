@@ -9,7 +9,7 @@ imdb_gold:
       pass: elyssa_pg_2026
       dbname: elyssa_warehouse
       schema: gold
-      threads: 2
+      threads: 4
       keepalives_idle: 0
     dev:
       type: postgres
@@ -19,5 +19,5 @@ imdb_gold:
       pass: elyssa_pg_2026
       dbname: elyssa_warehouse
       schema: gold_dev
-      threads: 2
+      threads: 4
       keepalives_idle: 0

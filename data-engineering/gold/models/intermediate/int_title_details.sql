@@ -68,7 +68,9 @@ SELECT
     ep.episode_number,
     rg.region_list,
     rg.language_list,
-    rg.aka_count
+    rg.aka_count,
+    tb.batch_id,
+    tb.ingested_at
 FROM title_base tb
 LEFT JOIN genres g ON tb.tconst = g.tconst
 LEFT JOIN directors d ON tb.tconst = d.tconst
