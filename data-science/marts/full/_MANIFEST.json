@@ -1,0 +1,56 @@
+[
+  {
+    "table": "dim_title",
+    "file": "dim_title.parquet",
+    "file_size_bytes": 670002975,
+    "file_size_mb": 638.96,
+    "sha256": "de25e8d437a9d0385a71c7a79ff0928394ed24f4f6cff6780dc79c835c02f1ef",
+    "format": "parquet",
+    "compression": "snappy"
+  },
+  {
+    "table": "dim_person",
+    "file": "dim_person.parquet",
+    "file_size_bytes": 673769763,
+    "file_size_mb": 642.56,
+    "sha256": "82d2d0b17b6259a8e652a88c9f8c824df5be5e1b725c42f32bd8318d97805487",
+    "format": "parquet",
+    "compression": "snappy"
+  },
+  {
+    "table": "fact_title_rating",
+    "file": "fact_title_rating.parquet",
+    "file_size_bytes": 12908346,
+    "file_size_mb": 12.31,
+    "sha256": "508e3b3fac8d40868456f20a72e7f6cfc78cbdb9dc51f362fe355579f279263b",
+    "format": "parquet",
+    "compression": "snappy"
+  },
+  {
+    "table": "fact_title_principal",
+    "file": "fact_title_principal.parquet",
+    "file_size_bytes": 1843767532,
+    "file_size_mb": 1758.35,
+    "sha256": "712ee0902a42fe142bedf8dca24d8d1cd62f2a0f6b64bdd9d7ff0cd634e22522",
+    "format": "parquet",
+    "compression": "snappy"
+  },
+  {
+    "table": "fact_performance",
+    "file": "fact_performance.parquet",
+    "file_size_bytes": 1844024632,
+    "file_size_mb": 1758.6,
+    "sha256": "d0832264c0f76be10f911ff22fc731c6c4d0175e61166cdd4a927055511b47f3",
+    "format": "parquet",
+    "compression": "snappy"
+  },
+  {
+    "table": "fact_episode",
+    "file": "fact_episode.parquet",
+    "file_size_bytes": 120524274,
+    "file_size_mb": 114.94,
+    "sha256": "09f1a896eadd09ff46f98c28809ebcb73782e6af36cd93171344a4ff16f0125c",
+    "format": "parquet",
+    "compression": "snappy"
+  }
+]

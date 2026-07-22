@@ -78,7 +78,7 @@ class BronzeIngestOperator(BaseOperator):
             "numVotes": "VARCHAR",
         },
         "name.basics": {
-            "tconst": "VARCHAR",
+            "nconst": "VARCHAR",
             "primaryName": "VARCHAR",
             "birthYear": "VARCHAR",
             "deathYear": "VARCHAR",

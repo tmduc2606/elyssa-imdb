@@ -116,23 +116,20 @@ models:
             - ordering
 
   - name: fact_performance
-    description: "Performance fact at grain (tconst, ordering) — LEFT JOIN to title_principal_char may expand rows per character"
+    description: "Performance fact — LEFT JOIN to title_principal_char expands 1 principal into N rows (one per character). No simple PK exists. Use unique combination (tconst, ordering) for principal-level dedup."
     columns:
       - name: tconst
         tests: [not_null]
+        description: "Title identifier (natural key)"
       - name: ordering
         tests: [not_null]
+        description: "Principal ordering within title"
       - name: nconst
         tests: [not_null]
+        description: "Person identifier"
       - name: category
         tests: [not_null]
+        description: "Role category (actor, director, etc.)"
       - name: character_name
         tests: []
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - tconst
-            - ordering
-            - nconst
-            - category
-            - job
+        description: "Character name — nullable, multiplies rows when present"
