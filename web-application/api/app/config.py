@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     port: int = 8000
 
     gold_marts_path: str = str(
-        Path(__file__).resolve().parents[3] / "data-science" / "marts" / "processed"
+        Path(__file__).resolve().parents[3] / "data-science" / "marts" / "full"
     )
 
     database_url: str = "sqlite:///" + str(

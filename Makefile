@@ -1,7 +1,7 @@
 # Elyssa-IMDb | Makefile
 # Build targets with Docker cache pruning to prevent bloat.
 
-.PHONY: build build-all prune up down clean mlops-up mlops-down mlops-build
+.PHONY: build build-all prune up down clean export mlops-up mlops-down mlops-build
 
 # Build all services (prunes build cache first)
 build:
@@ -33,6 +33,12 @@ down:
 clean:
 	docker builder prune -a -f
 	docker compose down -v
+
+# ─── Export Gold marts to Parquet ──────────────────────────
+
+# Export Gold marts from PostgreSQL to Parquet (requires docker-compose running)
+export:
+	docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_marts.py
 
 # ─── MLOps targets ──────────────────────────────────────────
 

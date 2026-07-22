@@ -58,3 +58,20 @@ User → Ingress → FastAPI (GraphQL + REST) → DuckDB / Model Service / Redis
 | Documentation             | This README       | MLOPS.13  |
 | Disaster recovery         | Runbooks          | MLOPS.14  |
 | Continuous improvement    | Quarterly review  | MLOPS.15  |
+
+---
+
+## Wiring to Other Modules
+
+| Module | Integration Point | Port | Status |
+|--------|------------------|------|--------|
+| Data Engineering | Airflow DAG monitoring | Prometheus :9090 | ✅ |
+| Data Science | MLflow model registry | MLflow :5000 | ✅ |
+| Web Application | API metrics, Grafana dashboards | Grafana :3000 | ✅ |
+
+## Quick Start with Sample Data
+
+```bash
+# Ensure MLflow can see DS artifacts
+docker compose -f mlops/docker-compose.yml up -d
+```

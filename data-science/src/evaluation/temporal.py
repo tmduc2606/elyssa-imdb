@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict
 import logging
+from sklearn.metrics import mean_squared_error
 
 logger = logging.getLogger(__name__)
 

@@ -72,10 +72,10 @@ def _row_to_summary(r) -> TitleSummary:
 def _get_con() -> duckdb.DuckDBPyConnection:
     settings = get_settings()
     con = duckdb.connect()
-    processed = Path(settings.gold_marts_path)
-    gold_root = processed.parent
+    gold_root = Path(settings.gold_marts_path)
+    processed_dir = gold_root.parent / "processed"
 
-    # Load Gold marts from data-science/marts/
+    # Load Gold marts from data-science/marts/full/
     for mart in GOLD_MARTS:
         parquet = gold_root / f"{mart}.parquet"
         if parquet.exists():
@@ -84,7 +84,7 @@ def _get_con() -> duckdb.DuckDBPyConnection:
             )
 
     # Also load base_features from processed/ for backward compat
-    base = processed / "base_features.parquet"
+    base = processed_dir / "base_features.parquet"
     if base.exists():
         con.execute(
             f"CREATE OR REPLACE VIEW base_features AS SELECT * FROM read_parquet('{base}')"

@@ -2,6 +2,7 @@ import json
 import numpy as np
 import torch
 import joblib
+import pandas as pd
 from pathlib import Path
 from typing import Dict, Optional
 import logging
@@ -45,22 +46,72 @@ def load_inference_models(processed_dir: Path, device: str = "cpu"):
     catboost_model = cb.CatBoostRegressor()
     catboost_model.load_model(str(processed_dir / "catboost_rating_model.cbm"))
 
+    preprocessor = joblib.load(processed_dir / "preprocessor.joblib")
+    scaler = joblib.load(processed_dir / "scaler.joblib")
+
     return {
         "feature_info": feat_info,
         "gmu_model": model,
         "catboost_model": catboost_model,
         "mlb_genre": mlb,
+        "preprocessor": preprocessor,
+        "scaler": scaler,
         "num_tab": num_tab,
         "num_text": num_text,
         "device": device,
     }
 
 
+def _get_text_embedding(title_text: str) -> np.ndarray:
+    from transformers import DistilBertTokenizer, DistilBertModel
+    tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+    model = DistilBertModel.from_pretrained("distilbert-base-uncased")
+    inputs = tokenizer(title_text, return_tensors="pt", truncation=True, max_length=128, padding=True)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    return outputs.last_hidden_state.mean(dim=1).squeeze().numpy()
+
+
 def build_feature_vector(
     raw_input: Dict,
-    tabular_cols: list,
-    num_tab: int,
+    models: Dict,
+    title_text: str = "",
 ) -> np.ndarray:
+    feature_info = models["feature_info"]
+    preprocessor = models["preprocessor"]
+    scaler = models["scaler"]
+    num_text = models["num_text"]
+    tab_cols = feature_info["tabular_features"]
+
+    row = {}
+    for col in tab_cols:
+        val = raw_input.get(col, 0)
+        if col.startswith("title_type_"):
+            title_type = raw_input.get("title_type", "")
+            val = 1.0 if title_type == col.split("_", 2)[-1] else 0.0
+        elif col.startswith("is_adult_"):
+            is_adult = int(raw_input.get("is_adult", 0))
+            expected_val = int(col.split("_")[-1])
+            val = 1.0 if is_adult == expected_val else 0.0
+        row[col] = val
+
+    df = pd.DataFrame([row])
+    tab_features = scaler.transform(preprocessor.transform(df))
+    tab_vec = np.asarray(tab_features).flatten().astype(np.float32)
+
+    if title_text:
+        text_emb = _get_text_embedding(title_text)
+        if text_emb.shape[0] < num_text:
+            text_emb = np.pad(text_emb, (0, num_text - text_emb.shape[0]), mode="constant")
+    else:
+        text_emb = np.zeros(num_text, dtype=np.float32)
+
+    return np.concatenate([tab_vec, text_emb])
+
+
+def predict_genre(raw_input: Dict, models: Dict) -> Dict:
+    num_tab = models["num_tab"]
+    tabular_cols = models["feature_info"]["tabular_features"]
     tab_vec = np.zeros(num_tab, dtype=np.float32)
     for i, col in enumerate(tabular_cols):
         if col in raw_input:
@@ -73,13 +124,6 @@ def build_feature_vector(
             is_adult = int(raw_input.get("is_adult", 0))
             expected_val = int(col.split("_")[-1])
             tab_vec[i] = 1.0 if is_adult == expected_val else 0.0
-    return tab_vec
-
-
-def predict_genre(raw_input: Dict, models: Dict) -> Dict:
-    num_tab = models["num_tab"]
-    tabular_cols = models["feature_info"]["tabular_features"]
-    tab_vec = build_feature_vector(raw_input, tabular_cols, num_tab)
 
     X_tab = torch.tensor(tab_vec, dtype=torch.float32).unsqueeze(0)
     text_tensor = torch.zeros(1, models["num_text"], dtype=torch.float32)
@@ -103,7 +147,18 @@ def predict_genre(raw_input: Dict, models: Dict) -> Dict:
 def predict_rating(raw_input: Dict, models: Dict) -> Dict:
     num_tab = models["num_tab"]
     tabular_cols = models["feature_info"]["tabular_features"]
-    tab_vec = build_feature_vector(raw_input, tabular_cols, num_tab)
+    tab_vec = np.zeros(num_tab, dtype=np.float32)
+    for i, col in enumerate(tabular_cols):
+        if col in raw_input:
+            tab_vec[i] = float(raw_input[col])
+        elif col.startswith("title_type_"):
+            title_type = raw_input.get("title_type", "")
+            expected_type = col.split("_", 2)[-1]
+            tab_vec[i] = 1.0 if title_type == expected_type else 0.0
+        elif col.startswith("is_adult_"):
+            is_adult = int(raw_input.get("is_adult", 0))
+            expected_val = int(col.split("_")[-1])
+            tab_vec[i] = 1.0 if is_adult == expected_val else 0.0
     text_emb = np.zeros(models["num_text"], dtype=np.float32)
     feature_vec = np.concatenate([tab_vec, text_emb]).reshape(1, -1)
 

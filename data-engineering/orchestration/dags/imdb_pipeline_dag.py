@@ -33,6 +33,7 @@ from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
 from operators.imdb_sensor import IMDbDataSensor
 from operators.quarantine_operator import QuarantineCheckOperator
+from operators.gold_export_operator import GoldExportOperator
 
 # ─── Retry config (exponential backoff) ─────────────────────────────
 _RETRY_CONFIG_PATH = os.path.join(
@@ -191,13 +192,19 @@ with DAG(
         sla_hours=24,
     )
 
+    # ─── Gold Export (DuckDB postgres_scanner → Snappy Parquet) ──────────────
+    gold_export = GoldExportOperator(
+        task_id="gold_export",
+        output_dir="/opt/airflow/output/gold/",
+    )
+
     end = EmptyOperator(task_id="pipeline_end")
 
     # ─── DAG Structure ────────────────────────────────────────────────────
-    # Sensor → bronze → quarantine_check → silver → gold → dq → freshness → end
+    # Sensor → bronze → quarantine_check → silver → gold → dq → freshness → gold_export → end
     # gold_dbt_test depends on gold_dbt_run (tests run against fresh Gold tables)
     # Neo4j sync removed from critical path (Phase 1 hardware limitation)
     start >> imdb_sensor >> bronze_ingest >> bronze_done
     bronze_done >> quarantine_check >> silver_transform
     silver_transform >> gold_dbt_run >> gold_dbt_test
-    gold_dbt_test >> dq_checks >> freshness_check >> end
+    gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end

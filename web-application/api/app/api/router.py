@@ -351,3 +351,16 @@ async def list_models():
         m["version"] = 1 if exists else 0
 
     return {"data": models}
+
+
+# ─── POST /api/v1/admin/reload-cache ────────────────────────────────
+@router.post("/admin/reload-cache")
+async def reload_cache():
+    from app.graphql.resolvers import _get_con
+    from app.cache.memory import get_cache
+    _get_con.cache_clear()
+    cache = get_cache()
+    cache.clear()
+    svc = get_model_service()
+    svc.load()
+    return {"status": "ok", "message": "DuckDB connection, cache, and models reloaded"}

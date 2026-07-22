@@ -159,8 +159,11 @@ class ModelService:
         return tabular
 
     def _get_embedding(self, tconst: str | None = None) -> np.ndarray | None:
-        if self._title_embeddings is None or tconst is None:
-            return None
+        if self._title_embeddings is not None and tconst is not None:
+            try:
+                return self._title_embeddings[tconst]
+            except (KeyError, IndexError, TypeError):
+                pass
         return np.zeros(768, dtype=np.float32)
 
     def predict_genre(self, features: np.ndarray) -> list[dict]:

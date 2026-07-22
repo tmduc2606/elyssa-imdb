@@ -154,6 +154,7 @@ services:
       - ./data-engineering:/opt/airflow/data-engineering:rw
       - ./data-engineering/orchestration/dags:/opt/airflow/dags:ro
       - ./data-engineering/orchestration/operators:/opt/airflow/operators:rw
+      - ./data-science/marts/full:/opt/airflow/output/gold:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,7 +175,8 @@ services:
       dockerfile: Dockerfile
     container_name: elyssa-api
     environment:
-      ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/full
+      ELYSSA_MODEL_ARTIFACTS_PATH: /data/marts/processed
       ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
       ELYSSA_DEBUG: "false"
       ELYSSA_REDIS_ENABLED: "true"
@@ -183,6 +185,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./data-science/marts/full:/data/marts/full:ro
       - ./data-science/marts/processed:/data/marts/processed:ro
       - api_data:/data
     depends_on:

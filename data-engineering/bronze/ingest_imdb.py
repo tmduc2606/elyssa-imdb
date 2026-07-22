@@ -1,3 +1,8 @@
+# NOTE: This PySpark script is a parallel implementation to the DuckDB
+# Airflow operators (orchestration/operators/bronze_operator.py).
+# The canonical pipeline path is via DuckDB Airflow operators.
+# Canonical path: orchestration/operators/bronze_operator.py
+
 from datetime import datetime, timezone
 import hashlib
 import json

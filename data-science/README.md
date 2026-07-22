@@ -28,8 +28,11 @@ Gold Parquet → src/data/loader.py → src/features/ → src/models/ → src/ev
 ## Pipeline Usage
 
 ```bash
-# Full pipeline
+# Full pipeline (after DE marts are available at marts/full/)
 python scripts/run_pipeline.py --stage all
+
+# Checkpoint resume — skip stages that already completed
+python scripts/run_pipeline.py --stage features   # skip EDA if already done
 
 # Single stage
 python scripts/run_pipeline.py --stage features
@@ -39,6 +42,45 @@ python scripts/validate_contracts.py
 
 # Generate model cards from inventory
 python scripts/generate_model_cards.py
+```
+
+## Quick Smoke Test
+
+```powershell
+# Use pre-packaged sample data
+python scripts/generate_sample_data.py
+New-Item -ItemType Junction -Path marts\full -Target marts\sample
+New-Item -ItemType Junction -Path marts\processed -Target marts\sample_processed
+python scripts/run_pipeline.py --stage all --sample
+```
+
+## Required Outputs
+
+| Artifact | Path | Consumer |
+|----------|------|----------|
+| GMU model | `marts/processed/gmu_genre_best.pt` | Web API |
+| CatBoost model | `marts/processed/catboost_rating_model.cbm` | Web API |
+| Feature schema | `marts/processed/feature_columns.json` | Web API |
+| Preprocessor | `marts/processed/preprocessor.joblib` | Web API |
+| Scaler | `marts/processed/scaler.joblib` | Web API |
+
+## Upstream Dependency
+
+Gold Parquet marts from `data-engineering/` pipeline at `marts/full/`.
+
+## Downstream Consumer
+
+Web Application API at `web-application/` reads from `marts/processed/` and `marts/full/`.
+
+## Checkpoint Resume
+
+After each stage, artifacts are saved in `marts/processed/`. The pipeline detects existing artifacts and can skip completed stages:
+
+```python
+from pathlib import Path
+processed = Path("marts/processed")
+if (processed / "X_tab.npy").exists():
+    print("Features already built — skipping FE stage")
 ```
 
 ## Config Management

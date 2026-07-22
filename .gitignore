@@ -9,7 +9,13 @@ docker/.env
 
 # Root docs folder — proposal, references, contracts
 # (Trailing /docs/ matches any depth; prefix / restricts to root)
-/docs/
+/docs/*
+# EXCEPT: These portfolio documentation files are tracked:
+!docs/plug_and_play_improvement_plan.md
+!docs/SMOKE_TEST.md
+!docs/RUNBOOK.md
+!docs/qa_catalog_template.md
+!docs/scripts/
 
 # ─── Documentation (not source code — agent planning docs excluded) ─
 data-engineering/docs/*

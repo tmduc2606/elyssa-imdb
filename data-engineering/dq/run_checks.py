@@ -15,52 +15,6 @@ sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
 from pipeline_logger import get_logger
 
 
-DEFAULT_CHECKS = [
-    {
-        "name": "null_rate_title_basics",
-        "table": "silver.title_basics",
-        "metric": "null_rate",
-        "column": "primary_title",
-        "threshold": 0.0,
-        "severity": "error",
-    },
-    {
-        "name": "null_rate_title_rating",
-        "table": "silver.title_rating",
-        "metric": "null_rate",
-        "column": "average_rating",
-        "threshold": 0.0,
-        "severity": "error",
-    },
-    {
-        "name": "referential_title_episode",
-        "table": "silver.title_episode",
-        "metric": "orphan_rate",
-        "fk_column": "parent_tconst",
-        "pk_table": "silver.title_basics",
-        "pk_column": "tconst",
-        "threshold": 0.01,
-        "severity": "warn",
-    },
-    {
-        "name": "row_count_title_basics",
-        "table": "silver.title_basics",
-        "metric": "row_count_variance",
-        "expected_min": 100000,
-        "threshold": 0.2,
-        "severity": "error",
-    },
-    {
-        "name": "row_count_name_basics",
-        "table": "silver.name_basics",
-        "metric": "row_count_variance",
-        "expected_min": 100000,
-        "threshold": 0.2,
-        "severity": "error",
-    },
-]
-
-
 def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: str):
     """Execute checks from config, log results to data_quality_log and quarantine."""
     import psycopg2
@@ -70,11 +24,10 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
     log = get_logger()
     batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    if config_path:
-        with open(config_path) as f:
-            checks = yaml.safe_load(f).get("checks", [])
-    else:
-        checks = DEFAULT_CHECKS
+    if not config_path:
+        config_path = "/opt/airflow/data-engineering/dq/config.yaml"
+    with open(config_path) as f:
+        checks = yaml.safe_load(f).get("checks", [])
 
     log.log_stage(stage="dq_runner", batch_id=batch_id, status="started",
                   message=f"Running {len(checks)} DQ checks")
