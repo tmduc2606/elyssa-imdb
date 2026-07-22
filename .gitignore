@@ -28,6 +28,10 @@ data-engineering/docs/*
 !data-engineering/docs/phase1_summary.md
 !data-engineering/docs/blueprint_database_ingestion.md
 !data-engineering/docs/pipeline-optimization-blueprint.md
+!data-engineering/docs/specialized_assessment.md
+!data-engineering/docs/de_optimization_plan.md
+!data-engineering/docs/assessment_results.json
+!data-engineering/docs/assessment_results_table.md
 
 # Binary office documents (agent reports, proposals)
 *.docx

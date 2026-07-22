@@ -1,0 +1,394 @@
+[
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: title_basics",
+    "value":"213.2 MB, 12,609,928 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: name_basics",
+    "value":"291.6 MB, 15,448,238 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: title_ratings",
+    "value":"8.1 MB, 1,689,394 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: title_principals",
+    "value":"735.9 MB, 100,243,363 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: title_episode",
+    "value":"51.4 MB, 9,743,274 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: title_crew",
+    "value":"78.3 MB, 12,611,414 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Ingestion",
+    "check":"Source exists + readable: title_akas",
+    "value":"480.8 MB, 58,178,050 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Schema",
+    "check":"Bronze view created: bronze_title_basics",
+    "value":"12,609,928 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Schema",
+    "check":"Bronze view created: bronze_name_basics",
+    "value":"15,448,238 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Schema",
+    "check":"Bronze view created: bronze_title_ratings",
+    "value":"1,689,394 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Schema",
+    "check":"Bronze view created: bronze_title_principals",
+    "value":"100,243,363 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Schema",
+    "check":"Bronze view created: bronze_title_episode",
+    "value":"9,743,274 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Bronze Schema",
+    "check":"Bronze view created: bronze_title_crew",
+    "value":"12,611,414 rows",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Duplicate PK (tconst) in dim_title",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Duplicate PK (nconst) in dim_person",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"PK uniqueness: fact_title_principal(tconst, ordering)",
+    "value":"Binder Error: Referenced column \"tconst\" not found in FROM clause!\nCandidate bin",
+    "status":"FAIL",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Duplicate PK (title_key, snapshot_date) in fact_title_rating",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Duplicate PK (series_key, season_number, episode_number) in fact_episode",
+    "value":"1978824",
+    "status":"FAIL",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Duplicate PK (tconst, nconst, category) in fact_performance",
+    "value":"1905885",
+    "status":"FAIL",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Invalid tconst format in dim_title",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Invalid nconst format in dim_person",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"is_adult domain (0\/1)",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Runtime domain (>0 and <=100000)",
+    "value":"6",
+    "status":"WARN",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Rating domain [0,10]",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Intrinsic Quality",
+    "check":"Start year range [1880,2030]",
+    "value":"38",
+    "status":"WARN",
+    "note":""
+  },
+  {
+    "category":"Gold Null Rates",
+    "check":"Null rate: dim_title.average_rating",
+    "value":"86.6%",
+    "status":"INFO",
+    "note":"Expected for sparse IMDb fields (ratings, votes, runtime)"
+  },
+  {
+    "category":"Gold Null Rates",
+    "check":"Null rate: dim_title.num_votes",
+    "value":"86.6%",
+    "status":"INFO",
+    "note":"Expected for sparse IMDb fields (ratings, votes, runtime)"
+  },
+  {
+    "category":"Gold Null Rates",
+    "check":"Null rate: dim_title.runtime_minutes",
+    "value":"64.1%",
+    "status":"INFO",
+    "note":"Expected for sparse IMDb fields (ratings, votes, runtime)"
+  },
+  {
+    "category":"Gold Null Rates",
+    "check":"Null rate: dim_title.genre_list",
+    "value":"4.27%",
+    "status":"OK",
+    "note":"Expected for sparse IMDb fields (ratings, votes, runtime)"
+  },
+  {
+    "category":"Gold Null Rates",
+    "check":"Null rate: dim_person.birth_year",
+    "value":"95.62%",
+    "status":"INFO",
+    "note":"Expected for sparse IMDb fields (ratings, votes, runtime)"
+  },
+  {
+    "category":"Gold Null Rates",
+    "check":"Null rate: dim_person.death_year",
+    "value":"98.32%",
+    "status":"INFO",
+    "note":"Expected for sparse IMDb fields (ratings, votes, runtime)"
+  },
+  {
+    "category":"Gold Referential Integrity",
+    "check":"fact_episode.series_key orphan (not a TV series)",
+    "value":"323065",
+    "status":"WARN",
+    "note":"FK enforcement missing in Silver; quarantine should catch"
+  },
+  {
+    "category":"Gold Referential Integrity",
+    "check":"fact_performance.tconst orphan",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Gold Referential Integrity",
+    "check":"fact_performance.nconst orphan",
+    "value":"7649",
+    "status":"FAIL",
+    "note":""
+  },
+  {
+    "category":"ETL Correctness (Bronze vs Gold)",
+    "check":"Row count: bronze_title_basics(12,609,928) vs dim_title(12,609,928)",
+    "value":"Bronze=12,609,928, Gold=12,609,928, delta=0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"ETL Correctness (Bronze vs Gold)",
+    "check":"Row count: bronze_name_basics(15,448,238) vs dim_person(15,448,149)",
+    "value":"Bronze=15,448,238, Gold=15,448,149, delta=89",
+    "status":"WARN",
+    "note":""
+  },
+  {
+    "category":"ETL Correctness (Bronze vs Gold)",
+    "check":"Distinct tconst: bronze vs dim_title",
+    "value":"Bronze=12,609,928, Gold=12,609,928, delta=0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"ETL Correctness (Bronze vs Gold)",
+    "check":"Distinct nconst: bronze vs dim_person",
+    "value":"Bronze=15,448,238, Gold=15,448,149, delta=89",
+    "status":"WARN",
+    "note":""
+  },
+  {
+    "category":"ETL Correctness (Bronze vs Gold)",
+    "check":"dim_title tconst missing from bronze",
+    "value":"0",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Minimum row count: dim_title (>1,000,000)",
+    "value":"12,609,928",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Minimum row count: dim_person (>500,000)",
+    "value":"15,448,149",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Minimum row count: fact_performance (>5,000,000)",
+    "value":"100,243,369",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Minimum row count: fact_episode (>1,000,000)",
+    "value":"9,743,274",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Max start_year in dim_title",
+    "value":"2115",
+    "status":"OK",
+    "note":"Current year: 2026"
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Genre distribution query time",
+    "value":"1.953s",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Fitness for Use",
+    "check":"Actor co-occurrence query time",
+    "value":"30.544s",
+    "status":"FAIL",
+    "note":"Advisor #3 flagged 27s in prior benchmark; this measures current DuckDB-over-Parquet"
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export size: dim_title",
+    "value":"638.96 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export size: dim_person",
+    "value":"642.56 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export size: fact_title_rating",
+    "value":"12.31 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export size: fact_performance",
+    "value":"1758.6 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export size: fact_episode",
+    "value":"114.94 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export size: fact_title_principal",
+    "value":"1758.35 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Total Gold export size",
+    "value":"4925.7 MB",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"Gold export manifest present",
+    "value":"not found",
+    "status":"WARN",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"dim_title schema completeness",
+    "value":"22 columns",
+    "status":"OK",
+    "note":""
+  },
+  {
+    "category":"Pipeline Governance",
+    "check":"dim_title analytical columns (genre_list, director_names)",
+    "value":"genre_list=VARCHAR, director_names=True",
+    "status":"OK",
+    "note":""
+  }
+]
