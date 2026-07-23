@@ -30,7 +30,16 @@ docker compose up -d
 docker compose ps --status running
 ```
 
-## 2. Unpause & Trigger the DAG
+## 2. Sign in to Airflow UI
+
+```powershell
+# Get the auto-generated admin password from Airflow logs
+docker compose logs airflow | Select-String -Pattern "Admin password|admin account password"
+```
+
+The Airflow UI is at http://localhost:8081. Sign in as `admin` with the password from above.
+
+## 3. Unpause & Trigger the DAG
 
 ```powershell
 # Unpause the pipeline DAG (disabled by default)
@@ -40,7 +49,7 @@ docker exec elyssa-airflow airflow dags unpause imdb_pipeline_dag
 docker exec elyssa-airflow airflow dags trigger imdb_pipeline_dag
 ```
 
-## 3. Watch Progress Layer by Layer
+## 4. Watch Progress Layer by Layer
 
 ```powershell
 # Follow all Airflow logs in real-time
