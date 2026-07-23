@@ -1,42 +1,53 @@
 # Elyssa-IMDb | Makefile
 # Build targets with Docker cache pruning to prevent bloat.
+# DE stack uses docker/docker-compose.yml; Web stack uses root docker-compose.yml.
 
-.PHONY: build build-all prune up down clean export mlops-up mlops-down mlops-build
+.PHONY: build build-svc build-quick prune up down clean web-up web-down export mlops-up mlops-down mlops-build
 
-# Build all services (prunes build cache first)
+# ─── DE Stack (docker/docker-compose.yml) ──────────────────
+
+# Build all DE services
 build:
 	docker builder prune -f
-	docker compose build
+	docker compose -f docker/docker-compose.yml build
 
-# Build a specific service: make build-svc svc=airflow
+# Build a specific DE service: make build-svc svc=airflow
 build-svc:
 	docker builder prune -f
-	docker compose build $(svc)
+	docker compose -f docker/docker-compose.yml build $(svc)
 
 # Build without pruning (faster, accumulates cache)
 build-quick:
-	docker compose build
+	docker compose -f docker/docker-compose.yml build
 
 # Prune Docker build cache only
 prune:
 	docker builder prune -a -f
 
-# Start all services
+# Start all DE services
 up:
-	docker compose up -d
+	docker compose -f docker/docker-compose.yml up -d
 
-# Stop all services
+# Stop all DE services
 down:
-	docker compose down
+	docker compose -f docker/docker-compose.yml down
 
 # Full clean: prune cache + stop + remove volumes
 clean:
 	docker builder prune -a -f
-	docker compose down -v
+	docker compose -f docker/docker-compose.yml down -v
+
+# ─── Web Stack (root docker-compose.yml) ───────────────────
+
+web-up:
+	docker compose up -d
+
+web-down:
+	docker compose down
 
 # ─── Export Gold marts to Parquet ──────────────────────────
 
-# Export Gold marts from PostgreSQL to Parquet (requires docker-compose running)
+# Export Gold marts from PostgreSQL to Parquet (requires DE stack running)
 export:
 	docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_marts.py
 

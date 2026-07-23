@@ -10,34 +10,125 @@ Medallion architecture processing IMDb `.tsv.gz` into queryable star-schema mart
 | **Gold** | dbt | Star-schema (6 fact/dim tables, 4.9 GB) | ~63 min |
 | **Export** | DuckDB | Snappy Parquet → `marts/full/` | ~15 min |
 
-## Prerequisites
-- Docker 24+ with compose plugin
-- 20 GB free disk, 16 GB RAM
-- Raw IMDb `.tsv.gz` files in `duke/gate0/source/` (7 files, ~1.9 GB compressed)
+## Critical: WSL2 Memory Constraint
+
+**Docker Desktop on Windows runs containers inside a WSL2 VM.** The default WSL2 memory cap is **8 GB**, regardless of host RAM. Check yours:
+
+```powershell
+wsl --status  # Look for "memory limit"
+```
+
+If it says 8 GB (or less), the effective RAM for Docker is **8 GB**, not 16 GB. All memory budgets below are calculated for this constraint. To raise the cap, create `%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+memory=12GB
+processors=4
+```
+
+## Architecture Changes (Tier-3 Memory Optimization)
+
+**Previous problem:** OOM crash at `silver.title_director` — DuckDB `memory_limit='4GB'` inside Airflow container with `mem_limit: 2g`.
+
+**Applied fixes (see `docs/de_optimization_plan_tier3_memory.md`):**
+
+| Fix | What | Why |
+|-----|------|-----|
+| M1 | DuckDB `memory_limit` → 1.2 GB (silver), 1.5 GB (bronze) | Prevents cgroup OOM kill — DuckDB spills to disk gracefully |
+| M2 | New `etl-runner` container (6 GB budget) | DuckDB no longer competes with Airflow for memory |
+| M3 | Chunked UNNEST (1M-row batches) | Bounds peak memory during array explosions (title.principals_char, etc.) |
+| M4 | `etl_temp` Docker volume | Spill I/O off the container writable layer onto a dedicated volume |
+| M5 | PG session tuning (`maintenance_work_mem`, `wal_level`) | Faster bulk COPY, less WAL amplification |
+| M6 | Removed dead PySpark imports + pandas | Cleaner dependency tree |
+| M7 | Multi-stage Docker builds | Smaller images (~800 MB vs ~1.2 GB for airflow) |
+| M8 | Airflow parallelism 2, scheduler heartbeat 30s | Matches 2C/4T CPU, reduces scheduler overhead |
+| M9 | `oom_score_adj` on all services | ETL runner killed last (mid-transaction), Postgres/Neo4j killed first |
+| M10 | `--profile-memory` flag + `_log_memory()` hook | Build per-transformation sizing matrix |
+
+### Auto-Cleanup Between Layers
+The pipeline cleans up automatically at every stage boundary:
+- **Bronze:** `CHECKPOINT` after each table flushes DuckDB temp files
+- **Silver parent→child:** `CHECKPOINT` after all parent tables, CSV per table deleted after COPY
+- **Silver child:** Per-chunk temp views dropped, CSV deleted after each chunk
+- **Silver cleanup (finally):** All remaining temp dirs and CSVs removed
+- **Duplicate temp dirs** are `shutil.rmtree()`'d even on pipeline failure
+
+### Speed vs. Memory: The Trade-off
+Lower DuckDB `memory_limit` (1.2 GB) forces more spill-to-disk, which is **slower** than a hypothetical crash-free 4 GB run. All other optimizations are orthogonal:
+- **Faster:** PG session tuning, volume-backed spill (avoids Docker overlay I/O tax), chunked CSVs
+- **Slower:** Lower memory limit (more disk spill), chunked UNNEST (repeated parquet scans)
+- **Neutral:** Multi-stage builds, dead code removal, oom_score_adj, memory profiling
+
+The net effect: **completes reliably instead of crashing at ~2h 23m**. Once stable, you can tune `memory_limit` upward in the `etl-runner` container (6 GB budget) for faster runs.
 
 ---
+
+## Prerequisites
+- Docker 24+ with compose plugin
+- 16 GB RAM (with `mem_limit` on all containers — see service table below)
+- 20 GB free disk
+- Raw IMDb `.tsv.gz` files in `duke/gate0/source/` (7 files, ~1.9 GB compressed)
+
+### Service Memory Budgets
+
+**Effective RAM = 8 GB (WSL2 cap).** All services must fit within 8 GB, with 3 GB headroom for DuckDB peak during ETL.
+
+| Service | `mem_limit` | `oom_score_adj` | Idle (RSS) | Peak (RSS) | Why |
+|---------|-------------|-----------------|------------|------------|-----|
+| postgres | 1 GB | +500 | ~300 MB | ~500 MB | 128 MB shared_buffers, no shm_size |
+| neo4j | 2 GB | +500 | ~800 MB | ~800 MB | Heap 512M + pagecache 256M (not on critical path) |
+| rustfs | 256 MB | +500 | ~50 MB | ~50 MB | Stateless, negligible |
+| **etl-runner** | **6 GB** | **−500** | **~10 MB** | **~4 GB** | **sleeps until ETL, then DuckDB peak** |
+| airflow | **1 GB** | **−250** | **~400 MB** | **~500 MB** | Webserver + scheduler (parallelism=2) |
+
+**Idle total:** ~1.6 GB / 8 GB WSL2 — **plenty of headroom for OS + Docker engine**.  
+**Peak total (during ETL):** ~5.9 GB / 8 GB WSL2 — **73%, safe**.
+
+> **Note:** `memswap_limit` is present in docker-compose.yml for non-WSL2 hosts. On Docker Desktop + WSL2, it may be silently ignored — the `mem_limit` cgroup hard limit still prevents OOM.
+
+---
+
+**All commands below run from the repo root** using the DE compose file at `docker/docker-compose.yml`.
+This stack runs independently from the web app compose.
+
+```powershell
+# Set convenience alias (optional)
+$dc = "docker compose -f docker/docker-compose.yml"
+```
 
 ## 1. Build & Start
 
 ```powershell
-# Build all images (cached layers)
-docker compose build
+# Build all DE images
+docker compose -f docker/docker-compose.yml build
 
-# Start services in background
-docker compose up -d
+# Start services in background (hard memory limits applied automatically)
+docker compose -f docker/docker-compose.yml up -d
 
 # Wait for healthy state (30-60s)
-docker compose ps --status running
+docker compose -f docker/docker-compose.yml ps --status running
 ```
+
+> **Low-RAM tip:** Build one service at a time to avoid parallel build contention:
+> ```powershell
+> docker compose -f docker/docker-compose.yml build postgres
+> docker compose -f docker/docker-compose.yml build neo4j
+> docker compose -f docker/docker-compose.yml build rustfs
+> docker compose -f docker/docker-compose.yml build etl-runner
+> docker compose -f docker/docker-compose.yml build airflow
+> ```
 
 ## 2. Sign in to Airflow UI
 
+The admin password is pre-seeded as **`admin`** (both username and password).
+
 ```powershell
-# Get the auto-generated admin password from Airflow logs
-docker compose logs airflow | Select-String -Pattern "Admin password|admin account password"
+# Open Airflow UI
+start http://localhost:8081
+# Sign in as admin / admin
 ```
 
-The Airflow UI is at http://localhost:8081. Sign in as `admin` with the password from above.
+> **Note:** If the simple_auth_manager password file was already generated (container restart), the password remains whatever was set on first start. To reset, delete the volume: `docker compose -f docker/docker-compose.yml down -v && docker compose up -d`
 
 ## 3. Unpause & Trigger the DAG
 
@@ -53,7 +144,7 @@ docker exec elyssa-airflow airflow dags trigger imdb_pipeline_dag
 
 ```powershell
 # Follow all Airflow logs in real-time
-docker compose logs -f airflow
+docker compose -f docker/docker-compose.yml logs -f airflow
 ```
 
 ### Bronze Layer (~47 min)
@@ -151,13 +242,17 @@ docker exec elyssa-airflow airflow dags list-runs -d imdb_pipeline_dag
 docker exec elyssa-airflow tasks states-for-dag-run imdb_pipeline_dag <run_id>
 
 # Streaming logs filtered to pipeline tasks
-docker compose logs -f airflow | Select-String -Pattern "bronze_ingest|silver_transform|gold_dbt"
+docker compose -f docker/docker-compose.yml logs -f airflow | Select-String -Pattern "bronze_ingest|silver_transform|gold_dbt"
 
-# Check for slow queries in PostgreSQL
-docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "
-SELECT query, calls, round(mean_time::numeric, 1) AS mean_ms, rows
-FROM pg_stat_statements ORDER BY mean_time DESC LIMIT 10;"
-"
+# Monitor container memory usage
+docker stats elyssa-postgres elyssa-neo4j elyssa-rustfs elyssa-etl-runner elyssa-airflow
+
+# Check DuckDB temp/spill usage (inside etl-runner or airflow)
+docker exec elyssa-etl-runner du -sh /opt/etl/tmp/duckdb_spill/
+docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
+
+# Run with memory profiling (build sizing matrix)
+docker exec elyssa-airflow python /opt/airflow/data-engineering/orchestration/operators/silver_operator.py --profile-memory
 ```
 
 ---
@@ -174,5 +269,6 @@ FROM pg_stat_statements ORDER BY mean_time DESC LIMIT 10;"
 
 ## Key Docs
 - [`docs/specialized_assessment.md`](docs/specialized_assessment.md) — 56-check DE assessment
-- [`docs/de_optimization_plan.md`](docs/de_optimization_plan.md) — 17-item optimization plan
+- [`docs/de_optimization_plan.md`](docs/de_optimization_plan.md) — 17-item optimization plan (Tier 1-2)
+- [`docs/de_optimization_plan_tier3_memory.md`](docs/de_optimization_plan_tier3_memory.md) — Tier-3 memory optimization (10 interventions)
 - [`docs/schema_dictionary.md`](docs/schema_dictionary.md) — Column-level schema + known deltas

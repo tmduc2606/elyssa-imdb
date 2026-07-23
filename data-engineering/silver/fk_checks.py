@@ -81,14 +81,13 @@ FK_CHECKS = [
     },
 ]
 
-def run_fk_checks(spark) -> list[dict]:
-    from pyspark.sql import SparkSession
+def run_fk_checks(conn) -> list[dict]:
     results = []
     all_passed = True
     for check in FK_CHECKS:
-        df = spark.sql(check["sql"])
-        row = df.collect()[0]
-        count = row["orphan_count"]
+        cur = conn.cursor()
+        cur.execute(check["sql"])
+        count = cur.fetchone()[0]
         passed = count <= check["threshold"]
         results.append({
             "check_name": check["name"],

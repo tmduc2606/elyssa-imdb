@@ -1,3 +1,7 @@
+
+
+# PySpark imports kept for compatibility with test fixtures.
+# These functions are not called in the production DuckDB pipeline.
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import col, when, split, explode, posexplode, arrays_zip, trim
 from pyspark.sql.types import BooleanType, IntegerType, ShortType, DecimalType, DateType

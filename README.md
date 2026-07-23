@@ -43,7 +43,7 @@ IMDb .tsv.gz
 
 ### Smoke Test
 ```powershell
-docs\SMOKE_TEST.md    # 30-minute walkthrough
+docs\SMOKE_TEST.md    # 30-minute walkthrough (no Docker needed)
 ```
 
 ### Full Pipeline (3 days, sequential)
@@ -51,7 +51,29 @@ docs\SMOKE_TEST.md    # 30-minute walkthrough
 |-----|-------|-----------|--------|
 | 1 | Data Engineering | 5–6 h | `marts/full/*.parquet` (6 Gold tables) |
 | 2 | Data Science | 3–4 h | `marts/processed/*` (trained models + artifacts) |
-| 3 | Web Application | 15 min | API :8000 + Frontend :5173 |
+| 3 | Web Application | 15 min | API :8000 |
+
+## Docker Stacks
+
+The project is split into independent compose stacks to fit 16 GB RAM:
+
+| Stack | Compose File | Services | Est. RAM |
+|-------|-------------|----------|----------|
+| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, neo4j, rustfs, duckdb, airflow | ~5-7 GB |
+| **Web Application** | `docker-compose.yml` (root) | api, redis | ~1 GB |
+| **MLOps** | `mlops/docker-compose.yml` | mlflow, prometheus, grafana + exporters | ~2-3 GB |
+
+Each service has `mem_limit` + reduced runtime configs. Run only what you need:
+```powershell
+# DE pipeline work
+docker compose -f docker/docker-compose.yml up -d
+
+# Web app only (requires existing marts)
+docker compose up -d
+
+# Both together if RAM permits
+docker compose -f docker/docker-compose.yml up -d && docker compose up -d
+```
 
 ---
 
@@ -107,9 +129,10 @@ elyssa-imdb/
 │   ├── SMOKE_TEST.md     30-minute smoke test
 │   ├── qa_catalog_template.md  58-check QA checklist
 │   └── plug_and_play_improvement_plan.md  Master improvement plan
-├── docker/               # Shared Dockerfiles
-├── docker-compose.yml    # Root Docker Compose (PostgreSQL, Neo4j, RustFS, Airflow, API, Redis)
-├── Makefile              # Build targets (build, up, down, export, etc.)
+├── docker/               # DE Dockerfiles + DE compose stack
+│   └── docker-compose.yml  DE Infra + Orchestration (postgres, neo4j, rustfs, duckdb, airflow)
+├── docker-compose.yml    # Web Application stack (api, redis) — separate from DE infra
+├── Makefile              # Build targets (DE: -f docker/docker-compose.yml, Web: default)
 ├── .env.example          # Environment variable reference
 └── AGENTS.md             # Root agent orchestration entry point
 ```
@@ -138,6 +161,11 @@ elyssa-imdb/
 | RAM | 16 GB | 32 GB |
 | Disk | 20 GB free | 50 GB SSD |
 | Docker | 24+ with compose plugin | 24+ |
+
+All containers have explicit `mem_limit` to prevent resource starvation.
+Run only the stack you need — see [Docker Stacks](#docker-stacks) above.
+Build sequentially (`docker compose build --no-cache <service>`) to avoid
+memory pressure during image compilation on constrained hosts.
 
 ---
 

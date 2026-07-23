@@ -2,12 +2,8 @@
 # Apache Airflow — orchestration for Elyssa pipeline DAGs
 # NOTE: Airflow does not support native Windows; runs exclusively in Docker.
 
-# ─── Apache Airflow ────────────────────────────────────────────────
-# Purpose: DAG orchestration — Bronze→Silver→Gold pipeline, Neo4j sync
-# Port: 8080 (Web UI)
 FROM apache/airflow:3.3.0
 
-# Switch to root for system packages
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -16,17 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-# NOTE: Spark/Java removed — bronze/silver operators now use DuckDB (no JVM needed)
-
-# Switch back to airflow user
 USER airflow
 
-# Install Python dependencies from requirements.txt
 COPY data-engineering/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Pre-install dbt packages at build time (avoids runtime network dependency)
-# Copy entire gold project so dbt deps can resolve packages into dbt_packages/
 COPY data-engineering/gold /opt/gold-build
 USER root
 RUN chown -R airflow:root /opt/gold-build
@@ -34,17 +24,14 @@ USER airflow
 RUN dbt deps --project-dir /opt/gold-build --profiles-dir /opt/gold-build 2>/dev/null || \
     echo "[WARN] dbt deps at build time failed — will retry at task time"
 
-# Airflow config
 ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor \
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse \
     AIRFLOW__CORE__LOAD_EXAMPLES=false \
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=60s \
     CMD curl -f http://localhost:8080/api/v2/monitor/health || exit 1
 
 EXPOSE 8080
 
-# Run Airflow standalone (all-in-one for local dev)
 CMD ["standalone"]

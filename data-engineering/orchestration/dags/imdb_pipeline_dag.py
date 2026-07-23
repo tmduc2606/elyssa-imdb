@@ -70,6 +70,42 @@ except Exception:
 
 
 # ─── Alerting callbacks ──────────────────────────────────────────────
+_NOTIFICATION_URL = os.environ.get("PIPELINE_NOTIFICATION_URL", "")
+_STATUS_FILE = os.environ.get("PIPELINE_STATUS_FILE", "/opt/airflow/output/pipeline_status.json")
+
+
+def _send_notification(status: str, dag_id: str, task_id: str = "", message: str = ""):
+    """POST JSON payload to notification URL (ntfy.sh, Slack webhook, etc.)."""
+    if not _NOTIFICATION_URL:
+        return
+    try:
+        import urllib.request
+        payload = json.dumps({"status": status, "dag_id": dag_id, "task_id": task_id, "message": message}).encode()
+        req = urllib.request.Request(_NOTIFICATION_URL, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[ALERT] Failed to send notification: {e}")
+
+
+def _write_status_file(status: str, dag_id: str, task_id: str = "", message: str = ""):
+    """Write pipeline status to a JSON file for external monitoring."""
+    try:
+        os.makedirs(os.path.dirname(_STATUS_FILE), exist_ok=True)
+        with open(_STATUS_FILE, "w") as f:
+            json.dump({"status": status, "dag_id": dag_id, "task_id": task_id, "message": message}, f)
+    except Exception as e:
+        print(f"[ALERT] Failed to write status file: {e}")
+
+
+def _on_success_callback(context):
+    """Business-impact alerting on task success."""
+    task_instance = context.get("task_instance")
+    dag_id = context.get("dag", {}).dag_id if context.get("dag") else "unknown"
+    task_id = task_instance.task_id if task_instance else "unknown"
+    print(f"[ALERT:OK] DAG={dag_id} Task={task_id} SUCCESS")
+    _write_status_file("success", dag_id, task_id)
+
+
 def _on_failure_callback(context):
     """Business-impact alerting on task failure."""
     task_instance = context.get("task_instance")
@@ -81,6 +117,8 @@ def _on_failure_callback(context):
     severity = "HIGH" if task_id in ["bronze_ingest", "silver_transform"] else "MEDIUM"
     log_msg = f"[ALERT:{severity}] DAG={dag_id} Task={task_id} FAILED | Exception: {exception} | Log: {log_url}"
     print(log_msg)
+    _write_status_file("failed", dag_id, task_id, str(exception))
+    _send_notification("failed", dag_id, task_id, str(exception))
 
 
 def _on_retry_callback(context):
@@ -100,6 +138,7 @@ default_args = {
     "retry_exponential_backoff": True,
     "max_retry_delay": timedelta(seconds=_retry_cfg.get("max_delay_s", 1800)),
     "execution_timeout": timedelta(hours=8),
+    "on_success_callback": _on_success_callback,
     "on_failure_callback": _on_failure_callback,
     "on_retry_callback": _on_retry_callback,
 }
@@ -127,6 +166,8 @@ with DAG(
     )
 
     # ─── Bronze (TSV → Parquet, with quarantine) ──────────────────────────
+    # retries=1: avoid infinite re-download loop; checkpoint resume skips
+    # tables whose parquet already exists from the first attempt.
     bronze_ingest = BronzeIngestOperator(
         task_id="bronze_ingest",
         source_tables=[
@@ -135,6 +176,7 @@ with DAG(
             "name.basics",
         ],
         bronze_path=_BRONZE_PATH,
+        retries=1,
     )
 
     # ─── Bronze Ingestion Complete ────────────────────────────────────────

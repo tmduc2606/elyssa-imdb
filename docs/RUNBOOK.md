@@ -2,14 +2,17 @@
 
 Sequential 3-day execution on reference hardware (AMD Athlon 200GE, 16 GB RAM).
 
+Memory-hardened compose at `docker/docker-compose.yml` (~5-7 GB peak with all services).
+
 ## Day 1 — Data Engineering (5-6 hours)
 
 ```powershell
 # === PHASE 1: DE Pipeline ===
-Write-Host "=== Step 1: Docker up ===" -ForegroundColor Cyan
+Write-Host "=== Step 1: Build & Start DE stack ===" -ForegroundColor Cyan
 docker builder prune -f
-docker compose up -d --build
-docker compose ps
+docker compose -f docker/docker-compose.yml build
+docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml ps
 
 Write-Host "=== Step 2: Download IMDb data ===" -ForegroundColor Cyan
 $files = @("title.basics","title.akas","title.ratings","title.episode","title.crew","title.principals","name.basics")

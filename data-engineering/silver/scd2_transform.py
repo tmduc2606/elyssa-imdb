@@ -7,12 +7,7 @@ Encapsulates:
 - SCD2 column computation for MERGE operations
 """
 
-from pyspark.sql import DataFrame
-from pyspark.sql.functions import (
-    col, lit, current_timestamp, when, coalesce, expr, monotonically_increasing_id,
-)
-from pyspark.sql.types import TimestampType, BooleanType, LongType
-
+from __future__ import annotations
 
 def generate_scd2_columns(
     df: DataFrame,

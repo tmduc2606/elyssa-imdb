@@ -127,14 +127,16 @@ class BronzeIngestOperator(BaseOperator):
 
         conn = duckdb.connect(":memory:")
         conn.execute("SET threads = 2")
-        # A2: Reduce memory_limit from 6GB to 3GB to prevent spill
-        conn.execute("SET memory_limit = '3GB'")
+        conn.execute("SET memory_limit = '700MB'")
         conn.execute("SET preserve_insertion_order = false")
 
-        # A1: Set DuckDB temp_directory to dedicated path on airflow_data volume
-        temp_dir = "/opt/airflow/output/duckdb_temp/"
-        os.makedirs(temp_dir, exist_ok=True)
-        conn.execute(f"SET temp_directory = '{temp_dir}'")
+        # M4: Set DuckDB temp_directory to volume-backed path
+        temp_root = "/opt/airflow/output/tmp/"
+        if not os.path.exists(temp_root):
+            temp_root = "/tmp/"
+        duckdb_temp = os.path.join(temp_root, "duckdb_spill")
+        os.makedirs(duckdb_temp, exist_ok=True)
+        conn.execute(f"SET temp_directory = '{duckdb_temp}'")
         conn.execute("SET max_temp_directory_size = '10GB'")
 
         # PostgreSQL connection for quarantine logging
@@ -175,6 +177,14 @@ class BronzeIngestOperator(BaseOperator):
                     self.log.warning(f"Source file not found: {file_path}, skipping {table}")
                     continue
 
+                output_path = os.path.join(self.bronze_path, f"{table}.parquet")
+                if os.path.exists(output_path):
+                    existing_count = conn.execute(f"SELECT COUNT(*) FROM '{output_path}'").fetchone()[0]
+                    self.log.info(f"  {table}: CHECKPOINT (already exists at {output_path}, {existing_count} rows)")
+                    total_rows += existing_count
+                    processed.append({"table": table, "rows": existing_count, "checkpoint": True})
+                    continue
+
                 # ── Validate file before processing ────────────────────────
                 expected_cols = self.EXPECTED_COLUMNS.get(table)
                 if expected_cols is not None:
@@ -198,7 +208,6 @@ class BronzeIngestOperator(BaseOperator):
                         self.log.warning(f"Validation error for {table}: {e}")
 
                 # ── Process valid file ─────────────────────────────────────
-                output_path = os.path.join(self.bronze_path, f"{table}.parquet")
                 now_ts = datetime.now(timezone.utc).isoformat()
 
                 # ── Compute file checksum for lineage ───────────────────────
@@ -215,7 +224,7 @@ class BronzeIngestOperator(BaseOperator):
 
                 schema_def = self.BRONZE_SCHEMAS.get(table, {})
                 if schema_def:
-                    cols_str = ", ".join(f"'{k}' '{v}'" for k, v in schema_def.items())
+                    cols_str = ", ".join(f"'{k}': '{v}'" for k, v in schema_def.items())
                     read_csv_sql = f"read_csv(?, columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
                 else:
                     read_csv_sql = "read_csv(?, delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
@@ -240,12 +249,15 @@ class BronzeIngestOperator(BaseOperator):
 
                 self.log.info(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
 
+                # Inline file paths in SQL (internal/trusted — avoids ? conflict in COPY subquery)
+                fp = file_path.replace("'", "''")
+                op = output_path.replace("'", "''")
+                copy_sql = read_csv_sql.replace("?", f"'{fp}'")
                 conn.execute(
                     f"COPY ("
-                    f"  SELECT *, ? AS _source_file, ? AS _source_table, ? AS _batch_id, ? AS _ingested_at, ? AS _row_count, ? AS _file_checksum "
-                    f"  FROM {read_csv_sql}"
-                    f") TO ? (FORMAT PARQUET, COMPRESSION snappy)",
-                    [file_path, table, batch_id, now_ts, row_count, file_checksum, file_path, output_path]
+                    f"  SELECT *, '{fp}' AS _source_file, '{table}' AS _source_table, '{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, {row_count} AS _row_count, '{file_checksum}' AS _file_checksum "
+                    f"  FROM {copy_sql}"
+                    f") TO '{op}' (FORMAT PARQUET, COMPRESSION snappy)"
                 )
 
                 total_rows += row_count
@@ -268,6 +280,9 @@ class BronzeIngestOperator(BaseOperator):
                     except Exception as e:
                         self.log.warning(f"Failed to persist batch metadata for {table}: {e}")
 
+                # Per-table cleanup: flush DuckDB temp to free space between large tables
+                conn.execute("CHECKPOINT")
+
             # ── Summary ────────────────────────────────────────────────────
             elapsed = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
             self.log.info(
@@ -286,12 +301,11 @@ class BronzeIngestOperator(BaseOperator):
             }
         finally:
             conn.close()
-            # A1: Clean up DuckDB temp files
+            # M4: Clean up DuckDB temp files
             try:
                 import shutil
-                temp_dir = "/opt/airflow/output/duckdb_temp/"
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+                if os.path.exists(duckdb_temp):
+                    shutil.rmtree(duckdb_temp, ignore_errors=True)
             except Exception as e:
                 self.log.warning(f"Failed to clean up DuckDB temp directory: {e}")
             if pg:

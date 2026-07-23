@@ -4,21 +4,20 @@
 
 # ─── Processing ────────────────────────────────────────────────────
 duckdb==1.1.3
-pyarrow==18.1.0
+pyarrow==25.0.0
 
 # ─── Database Drivers ─────────────────────────────────────────────
 psycopg2-binary==2.9.10
-neo4j==5.27.0
+neo4j==6.2.0
 
 # ─── Transformation (dbt — pin core+adapter together) ─────────────
 dbt-core==1.11.11
-dbt-postgres==1.11.11
+dbt-postgres==1.11.0
 
 # ─── Data Quality ─────────────────────────────────────────────────
 great-expectations==1.18.2
 
 # ─── Data Manipulation ────────────────────────────────────────────
-pandas==2.2.3
 
 # ─── Config / Utilities ───────────────────────────────────────────
 pyyaml==6.0.3

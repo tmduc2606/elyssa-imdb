@@ -82,10 +82,11 @@ npm run dev                 # → http://localhost:5173
 
 Vite proxies `/graphql`, `/auth`, and `/api` to the backend.
 
-### Docker (full stack)
+### Docker (web stack only)
 
 ```bash
-docker compose up -d        # starts api, redis, postgres, etc.
+docker compose up -d        # starts api + redis (root docker-compose.yml, ~1 GB RAM)
+docker compose -f docker/docker-compose.yml up -d   # DE infra (separate terminal)
 ```
 
 ---

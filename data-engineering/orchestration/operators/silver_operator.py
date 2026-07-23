@@ -7,6 +7,80 @@ from datetime import datetime, timezone
 sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
 from pipeline_logger import get_logger
 
+# Threshold for chunked processing: tables with >5M source rows
+CHUNKED_CHILD_THRESHOLD = 5_000_000
+CHUNK_BATCH_SIZE = 1_000_000
+
+
+def _log_memory(conn, logger, stage_name):
+    """Log DuckDB peak memory and temp file usage for profiling (M10)."""
+    try:
+        peak_mb = conn.execute(
+            "SELECT peak_memory / (1024 * 1024) FROM pragma_database_info()"
+        ).fetchone()[0]
+        temp_count = conn.execute(
+            "SELECT count(*) FROM glob( "
+            "(SELECT value FROM pragma_database_setting('temp_directory')) || '/*.tmp')"
+        ).fetchone()[0]
+        logger.info(f"[MEMPROFILE] {stage_name}: DuckDB peak={peak_mb} MB, temp_files={temp_count}")
+    except Exception:
+        pass
+
+
+def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, batch_size=CHUNK_BATCH_SIZE):
+    """Process a child table in chunks to bound peak memory during array explosion (M3).
+
+    For large source tables (e.g. title.principals with 100M rows),
+    the UNNEST operation on the full table can cause OOM. This function
+    reads the source Parquet in row-range chunks and explodes each chunk.
+    """
+    import os as _os
+
+    dst_table = child_def["dst_table"]
+    snake_cols = child_def["snake_cols"]
+    sql_template = child_def["sql"]
+
+    total_src = conn.execute(
+        f"SELECT count(*) FROM read_parquet('{parquet_path}')"
+    ).fetchone()[0]
+
+    log.info(f"  {dst_table}: {total_src} source rows, processing in chunks of {batch_size}")
+
+    offset = 0
+    chunk_total = 0
+    chunk_idx = 0
+    while offset < total_src:
+        chunk_idx += 1
+        # Read a row-range window of the source parquet
+        # DuckDB: use a subquery with row_number to paginate
+        chunk_table = f"_chunk_{dst_table.replace('.', '_')}_{chunk_idx}"
+        conn.execute(f"""
+            CREATE TEMPORARY VIEW {chunk_table} AS
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER () AS _rn
+                FROM read_parquet('{parquet_path}')
+            ) sub WHERE _rn > {offset} AND _rn <= {offset + batch_size}
+        """)
+        chunk_sql = sql_template.format(source=chunk_table)
+        csv_path = f"/tmp/silver_{dst_table.replace('.', '_')}_chunk_{chunk_idx}.csv"
+        conn.execute(f"COPY ({chunk_sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
+
+        with open(csv_path, "r") as f:
+            cols = ", ".join(snake_cols)
+            pg_cursor.copy_expert(
+                f"COPY {dst_table} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
+                f,
+            )
+
+        _os.remove(csv_path)
+        conn.execute(f"DROP VIEW IF EXISTS {chunk_table}")
+        chunk_rows = pg_cursor.rowcount
+        chunk_total += chunk_rows
+        offset += batch_size
+        log.info(f"  {dst_table}: chunk {chunk_idx} loaded ({chunk_rows} rows)")
+
+    return chunk_total
+
 
 class SilverTransformOperator(BaseOperator):
     """
@@ -22,6 +96,7 @@ class SilverTransformOperator(BaseOperator):
         jdbc_url: str = "postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
         jdbc_user: str = "elyssa",
         jdbc_password: str = "elyssa_pg_2026",
+        profile_memory: bool = False,
         *args,
         **kwargs,
     ):
@@ -30,6 +105,7 @@ class SilverTransformOperator(BaseOperator):
         self.jdbc_url = jdbc_url
         self.jdbc_user = jdbc_user
         self.jdbc_password = jdbc_password
+        self.profile_memory = profile_memory
 
     def execute(self, context):
         import duckdb
@@ -44,13 +120,18 @@ class SilverTransformOperator(BaseOperator):
 
         conn = duckdb.connect(":memory:")
         conn.execute("SET threads = 2")
-        conn.execute("SET memory_limit = '4GB'")
+        conn.execute("SET memory_limit = '1.2GB'")
         conn.execute("SET preserve_insertion_order = false")
 
-        # A1: Set DuckDB temp_directory to dedicated path on airflow_data volume
-        temp_dir = "/opt/airflow/output/duckdb_temp/"
-        os.makedirs(temp_dir, exist_ok=True)
-        conn.execute(f"SET temp_directory = '{temp_dir}'")
+        # M4: Use etl_temp volume path (falls back to /tmp for backward compat)
+        temp_root = "/opt/airflow/output/tmp/"
+        if not os.path.exists(temp_root):
+            temp_root = "/tmp/"
+        duckdb_temp = os.path.join(temp_root, "duckdb_spill")
+        csv_dir = os.path.join(temp_root, "csv_intermediates")
+        os.makedirs(duckdb_temp, exist_ok=True)
+        os.makedirs(csv_dir, exist_ok=True)
+        conn.execute(f"SET temp_directory = '{duckdb_temp}'")
         conn.execute("SET max_temp_directory_size = '10GB'")
 
         pg = psycopg2.connect(
@@ -63,6 +144,16 @@ class SilverTransformOperator(BaseOperator):
             keepalives_count=5,
         )
         pg.autocommit = False
+
+        # M5: Tune PostgreSQL session for bulk COPY
+        with pg.cursor() as tune:
+            tune.execute("SET maintenance_work_mem = '256MB'")
+            tune.execute("SET max_wal_size = '4GB'")
+            tune.execute("SET checkpoint_timeout = '1h'")
+            # Reduce WAL level for bulk load (session-local, non-persistent)
+            tune.execute("SET wal_level = minimal")
+            tune.execute("SET archive_mode = off")
+        pg.commit()
 
         # Ensure schemas and tables exist (idempotent — survives container rebuilds)
         schema_path = "/opt/airflow/data-engineering/silver/schema.sql"
@@ -227,8 +318,8 @@ class SilverTransformOperator(BaseOperator):
 
                 self.log.info(f"  {src_table}: {row_count} rows -> {dst_table}")
 
-                # Copy to CSV for PostgreSQL COPY
-                csv_path = f"/tmp/silver_{src_table.replace('.', '_')}.csv"
+                # Copy to CSV for PostgreSQL COPY (M4: use volume-backed csv_dir)
+                csv_path = os.path.join(csv_dir, f"silver_{src_table.replace('.', '_')}.csv")
                 conn.execute(
                     "COPY (SELECT " + select_sql + " FROM read_parquet('" + parquet_path + "')"
                     + where_clause + ") TO '" + csv_path + "' (FORMAT CSV, HEADER true, DELIMITER '|')"
@@ -344,8 +435,18 @@ class SilverTransformOperator(BaseOperator):
                 log.log_stage(stage="silver_transform", batch_id=batch_id,
                               status="success", row_count=row_count,
                               message=f"{src_table} -> {dst_table}")
+                if self.profile_memory:
+                    _log_memory(conn, self.log, f"parent_{src_table}")
+
+            # Per-stage cleanup: flush DuckDB temp between parent and child stages
+            conn.execute("CHECKPOINT")
+            self.log.info("DuckDB temp checkpoint after parent tables, starting child normalization")
+            if self.profile_memory:
+                _log_memory(conn, self.log, "after_parent_tables")
 
             # ─── Normalize Child Tables ───────────────────────────────────────
+            # SQL templates use {source} placeholder — replaced with
+            # read_parquet('file.parquet') for full COPY or a view name for chunks.
             child_table_defs = [
                 {
                     "dst_table": "silver.title_genre",
@@ -354,7 +455,7 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT tconst,
                                UNNEST(string_split(NULLIF(genres, '\\N'), ',')) AS genre
-                        FROM read_parquet('{path}')
+                        FROM {source}
                         WHERE genres IS NOT NULL
                           AND genres != ''
                           AND genres != '\\N'
@@ -371,7 +472,7 @@ class SilverTransformOperator(BaseOperator):
                         FROM (
                             SELECT tconst,
                                    UNNEST(string_split(NULLIF(directors, '\\N'), ',')) AS director
-                            FROM read_parquet('{path}')
+                            FROM {source}
                             WHERE directors IS NOT NULL
                               AND directors != ''
                               AND directors != '\\N'
@@ -389,7 +490,7 @@ class SilverTransformOperator(BaseOperator):
                         FROM (
                             SELECT tconst,
                                    UNNEST(string_split(NULLIF(writers, '\\N'), ',')) AS writer
-                            FROM read_parquet('{path}')
+                            FROM {source}
                             WHERE writers IS NOT NULL
                               AND writers != ''
                               AND writers != '\\N'
@@ -404,7 +505,7 @@ class SilverTransformOperator(BaseOperator):
                         SELECT titleId AS title_id,
                                ordering,
                                UNNEST(string_split(NULLIF(types, '\\N'), ',')) AS type
-                        FROM read_parquet('{path}')
+                        FROM {source}
                         WHERE types IS NOT NULL
                           AND types != ''
                           AND types != '\\N'
@@ -418,7 +519,7 @@ class SilverTransformOperator(BaseOperator):
                         SELECT titleId AS title_id,
                                ordering,
                                UNNEST(string_split(NULLIF(attributes, '\\N'), ',')) AS attr
-                        FROM read_parquet('{path}')
+                        FROM {source}
                         WHERE attributes IS NOT NULL
                           AND attributes != ''
                           AND attributes != '\\N'
@@ -434,7 +535,7 @@ class SilverTransformOperator(BaseOperator):
                                TRIM(UNNEST(
                                    string_split(TRIM(NULLIF(characters, '\\N'), '[]'), '","')
                                ), '"') AS character_name
-                        FROM read_parquet('{path}')
+                        FROM {source}
                         WHERE characters IS NOT NULL
                           AND characters != ''
                           AND characters != '\\N'
@@ -451,7 +552,7 @@ class SilverTransformOperator(BaseOperator):
                         FROM (
                             SELECT nconst,
                                    UNNEST(string_split(NULLIF(primaryProfession, '\\N'), ',')) AS profession
-                            FROM read_parquet('{path}')
+                            FROM {source}
                             WHERE primaryProfession IS NOT NULL
                               AND primaryProfession != ''
                               AND primaryProfession != '\\N'
@@ -469,7 +570,7 @@ class SilverTransformOperator(BaseOperator):
                         FROM (
                             SELECT nconst,
                                    UNNEST(string_split(NULLIF(knownForTitles, '\\N'), ',')) AS title
-                            FROM read_parquet('{path}')
+                            FROM {source}
                             WHERE knownForTitles IS NOT NULL
                               AND knownForTitles != ''
                               AND knownForTitles != '\\N'
@@ -486,35 +587,59 @@ class SilverTransformOperator(BaseOperator):
                     continue
 
                 self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
-                sql = child["sql"].format(path=parquet_path)
 
-                row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
+                # Determine if chunked processing is needed (M3)
+                total_src = conn.execute(
+                    f"SELECT count(*) FROM read_parquet('{parquet_path}')"
+                ).fetchone()[0]
 
-                if row_count == 0:
-                    self.log.info(f"  {child['dst_table']}: 0 rows, skipping")
-                    continue
+                use_chunked = total_src > CHUNKED_CHILD_THRESHOLD
 
-                self.log.info(f"  {child['dst_table']}: {row_count} rows to load")
-
-                csv_path = f"/tmp/silver_{child['dst_table'].replace('.', '_')}.csv"
-                conn.execute(f"COPY ({sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
-                self.log.info(f"  {child['dst_table']}: CSV export done")
-
-                with pg.cursor() as pg_cursor:
-                    pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
-
-                    with open(csv_path, "r") as f:
-                        cols = ", ".join(child["snake_cols"])
-                        pg_cursor.copy_expert(
-                            f"COPY {child['dst_table']} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
-                            f,
+                if use_chunked:
+                    with pg.cursor() as pg_cursor:
+                        pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
+                        self.log.info(f"  {child['dst_table']}: large source ({total_src:,} rows), using chunked UNNEST")
+                        chunk_loaded = _process_child_table_chunked(
+                            conn, pg_cursor, child, parquet_path, self.log
                         )
-                os.remove(csv_path)
-                child_rows += row_count
-                self.log.info(f"  {child['dst_table']}: {row_count} rows loaded")
-                log.log_stage(stage="silver_transform", batch_id=batch_id,
-                              status="success", row_count=row_count,
-                              message=f"child {child['dst_table']}")
+                    child_rows += chunk_loaded
+                    self.log.info(f"  {child['dst_table']}: {chunk_loaded} rows loaded (chunked)")
+                    log.log_stage(stage="silver_transform", batch_id=batch_id,
+                                  status="success", row_count=chunk_loaded,
+                                  message=f"child {child['dst_table']} (chunked)")
+                else:
+                    source_expr = f"read_parquet('{parquet_path}')"
+                    sql = child["sql"].format(source=source_expr)
+                    row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
+
+                    if row_count == 0:
+                        self.log.info(f"  {child['dst_table']}: 0 rows, skipping")
+                        continue
+
+                    self.log.info(f"  {child['dst_table']}: {row_count} rows to load (full COPY)")
+
+                    csv_path = os.path.join(csv_dir, f"silver_{child['dst_table'].replace('.', '_')}.csv")
+                    conn.execute(f"COPY ({sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
+                    self.log.info(f"  {child['dst_table']}: CSV export done")
+
+                    with pg.cursor() as pg_cursor:
+                        pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
+
+                        with open(csv_path, "r") as f:
+                            cols = ", ".join(child["snake_cols"])
+                            pg_cursor.copy_expert(
+                                f"COPY {child['dst_table']} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
+                                f,
+                            )
+                    os.remove(csv_path)
+                    child_rows += row_count
+                    self.log.info(f"  {child['dst_table']}: {row_count} rows loaded")
+                    log.log_stage(stage="silver_transform", batch_id=batch_id,
+                                  status="success", row_count=row_count,
+                                  message=f"child {child['dst_table']}")
+
+                if self.profile_memory:
+                    _log_memory(conn, self.log, f"child_{child['dst_table']}")
 
             pg.commit()
             elapsed = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
@@ -534,19 +659,22 @@ class SilverTransformOperator(BaseOperator):
             raise
         finally:
             conn.close()
-            # Clean up temp CSV files
+            # Clean up temp CSV files (M4: check both old /tmp and volume paths)
             try:
-                import glob
-                for csv_file in glob.glob("/tmp/silver_*.csv"):
-                    os.remove(csv_file)
+                import glob as _glob
+                for _p in ("/tmp/", csv_dir):
+                    for csv_file in _glob.glob(os.path.join(_p, "silver_*.csv")):
+                        try:
+                            os.remove(csv_file)
+                        except Exception:
+                            pass
             except Exception:
                 pass
             # Clean up DuckDB temp files
             try:
                 import shutil
-                temp_dir = "/opt/airflow/output/duckdb_temp/"
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+                if os.path.exists(duckdb_temp):
+                    shutil.rmtree(duckdb_temp, ignore_errors=True)
             except Exception as e:
                 self.log.warning(f"Failed to clean up DuckDB temp directory: {e}")
             pg.close()

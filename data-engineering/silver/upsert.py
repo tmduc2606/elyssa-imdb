@@ -1,4 +1,4 @@
-from pyspark.sql import DataFrame
+from __future__ import annotations
 
 SILVER_TABLE_DDL = {
     "silver.title_basics": {
