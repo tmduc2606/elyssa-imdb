@@ -1,290 +1,431 @@
 # DE Pipeline Optimization Plan
 
-**Codename: Elyssa** — Phase 1 Data Engineering Module  
-_Cross-compared findings from specialized assessment, external Architecture Review (3 advisors), and Elyssa proposal criteria_
-
-**Hardware target:** AMD Athlon 200GE (2C/4T), 16 GB RAM  
-**Current pipeline runtime:** ~5h36m (Bronze 47m → Silver 3h39m → Gold 63m → Export 15m)  
-**Assessment date:** 2026-07-22
-
----
-
-## Optimization Philosophy
-
-Given the hardware ceiling (2 cores, 16 GB), the plan prioritizes **architectural optimizations that reduce total runtime without requiring more parallelism** — better indexing, incremental strategies, smarter data skipping, and pre-computed aggregates over brute-force parallel scaling.
-
-Three tiers:
-
-- **Tier 1 — Zero-cost fixes:** SQL rewrites, grain clarifications, index additions (no infra change, immediate impact)
-- **Tier 2 — Configuration & incremental:** dbt thread tuning, incremental models, materialized views (leverage existing infra)
-- **Tier 3 — Architectural:** Partitioning, engine consolidation, pre-computed aggregates (structural change, requires testing)
+**Codename: Elyssa** — Phase 1 Production Data Engineering
+_Derived from specialized_assessment.md findings_
+**Hardware:** AMD Athlon 200GE (2C/4T), 16 GB RAM
+**Baseline runtime:** ~5h 30m (Bronze 47m → Silver 3.5h → Gold 63m → Export 15m)
+**Assessment reference:** A1-A16 in `specialized_assessment.md`
 
 ---
 
-## Summary Table
+## Tier Strategy
 
-| # | Domain | Current State | Optimization | Est. Impact | Tier | Depends On |
-|---|--------|---------------|-------------|-------------|------|------------|
-| 1 | Gold PK | fact_performance PK declared on wrong grain | Fix PK to (title_key, name_key, ordering) | Eliminates false 1.9M "duplicate" warnings | T1 | — |
-| 2 | Gold PK | fact_episode PK declared on nullable columns | PK = episode_key; COALESCE NULL season/episode | Eliminates false 1.9M "duplicate" warnings | T1 | — |
-| 3 | DQ SQL | fact_title_principal PK test uses wrong column name | Change `tconst` to `title_key` in DQ check | Unblocks 4 previously-failing DQ tests | T1 | — |
-| 4 | FK | 7,649 orphan nconst in fact_performance | Add FK pre-check in Silver before Gold materialization | Catches referential drift early | T1 | — |
-| 5 | FK | 323K episode series_key orphans | Document or fix series_key / title_type join in int_title_details | Clarifies 3% episode provenance | T1 | — |
-| 6 | Bronze | `all_varchar=true` on read_csv adds type coercion cost | Add explicit schema structs to DuckDB read_csv | Target: 47m → <15m | T2 | Schema definition per source |
-| 7 | dbt | `threads: 2` limits Gold model concurrency | Increase to `threads: 4` (HW-limited; 4 > 2 on 4-logical-core CPU) | Target: 63m → ~40m | T2 | profiles.yml edit |
-| 8 | dbt | All 6 mart models use full `table` rebuild | Convert high-volume marts (fact_performance, fact_title_principal, dim_title) to `incremental` | Target: 63m → ~35m | T2 | unique_key + timestamp column |
-| 9 | Performance | Actor co-occurrence 30s on 100M-row fact_performance | Materialize co-occurrence as `agg_actor_cooccurrence` table | Target: 30s → <1s | T2 | New dbt model |
-| 10 | Performance | No single-row lookup index on dim_person for web API | Add index on dim_person(primary_name) for search | Tooltip: sub-second lookups | T2 | Index DDL |
-| 11 | Architecture | 5 engines (DuckDB, PySpark, Postgres, Neo4j, RustFS) for 5 GB data | Consolidate Silver+Gold into DuckDB-native pipeline | Target: 5.5h → <2h (total) | T3 | Pipeline rewrite |
-| 12 | Architecture | Gold export (Postgres → Parquet) takes 15 min | Replace export step with direct DuckDB `COPY (query) TO 'file.parquet'` | Target: 15m → <2m | T3 | DuckDB postgres_scanner |
-| 13 | Incremental | Full pipeline rerun on every execution | Implement watermark-based incremental loads for Bronze → Silver | Target: 5.5h → ~45m (incremental) | T3 | Watermark logic exists but unused |
-| 14 | Partitioning | No partition pruning on 100M-row fact tables | Partition fact_performance by title_type or year bucket | Target: query scan reduction 40-60% | T3 | Partition key design |
-| 15 | Indexing | Missing FK composite indexes on Gold fact tables | Add composite indexes (title_key + name_key) on fact_performance | Target: join speedup 2-5x | T2 | Index DDL |
-| 16 | Governance | _MANIFEST.json not written to marts/full/ | Fix or re-run GoldExportOperator after dbt test passes | Restores export audit trail | T1 | Existing operator fix (G9) |
-| 17 | Documentation | 89-row nconst delta in SCD2 filter unexplained | Document in schema_dictionary.md | Reduces confusion for DE audits | T1 | — |
+| Tier | Type | Impact | Risk | Items |
+|------|------|--------|------|-------|
+| T1 | Safety & correctness | Prevents OOM, fixes broken data | None | A1-A8 |
+| T2 | Performance & quality | Reduces runtime 20-40% | Low | A9-A13 |
+| T3 | Architectural | Reduces runtime 60-70% | Medium | A14-A16 |
 
 ---
 
-## Detailed Plan
+## Tier 1 — Safety & Correctness (0 dev hours config, 2-3 days implementation)
 
-### Tier 1 — Zero-Cost Fixes (0 dev hours, immediate)
+### T1.1 Wire `etl-runner` Container into Silver DAG
 
-#### O1. Fix fact_performance PK Grain
+**Assessment ref:** A2 (P0 — `etl-runner` exists but unused)
+**File:** `imdb_pipeline_dag.py`, `docker-compose.yml`
 
-**Current:** `unique` test on `(tconst, nconst, category)` — 1,905,885 "duplicates"  
-**Problem:** A person can have multiple orderings per category per title (e.g., credited as "actor" at ordering 1 and "actor" at ordering 5).  
-**Fix in** `gold/models/marts/schema.yml`:
+**Problem:** Silver DuckDB runs inside Airflow container (4 GB limit), sharing RAM with webserver and scheduler. The `etl-runner` container (6 GB, `mem_limit: 6g`) already exists in `mlops/docker-compose.yml` but is never used.
+
+**Solution:** Add `etl-runner` to `docker/docker-compose.yml` and wire it into the DAG:
+
 ```yaml
+# docker/docker-compose.yml
+etl-runner:
+  image: elyssa-etl-runner:latest
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.etl-runner
+  container_name: elyssa-etl-runner
+  mem_limit: 6g
+  memswap_limit: 8g
+  oom_score_adj: -500
+  environment:
+    DUCKDB_MEMORY_LIMIT: "4GB"
+    DUCKDB_THREADS: "2"
+    POSTGRES_HOST: postgres
+    POSTGRES_USER: ${POSTGRES_USER:-elyssa}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  volumes:
+    - ../data-engineering:/opt/etl/data-engineering:rw
+    - airflow_data:/opt/etl/output:rw
+    - etl_temp:/opt/etl/tmp:rw
+  shm_size: 2g
+  networks:
+    - elyssa-net
+  restart: "no"
+```
+
+In the DAG, replace `SilverTransformOperator` with a `DockerOperator` or `SSHOperator` that triggers silver_operator.py inside the etl-runner container:
+
+```python
+# imdb_pipeline_dag.py — using DockerOperator
+from airflow.providers.docker.operators.docker import DockerOperator
+
+silver_transform = DockerOperator(
+    task_id="silver_transform",
+    image="elyssa-etl-runner:latest",
+    command="python /opt/etl/data-engineering/orchestration/operators/silver_operator.py",
+    docker_url="unix://var/run/docker.sock",
+    network_mode="elyssa-net",
+    mount_tmp_dir=False,
+    auto_remove=True,
+    environment={
+        "DUCKDB_MEMORY_LIMIT": "4GB",
+        "POSTGRES_HOST": "postgres",
+    },
+    execution_timeout=timedelta(hours=6),
+)
+```
+
+**Rationale:** If the `etl-runner` is in `mlops/docker-compose.yml` and the Airflow pipeline runs in `docker/docker-compose.yml`, they are separate compose stacks. The simpler approach is to remove the `etl-runner` from mlops/ and add it to `docker/docker-compose.yml` where the Airflow instance lives, so they share a Docker network.
+
+**Est. impact:** Eliminates OOM on Silver UNNEST (peak usage moves from 3.5 GB in 4 GB container to ~4.5 GB in 6 GB container).
+
+### T1.2 Fix Silver DuckDB memory_limit
+
+**Assessment ref:** A1 (P0 — 2.5 GB in 4 GB container is unsafe)
+**File:** `silver_operator.py:132`
+
+```python
+# Before (line 132)
+conn.execute("SET memory_limit = '2.5GB'")
+
+# After
+conn.execute("SET memory_limit = '1.2GB'")  # 60% of remaining budget after Airflow
+```
+
+With the `etl-runner` container (T1.1), change to:
+```python
+conn.execute("SET memory_limit = '4GB'")  # 67% of 6 GB container
+```
+
+### T1.3 Fix Gold PK Grains
+
+**Assessment ref:** A3 (P0), A4 (P0)
+**Files:** `gold/models/marts/schema.yml`, `gold/models/marts/episodic_content/schema.yml`
+
+**fact_performance** — change PK from `(tconst, nconst, category)` to `(title_key, name_key, ordering)`:
+
+```yaml
+# In gold/models/marts/schema.yml
 - name: fact_performance
   columns:
     - name: title_key
+      tests: [not_null]
     - name: name_key
+      tests: [not_null]
     - name: ordering
       tests: [unique, not_null]
-      # maintain PK as (title_key, name_key, ordering)
+      description: "PK: (title_key, name_key, ordering) — unique per credit position"
 ```
 
-#### O2. Fix fact_episode PK Grain
+**fact_episode** — change PK from `(series_key, season_number, episode_number)` to `(episode_key)`:
 
-**Current:** `unique` test on `(series_key, season_number, episode_number)` — 1,978,824 "duplicates"  
-**Problem:** NULL season_number and episode_number collapse all episodes with missing numbers into the same key.  
-**Fix in** `gold/models/marts/episodic_content/schema.yml`:
 ```yaml
+# In gold/models/marts/episodic_content/schema.yml
 - name: fact_episode
   columns:
     - name: episode_key
       tests: [unique, not_null]
-    - name: season_number
-      tests:
-        - not_null:
-            severity: warn
-    - name: episode_number
-      tests:
-        - not_null:
-            severity: warn
+      description: "PK: tconst of the episode itself"
 ```
 
-#### O3. Fix fact_title_principal DQ SQL
+### T1.4 Remove Dead PySpark Code
 
-**Current:** `count(DISTINCT tconst, ordering)` — binder error: "tconst not found"  
-**Fix in** DQ config: Replace `tconst` with `title_key` to match Gold schema column name. This unblocks the 4 failed PK tests noted in the external Architecture Review.
+**Assessment ref:** A5 (P1)
+**Files:** `silver/scd2_transform.py`, `silver/transform.py`, `silver/upsert.py`
 
-#### O4. Add Silver FK Pre-checks
+**Actions:**
+- `silver/scd2_transform.py`: Remove or deprecate all 144 lines. Add `# DEPRECATED — use inline SCD2 in silver_operator.py` header. The functions `generate_scd2_columns()`, `compute_scd2_close_sql()`, `build_scd2_merge_sql()` use PySpark `DataFrame` which is stripped from the Docker image.
+- `silver/transform.py`: Remove unused ARRAY_FIELDS, TYPE_MAP, null_to_empty, rename_to_silver, explode_array — all PySpark-based and superseded by DuckDB SQL in silver_operator.py.
+- `silver/upsert.py`: Remove `generate_merge_sql()` — never called.
 
-**Current:** 7,649 orphan nconst flow into Gold fact_performance with no FK constraint.  
-**Fix in** `silver/fk_checks.py`: Add `fact_performance.nconst → dim_person.nconst` check before Gold materialization. Quarantine orphan rows.
+**Est. impact:** Eliminates ~250 lines of dead code, removes confusion about which transform path is active.
 
-#### O5. Document 89-Row nconst Delta
+### T1.5 Verify & Fix Child Table Population
 
-**Current:** External review flagged this as suspicious; we reproduced it.  
-**Fix:** Add a note in `schema_dictionary.md` explaining that SCD2 deduplication on name_basics filters rows where all fields match an existing current record (no effective change). This is intentional.
+**Assessment ref:** A6 (P1)
+**Files:** `silver_operator.py:498-539`
 
-#### O6. Generate _MANIFEST.json
+**Action:** Against live PostgreSQL, verify row counts for:
+```sql
+SELECT 'title_akas_type' AS tbl, COUNT(*) FROM silver.title_akas_type
+UNION ALL
+SELECT 'title_akas_attribute', COUNT(*) FROM silver.title_akas_attribute
+UNION ALL
+SELECT 'title_principal_char', COUNT(*) FROM silver.title_principal_char;
+```
 
-**Current:** Missing from `marts/full/`.  
-**Fix:** Re-run `make export` or execute the GoldExportOperator against the existing Postgres instance.
+If tables are empty, the issue is likely a column name mismatch in `snake_cols` vs `schema.sql` column definitions. Check:
+- `title_akas_type`: `snake_cols = ["title_id", "ordering", "type"]`
+- `title_akas_attribute`: `snake_cols = ["title_id", "ordering", "attr"]`
+- `title_principal_char`: `snake_cols = ["tconst", "ordering", "character_name"]`
+
+Verify these match the column names in `silver/schema.sql`.
+
+### T1.6 Move Gold FK Check Before Gold Export
+
+**Assessment ref:** A7 (P1)
+**File:** `silver/fk_checks.py:73-81`
+
+**Current:** Runs `SELECT COUNT(*) FROM gold.fact_performance LEFT JOIN gold.dim_person` — too late, or already propagated to Gold.
+
+**Fix:** Change FK check to run against Silver layer before dbt builds Gold:
+
+```python
+# fk_checks.py — replace Gold FK with Silver FK
+{
+    "name": "fact_performance_nconst_exists_in_name_basics",
+    "sql": """
+        SELECT COUNT(*) AS orphan_count
+        FROM silver.title_principal p
+        LEFT JOIN silver.name_basics n ON p.nconst = n.nconst AND n.is_current = TRUE
+        WHERE n.nconst IS NULL
+    """,
+    "threshold": 0,
+},
+```
+
+This catches the 7,649 orphan nconst before they reach Gold.
+
+### T1.7 Generate `_MANIFEST.json`
+
+**Assessment ref:** A8 (P1)
+**File:** `orchestration/operators/gold_export_operator.py`
+
+**Action:** Re-run Gold export operator after dbt test passes. If operator is not easily re-runnable, create a one-shot script:
+
+```python
+# scripts/generate_manifest.py
+import os, json, hashlib
+MART_DIR = "/opt/airflow/output/gold/"
+entries = []
+for f in os.listdir(MART_DIR):
+    if f.endswith(".parquet"):
+        path = os.path.join(MART_DIR, f)
+        stat = os.stat(path)
+        entries.append({
+            "file": f,
+            "size_bytes": stat.st_size,
+            "mtime": stat.st_mtime,
+        })
+manifest = {
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+    "file_count": len(entries),
+    "files": entries,
+}
+with open(os.path.join(MART_DIR, "_MANIFEST.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+```
+
+### T1.8 Fix DQ Composite PK SQL
+
+**Assessment ref:** A13 (P2)
+**File:** `dq/config.yaml`
+
+**Current:** `count(DISTINCT tconst, ordering)` — binder error, `tconst` renamed to `title_key`
+**Fix:** Change to `count(DISTINCT title_key, ordering)` to match Gold schema column names.
 
 ---
 
-### Tier 2 — Configuration & Incremental (moderate effort)
+## Tier 2 — Performance & Quality (1-2 days)
 
-#### O7. Explicit DuckDB Schemas for Bronze Ingestion
+### T2.1 Increase dbt Threads
 
-**Current:** `all_varchar=true` forces DuckDB to auto-detect and store everything as strings; Silver then re-parses all types.  
-**Fix in** `orchestration/operators/bronze_operator.py`:
-
-```python
-bronze_schemas = {
-    "title.basics": {
-        "columns": {
-            "tconst": "VARCHAR",
-            "titleType": "VARCHAR",
-            "primaryTitle": "VARCHAR",
-            "originalTitle": "VARCHAR",
-            "isAdult": "VARCHAR",
-            "startYear": "VARCHAR",
-            "endYear": "VARCHAR",
-            "runtimeMinutes": "VARCHAR",
-            "genres": "VARCHAR",
-        }
-    },
-    # ... similar for all 7 sources
-}
-```
-
-**Impact:** DuckDB skips type inference and reads TSV raw into Parquet faster. Targets 47m → <15m.
-
-**Implementation note:** Per the external review (Advisor #3), DuckDB benchmarks show CSV reads at gigabytes/second. The 47-minute bottleneck on 4.5 GB indicates the current `all_varchar=true` path is not the limiting factor — the 3 GB memory limit and `threads=2` constraint on the AMD 200GE is the real bottleneck. On this hardware, expect improvement to ~20-25 min rather than <3 min.
-
-#### O8. Tune dbt Threads
-
-**Current:** `profiles.yml` sets `threads: 2`.  
-**Fix:** Increase to `threads: 4`. The AMD 200GE has 4 logical threads (2C/4T). Postgres can handle 4 concurrent connections.
+**Assessment ref:** A12
+**File:** `gold/profiles.yml`
 
 ```yaml
 outputs:
   prod:
-    threads: 4
-  dev:
-    threads: 4
+    type: postgres
+    threads: 4  # was 2
 ```
 
-**Impact:** More concurrent model execution in the same dbt DAG. Target: 63m → ~40-45m.
+**Rationale:** AMD 200GE has 4 logical threads. PostgreSQL can handle 4 concurrent connections. dbt's DAG ensures models with dependencies don't run concurrently, so peak concurrency is limited to independent models (staging models run in parallel, intermediate models depend on staging).
 
-#### O9. Convert High-Volume Marts to Incremental
+**Risk:** If PostgreSQL shared_buffers is too low (256 MB), 4 concurrent threads could cause index scan contention. Mitigate by increasing `shared_buffers` to `512 MB` in docker-compose.yml postgres command args.
 
-**Current:** All 6 marts use `materialized='table'`, full rebuild every run.  
-**Fix:** Convert `fact_performance`, `fact_title_principal`, and `dim_title` to `incremental`:
+### T2.2 Make Intermediate Models Ephemeral
 
-```sql
-{{ config(
-    materialized='incremental',
-    unique_key='title_key',
-    on_schema_change='append_new_columns'
-) }}
+**Assessment ref:** A11
+**File:** `gold/dbt_project.yml`
 
-SELECT ... FROM {{ ref('int_title_details') }}
-
-{% if is_incremental() %}
-  WHERE last_refreshed > (SELECT max(last_refreshed) FROM {{ this }})
-{% endif %}
+```yaml
+models:
+  imdb_gold:
+    intermediate:
+      +materialized: ephemeral  # was: table
 ```
 
-**Impact:** Only new/changed rows processed on incremental runs. On first run behaves like `table`. Target: 63m → ~25-30m for incremental.
+**Rationale:** `int_title_details` is referenced only by `dim_title`. `int_person_details` is referenced only by `dim_person`. Making them ephemeral inlines the SQL into the mart query, eliminating intermediate table writes. This saves ~15-20% of Gold build time.
 
-#### O10. Materialize Actor Co-occurrence
+### T2.3 Eliminate CSV Intermediates via DuckDB postgres_scanner
 
-**Current:** Self-join on 100M-row fact_performance takes 30s.  
-**Fix:** Create new dbt model `agg_actor_cooccurrence`:
+**Assessment ref:** A9
+**File:** `silver_operator.py`
 
-```sql
-{{ config(materialized='table') }}
+**Current path:** DuckDB → CSV file → psycopg2 COPY → PostgreSQL
+**Target path:** DuckDB → PostgreSQL directly via `postgres_scanner`
 
-SELECT
-  a.nconst AS actor_a,
-  b.nconst AS actor_b,
-  a.tconst AS shared_title,
-  a.category AS role_a,
-  b.category AS role_b,
-  count(*) AS weight
-FROM fact_performance a
-JOIN fact_performance b
-  ON a.tconst = b.tconst AND a.nconst < b.nconst
-WHERE a.category IN ('actor', 'actress')
-  AND b.category IN ('actor', 'actress')
-GROUP BY a.nconst, b.nconst, a.tconst, a.category, b.category
+```python
+# Install and load extension
+conn.install_extension("postgres_scanner")
+conn.load_extension("postgres_scanner")
+
+# Attach PostgreSQL
+conn.execute(f"""
+    ATTACH 'postgresql://elyssa:{password}@postgres:5432/elyssa_warehouse' AS pg (TYPE postgres)
+""")
+
+# Direct COPY — no CSV
+conn.execute(f"""
+    CREATE TABLE pg.silver.title_genre AS
+    SELECT tconst, UNNEST(string_split(NULLIF(genres, '\\N'), ',')) AS genre
+    FROM read_parquet('{parquet_path}')
+    WHERE genres IS NOT NULL AND genres != '' AND genres != '\\N'
+""")
 ```
 
-**Impact:** Pre-computes the co-occurrence once per pipeline run. Query time goes from 30s to < 1s.
+**Est. impact:** Eliminates ~1h of Silver CSV I/O. DuckDB writes directly to PostgreSQL via the postgres wire protocol, which is faster than CSV export + psycopg2 import.
 
-#### O11. Add Composite FK Indexes on Gold Fact Tables
+**Risk:** `postgres_scanner` is an extension that must be installed. DuckDB 1.2 ships it as a core extension. If unavailable, fall back to streaming via `conn.fetchmany()` with `executemany()`.
 
-**Current:** Individual indexes on `title_key` and `name_key` but not composite.  
-**Fix in** Postgres after dbt run:
+### T2.4 Add Composite FK Indexes
+
+**File:** `silver/migrations/001_initial_schema.sql` or post-Gold DDL
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_performance_title_name
   ON gold.fact_performance(title_key, name_key);
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_episode_series_season
-  ON gold.fact_episode(series_key, season_number, episode_number);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_episode_key
+  ON gold.fact_episode(episode_key);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dim_title_start_year
+  ON gold.dim_title(start_year);
 ```
 
-**Impact:** Reduces hash join probe time for multi-key joins.
+**Est. impact:** Reduces join probe time for analytics queries and DS feature engineering.
 
 ---
 
-### Tier 3 — Architectural (structural change, highest payoff)
+## Tier 3 — Architectural (3-5 days, highest payoff)
 
-#### O12. Consolidate Silver+Gold into DuckDB-native Pipeline
+### T3.1 Implement Incremental Watermark
 
-**Current architecture:** TSV → DuckDB(Parquet) → CSV → psycopg2(Postgres) → dbt(Postgres) → DuckDB(Parquet export)
+**Assessment ref:** A10
+**Files:** `bronze/watermark.py`, `imdb_pipeline_dag.py`
 
-The 3-stage Postgres detour (Silver load → Gold build → Gold export) adds ~4.5h to the pipeline. DuckDB can do all Silver transformations and Gold star-schema builds in-memory on the 16 GB machine, writing directly to Parquet.
+**Current:** `bronze/watermark.py` exists with `save_watermark()` / `load_watermark()` but is never called.
 
-**Proposed architecture:**
-```
-TSV → DuckDB(Bronze Parquet) → DuckDB(Silver transformations) → DuckDB(Gold star-schema) → Gold Parquet
-```
-
-**Implementation steps:**
-1. Port Silver SCD2 logic from SQL + psycopg2 to pure DuckDB SQL
-2. Port dbt Gold models to DuckDB SQL in a single `build_gold.py` script
-3. Remove Postgres dependency from the core pipeline (keep for serving/BI)
-
-**Impact:** Eliminates 3h39m Silver ETL + 63m Gold dbt + 15m export. Target: 5.5h → <2h total on the AMD 200GE.
-
-**Risk:** SCD2 merge in DuckDB requires careful `UPDATE` + `INSERT` implementation (DuckDB 1.2 supports `INSERT OR REPLACE` but not full `MERGE`).
-
-#### O13. Implement Watermark-Based Incremental Loads
-
-**Current:** Full pipeline rerun reprocesses all 210M rows from scratch.  
-**Fix leverage existing watermark.py:** Use `bronze/watermark.py`'s JSON persistence to track last successful run. Bronze ingestion only processes new/missing TSV files (IMDb publishes nightly dumps). Silver SCD2 only processes new Bronze partitions.
-
-**Impact:** Incremental runtime on a 2C/4T machine: ~45 min instead of 5.5h.
-
-#### O14. Partition Large Fact Tables
-
-**Current:** 100M-row fact_performance with no partition pruning.  
-**Fix:** Partition by `title_type` (or a year-bucket derived from the title join) in the Parquet export. DuckDB supports Hive-partitioned writes:
+**Implementation:**
 
 ```python
-con.execute("""
-  COPY (
-    SELECT * FROM fact_performance
-  ) TO 'marts/full/fact_performance'
-  (FORMAT PARQUET, PARTITION_BY (title_type), COMPRESSION SNAPPY)
+# In bronze_operator.py execute() — when using checkpoint resume:
+if os.path.exists(output_path):
+    existing_count = conn.execute(...).fetchone()[0]
+    # NEW: check watermark freshness
+    watermark = load_watermark()
+    if watermark and watermark.get(table) == file_checksum:
+        self.log.info(f"  {table}: SKIP (watermark matches, no new data)")
+        continue
+```
+
+```python
+# In imdb_pipeline_dag.py — add watermark tracking
+def _save_pipeline_watermark(**context):
+    from bronze.watermark import save_watermark
+    save_watermark({"last_run": datetime.now(timezone.utc).isoformat()})
+```
+
+**Est. impact on incremental runs:** 5.5h → ~45min (only new/changed data processed).
+
+### T3.2 Partition Large Fact Tables
+
+**File:** `orchestration/operators/gold_export_operator.py`
+
+```python
+# Replace flat Parquet export with Hive-partitioned write
+conn.execute("""
+    COPY (
+        SELECT fp.*, dt.title_type
+        FROM gold.fact_performance fp
+        JOIN gold.dim_title dt ON fp.tconst = dt.tconst
+    ) TO 'marts/full/fact_performance'
+    (FORMAT PARQUET, PARTITION_BY (title_type), COMPRESSION SNAPPY)
 """)
 ```
 
-**Impact:** Partition pruning reduces scan by 40-60% for type-filtered queries.
+**Est. impact:** Partition pruning reduces scan by 40-60% for type-filtered queries. Particularly beneficial for DS genre model training (filters by movie types).
+
+### T3.3 DuckDB-Native Silver (Remove PostgreSQL Detour)
+
+**File:** New `build_silver_gold.py` script
+
+**Current architecture:** TSV → DuckDB(Parquet) → CSV → psycopg2(PostgreSQL) → dbt(PostgreSQL) → DuckDB(export)
+
+**Proposed:** TSV → DuckDB(Bronze Parquet) → DuckDB(Silver transformations + Gold star-schema) → Gold Parquet
+
+```python
+# build_silver_gold.py — pure DuckDB pipeline
+import duckdb
+conn = duckdb.connect("/tmp/etl.duckdb")
+conn.execute("SET memory_limit = '8GB'")
+conn.execute("SET threads = 2")
+
+# Read Bronze → Silver transforms (all DuckDB SQL)
+conn.execute("""
+    CREATE TABLE silver.title_basics AS
+    SELECT tconst, titleType, primaryTitle, ...
+    FROM read_parquet('/opt/airflow/output/bronze/title.basics.parquet')
+""")
+
+# Build Gold star-schema directly
+conn.execute("""
+    CREATE TABLE gold.dim_title AS
+    SELECT tconst, title_type, primary_title, ..., genre_list
+    FROM silver.title_basics
+""")
+
+# Export to Parquet
+conn.execute("""
+    COPY gold.dim_title TO '/opt/airflow/output/gold/dim_title.parquet'
+    (FORMAT PARQUET, COMPRESSION SNAPPY)
+""")
+```
+
+**Est. impact:** Eliminates 3.5h Silver (PostgreSQL detour) + 63m Gold dbt + 15m export → total drops from 5.5h to ~1.5h.
+
+**Risk:** SCD2 merge in DuckDB requires careful `UPDATE` + `INSERT` logic (no native `MERGE`). PostgreSQL's SCD2 logic would need to be ported.
 
 ---
 
 ## Implementation Sequence
 
 ```
-Week 1 — Tier 1 (zero-cost fixes)
-├── Fix fact_performance PK grain (schema.yml)
-├── Fix fact_episode PK grain (schema.yml)
-├── Fix fact_title_principal DQ SQL
-├── Add FK pre-check to silver/fk_checks.py
-├── Document 89-row delta
-└── Generate _MANIFEST.json (make export)
+Week 1 — Tier 1 (Safety & Correctness)
+├── T1.1: Wire etl-runner container into DAG
+├── T1.2: Fix silver DuckDB memory_limit
+├── T1.3: Fix Gold PK grains (schema.yml × 2)
+├── T1.4: Remove dead PySpark code (3 files)
+├── T1.5: Verify & fix child table population
+├── T1.6: Move FK check to Silver layer
+├── T1.7: Generate _MANIFEST.json
+└── T1.8: Fix DQ composite PK SQL
 
-Week 2 — Tier 2 (configuration + incremental)
-├── Tune dbt threads → 4
-├── Add explicit Bronze schemas to DuckDB read_csv
-├── Convert 3 high-volume marts to incremental
-├── Add composite FK indexes
-├── Materialize actor co-occurrence
-└── Benchmark: profile runtime improvement
+Week 2 — Tier 2 (Performance & Quality)
+├── T2.1: Increase dbt threads to 4
+├── T2.2: Make intermediate models ephemeral
+├── T2.3: Eliminate CSV via postgres_scanner
+├── T2.4: Add composite FK indexes
+└── Benchmark: profile runtime vs baseline
 
-Week 3 — Tier 3 (architectural, optional)
-├── Design DuckDB-native Silver transformations
-├── Port dbt Gold models to DuckDB SQL
-├── Implement incremental watermark logic
-├── Add partition-by-title_type to Parquet export
+Week 3 — Tier 3 (Architectural)
+├── T3.1: Implement incremental watermark
+├── T3.2: Partition large fact tables
+├── T3.3: DuckDB-native Silver+Gold (optional)
 └── End-to-end benchmark vs baseline
 ```
 
@@ -294,22 +435,26 @@ Week 3 — Tier 3 (architectural, optional)
 
 | Metric | Baseline | After T1 | After T2 | After T3 |
 |--------|----------|----------|----------|----------|
-| Bronze ingestion | 47 min | 47 min | ~20 min | ~15 min |
-| Silver ETL | 3h 39m | 3h 39m | 3h 39m | ~30 min |
-| Gold dbt | 63 min | 63 min | ~35 min | ~15 min |
-| Gold export | 15 min | 15 min | 15 min | ~2 min |
-| **Total DE** | **~5h 36m** | **~5h 36m** | **~4h 49m** | **~1h 2m** |
-| Actor co-occurrence | 30.5 s | 30.5 s | < 1 s | < 1 s |
+| Silver stability | OOM on UNNEST | Stable | Stable | Stable |
+| Bronze ingestion | 47 min | 47 min | 47 min | 47 min |
+| Silver ETL | 3h 30m | 3h 30m | ~2h 30m | ~30m |
+| Gold dbt | 63 min | 63 min | ~40 min | ~15m |
+| Gold export | 15 min | 15 min | 15 min | ~2m |
+| **Total DE** | **~5h 30m** | **~5h 30m** | **~4h** | **~1h 30m** |
 | False PK warnings | 3.9M "dupes" | 0 | 0 | 0 |
 | DQ test failures | 4 (SQL errors) | 0 | 0 | 0 |
+| Dead code lines | ~250 | 0 | 0 | 0 |
 
 ---
 
-## Measurable Success Criteria
+## Acceptance Criteria
 
-1. All 6 Gold fact tables have valid, enforceable PKs (0 duplicates by declared grain)
-2. All DQ SQL tests execute without binder errors
-3. Actor co-occurrence query completes in < 2 seconds
-4. Gold export produces `_MANIFEST.json` with file count, checksums, and row counts
-5. Pipeline runtime < 4 hours after Tier 2 (vs 5h36m baseline)
-6. Runtime delta between Bronze and Gold row counts documented and < 0.001% (excluding intentional filters)
+1. Silver transform completes without OOM on full 210M-row run
+2. All 8 child tables have >0 rows (title_akas_type, title_akas_attribute, title_principal_char populated)
+3. Gold fact_performance PK has 0 duplicates at `(title_key, name_key, ordering)` grain
+4. Gold fact_episode PK has 0 duplicates at `(episode_key)` grain
+5. All DQ SQL tests execute without binder errors
+6. `_MANIFEST.json` present in Gold export directory
+7. All PySpark imports removed from silver/ modules
+8. Pipeline runtime < 4 hours after Tier 2 (vs 5h30m baseline)
+9. Incremental pipeline run < 1 hour after Tier 3
