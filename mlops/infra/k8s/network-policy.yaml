@@ -1,0 +1,73 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-network-policy
+  namespace: elyssa
+spec:
+  podSelector:
+    matchLabels:
+      app: elyssa-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: elyssa-frontend
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elyssa-monitoring
+      ports:
+        - port: 8000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: elyssa-redis
+      ports:
+        - port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: elyssa-mlflow
+      ports:
+        - port: 5000
+    - to:
+        - podSelector:
+            matchLabels:
+              app: elyssa-postgres
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mlflow-network-policy
+  namespace: elyssa
+spec:
+  podSelector:
+    matchLabels:
+      app: elyssa-mlflow
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: elyssa-api
+        - podSelector:
+            matchLabels:
+              app: elyssa-model
+      ports:
+        - port: 5000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: elyssa
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress

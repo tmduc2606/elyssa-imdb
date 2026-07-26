@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path as PathParam, Query
+
+logger = logging.getLogger(__name__)
+
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -112,7 +116,7 @@ async def list_titles(
 
 # ─── GET /api/v1/titles/{id} ─────────────────────────────────────────
 @router.get("/titles/{tconst}")
-async def get_title_detail(tconst: str):
+async def get_title_detail(tconst: str = PathParam(..., pattern=r"^tt\d+$")):
     title = resolve_title(tconst)
     if title is None:
         raise AppError("NOT_FOUND", "Title not found", 404)
@@ -120,7 +124,8 @@ async def get_title_detail(tconst: str):
     try:
         cast = _resolve_cast(tconst, limit=50)
         crew = _resolve_crew(tconst)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve cast/crew for title %s: %s", tconst, exc)
         cast = []
         crew = []
 
@@ -174,7 +179,7 @@ async def get_title_detail(tconst: str):
 
 # ─── GET /api/v1/titles/{id}/principals ──────────────────────────────
 @router.get("/titles/{tconst}/principals")
-async def get_title_principals(tconst: str):
+async def get_title_principals(tconst: str = PathParam(..., pattern=r"^tt\d+$")):
     title = resolve_title(tconst)
     if title is None:
         raise AppError("NOT_FOUND", "Title not found", 404)
@@ -182,7 +187,8 @@ async def get_title_principals(tconst: str):
     try:
         cast = _resolve_cast(tconst, limit=100)
         crew = _resolve_crew(tconst)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve principals for title %s: %s", tconst, exc)
         cast = []
         crew = []
 
@@ -210,7 +216,7 @@ async def get_title_principals(tconst: str):
 
 # ─── GET /api/v1/persons/{id} ────────────────────────────────────────
 @router.get("/persons/{nconst}")
-async def get_person_detail(nconst: str):
+async def get_person_detail(nconst: str = PathParam(..., pattern=r"^nm\d+$")):
     person = resolve_person(nconst)
     if person is None:
         raise AppError("NOT_FOUND", "Person not found", 404)
@@ -229,14 +235,15 @@ async def get_person_detail(nconst: str):
 
 # ─── GET /api/v1/persons/{id}/credits ────────────────────────────────
 @router.get("/persons/{nconst}/credits")
-async def get_person_credits(nconst: str):
+async def get_person_credits(nconst: str = PathParam(..., pattern=r"^nm\d+$")):
     person = resolve_person(nconst)
     if person is None:
         raise AppError("NOT_FOUND", "Person not found", 404)
 
     try:
         filmography = _resolve_filmography(nconst, limit=100)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve filmography for person %s: %s", nconst, exc)
         filmography = []
 
     data = []
@@ -265,7 +272,8 @@ async def search(
     if type in ("title", "all"):
         try:
             title_items, _total, _has_more, _cursor = resolve_search(q, first=limit)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to search titles for query %s: %s", q, exc)
             title_items = []
         for t in title_items:
             titles_data.append(_prune_none({
@@ -288,8 +296,8 @@ async def search(
                     "primary_name": r[1],
                     "birth_year": r[2],
                 }))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to search persons for query %s: %s", q, exc)
 
     return {"data": {"titles": titles_data, "persons": persons_data}}
 
@@ -350,7 +358,26 @@ async def list_models():
     for m in models:
         m["version"] = 1 if exists else 0
 
-    return {"data": models}
+    return {"data": {"models": models}}
+
+
+# ─── POST /api/v1/admin/canary-deploy ──────────────────────────────
+@router.post("/admin/canary-deploy")
+async def canary_deploy(body: dict | None = None):
+    from app.cache.memory import get_cache
+    payload = body or {}
+    traffic_weight = payload.get("traffic_weight", 0.05)
+    cache = get_cache()
+    cache.set("canary_active", True)
+    cache.set("canary_traffic_weight", traffic_weight)
+    cache.set("canary_timestamp", payload.get("timestamp", ""))
+    logger.info("Canary deploy activated with weight=%s", traffic_weight)
+    return {
+        "status": "ok",
+        "canary_active": True,
+        "traffic_weight": traffic_weight,
+        "message": f"Canary active at {traffic_weight*100:.0f}% traffic",
+    }
 
 
 # ─── POST /api/v1/admin/reload-cache ────────────────────────────────

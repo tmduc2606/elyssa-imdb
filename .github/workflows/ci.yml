@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint-test-build:
+  lint-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -49,3 +49,58 @@ jobs:
       - run: npm ci --silent
       - run: npm run lint --silent 2>/dev/null || true
       - run: npm run test -- --run 2>/dev/null || echo "No frontend tests configured"
+
+  contract-validation:
+    runs-on: ubuntu-latest
+    needs: [lint-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - name: Validate Gold-to-DS contract
+        run: |
+          python -c "
+          import yaml, json
+          with open('data-science/config/settings.yaml') as f:
+              cfg = yaml.safe_load(f)
+          assert 'paths' in cfg, 'Missing paths in config'
+          assert 'models' in cfg, 'Missing models in config'
+          print('Contract validation: PASS')
+          "
+
+  build-check:
+    runs-on: ubuntu-latest
+    needs: [lint-test, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Dockerfiles exist
+        run: |
+          for f in mlops/docker/Dockerfile.api mlops/docker/Dockerfile.model mlops/docker/Dockerfile.frontend docker/Dockerfile.airflow; do
+            if [ ! -f "$f" ]; then
+              echo "Missing: $f"
+              exit 1
+            fi
+            echo "Found: $f"
+          done
+
+  image-scan:
+    needs: [build-check]
+    uses: ./.github/workflows/trivy-scan.yml
+
+  mlops-audit:
+    runs-on: ubuntu-latest
+    needs: [lint-test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify MLOps infrastructure files
+        run: |
+          for f in mlops/docker-compose.yml mlops/monitoring/prometheus/prometheus.yml mlops/monitoring/prometheus/alert-rules.yml mlops/monitoring/grafana/datasources/prometheus.yml; do
+            if [ ! -f "$f" ]; then
+              echo "Missing: $f"
+              exit 1
+            fi
+            echo "OK: $f"
+          done
+          echo "MLOps audit: PASS"

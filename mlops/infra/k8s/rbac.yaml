@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elyssa
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elyssa-monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elyssa-api-sa
+  namespace: elyssa
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elyssa-model-sa
+  namespace: elyssa
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elyssa-airflow-sa
+  namespace: elyssa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: elyssa-api-role
+  namespace: elyssa
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: elyssa-model-role
+  namespace: elyssa
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: elyssa-airflow-role
+  namespace: elyssa
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: elyssa-api-binding
+  namespace: elyssa
+subjects:
+  - kind: ServiceAccount
+    name: elyssa-api-sa
+    namespace: elyssa
+roleRef:
+  kind: Role
+  name: elyssa-api-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: elyssa-model-binding
+  namespace: elyssa
+subjects:
+  - kind: ServiceAccount
+    name: elyssa-model-sa
+    namespace: elyssa
+roleRef:
+  kind: Role
+  name: elyssa-model-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: elyssa-airflow-binding
+  namespace: elyssa
+subjects:
+  - kind: ServiceAccount
+    name: elyssa-airflow-sa
+    namespace: elyssa
+roleRef:
+  kind: Role
+  name: elyssa-airflow-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: elyssa-readonly-role
+  namespace: elyssa-monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: elyssa-monitoring-binding
+  namespace: elyssa-monitoring
+subjects:
+  - kind: ServiceAccount
+    name: elyssa-api-sa
+    namespace: elyssa
+roleRef:
+  kind: Role
+  name: elyssa-readonly-role
+  apiGroup: rbac.authorization.k8s.io

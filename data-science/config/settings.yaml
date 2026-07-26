@@ -91,5 +91,6 @@ evaluation:
     cold_start_precision_min: 0.01
 
 mlflow:
-  tracking_uri: "sqlite:///mlflow.db"
+  tracking_uri: "http://mlflow:5000"
   experiment_prefix: "elyssa_phase3"
+  s3_artifact_root: "s3://elyssa-dev-mlflow-artifacts"

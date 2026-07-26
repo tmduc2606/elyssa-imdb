@@ -16,6 +16,21 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        service:
+          - name: api
+            compose_service: api
+            dockerfile: mlops/docker/Dockerfile.api
+          - name: frontend
+            compose_service: frontend
+            dockerfile: mlops/docker/Dockerfile.frontend
+          - name: model
+            compose_service: model
+            dockerfile: mlops/docker/Dockerfile.model
+          - name: airflow
+            compose_service: airflow
+            dockerfile: docker/Dockerfile.airflow
     steps:
       - uses: actions/checkout@v4
 
@@ -26,18 +41,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push API
+      - name: Build and push ${{ matrix.service.name }}
         run: |
-          docker compose -f mlops/docker-compose.yml build api
-          docker tag elyssa-api:latest ${{ env.IMAGE_PREFIX }}/elyssa-api:${{ github.sha }}
-          docker tag elyssa-api:latest ${{ env.IMAGE_PREFIX }}/elyssa-api:latest
-          docker push ${{ env.IMAGE_PREFIX }}/elyssa-api:${{ github.sha }}
-          docker push ${{ env.IMAGE_PREFIX }}/elyssa-api:latest
-
-      - name: Build and push Frontend
-        run: |
-          docker compose -f mlops/docker-compose.yml build frontend
-          docker tag elyssa-frontend:latest ${{ env.IMAGE_PREFIX }}/elyssa-frontend:${{ github.sha }}
-          docker tag elyssa-frontend:latest ${{ env.IMAGE_PREFIX }}/elyssa-frontend:latest
-          docker push ${{ env.IMAGE_PREFIX }}/elyssa-frontend:${{ github.sha }}
-          docker push ${{ env.IMAGE_PREFIX }}/elyssa-frontend:latest
+          docker compose -f mlops/docker-compose.yml build ${{ matrix.service.compose_service }}
+          docker tag elyssa-${{ matrix.service.name }}:latest ${{ env.IMAGE_PREFIX }}/elyssa-${{ matrix.service.name }}:${{ github.sha }}
+          docker tag elyssa-${{ matrix.service.name }}:latest ${{ env.IMAGE_PREFIX }}/elyssa-${{ matrix.service.name }}:latest
+          docker push ${{ env.IMAGE_PREFIX }}/elyssa-${{ matrix.service.name }}:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}/elyssa-${{ matrix.service.name }}:latest

@@ -13,9 +13,9 @@ services:
       dockerfile: docker/Dockerfile.postgres
     container_name: elyssa-postgres
     environment:
-      POSTGRES_USER: elyssa
-      POSTGRES_PASSWORD: elyssa_pg_2026
-      POSTGRES_DB: elyssa_warehouse
+      POSTGRES_USER: ${POSTGRES_USER:-elyssa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?PostgreSQL password required}
+      POSTGRES_DB: ${POSTGRES_DB:-elyssa_warehouse}
     command: >
       postgres
         -c config_file=/etc/postgresql/custom.conf
@@ -45,8 +45,8 @@ services:
       dockerfile: docker/Dockerfile.rustfs
     container_name: elyssa-rustfs
     environment:
-      RUSTFS_ACCESS_KEY: elyssa
-      RUSTFS_SECRET_KEY: elyssa_s3_2026
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-elyssa}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?RustFS secret key required}
       RUSTFS_REGION: us-east-1
     ports:
       - "9100:9000"
@@ -77,7 +77,7 @@ services:
       mlflow server
         --host 0.0.0.0
         --port 5000
-        --backend-store-uri postgresql://elyssa:elyssa_pg_2026@postgres:5432/mlflow
+        --backend-store-uri postgresql://elyssa:${POSTGRES_PASSWORD:?PostgreSQL password required}@postgres:5432/mlflow
         --default-artifact-root /mlflow-artifacts
     ports:
       - "5000:5000"
@@ -119,6 +119,30 @@ services:
       - elyssa-net
     restart: unless-stopped
 
+  # ─── Model Service (GMU + CatBoost + Recommender) ────────────────────
+  model:
+    image: elyssa-model:latest
+    build:
+      context: ..
+      dockerfile: mlops/docker/Dockerfile.model
+    container_name: elyssa-model
+    environment:
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
+      ELYSSA_DEBUG: "false"
+      ELYSSA_MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports:
+      - "8001:8001"
+    volumes:
+      - gold_marts:/data/marts/processed:ro
+      - api_data:/data
+    depends_on:
+      mlflow:
+        condition: service_started
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+
   # ─── Frontend (React SPA) ───────────────────────────────────────────
   frontend:
     image: elyssa-frontend:latest
@@ -143,7 +167,7 @@ services:
     container_name: elyssa-airflow
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://elyssa:${POSTGRES_PASSWORD:?PostgreSQL password required}@postgres:5432/elyssa_warehouse"
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
       AIRFLOW__CORE__PARALLELISM: "8"
@@ -186,8 +210,8 @@ services:
     image: grafana/grafana:latest
     container_name: elyssa-grafana
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: elyssa_grafana_2026
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Grafana password required}
       GF_INSTALL_PLUGINS: ""
     ports:
       - "3000:3000"
@@ -206,7 +230,7 @@ services:
     image: prometheuscommunity/postgres-exporter:latest
     container_name: elyssa-pg-exporter
     environment:
-      DATA_SOURCE_NAME: "postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://elyssa:${POSTGRES_PASSWORD:?PostgreSQL password required}@postgres:5432/elyssa_warehouse?sslmode=disable"
     ports:
       - "9187:9187"
     depends_on:
@@ -252,7 +276,7 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: ${PWD}/../data-science/marts/
+      device: ${PWD}/../data-science/marts/processed/
       o: bind
 
 networks:

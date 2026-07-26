@@ -2,13 +2,30 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
+from prometheus_client import Counter, Histogram
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+genre_predictions = Counter(
+    "genre_predictions_total", "Total genre predictions", ["status"]
+)
+rating_predictions = Counter(
+    "rating_predictions_total", "Total rating predictions", ["status"]
+)
+prediction_latency = Histogram(
+    "prediction_latency_seconds", "Prediction latency", ["model"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5)
+)
+prediction_confidence = Histogram(
+    "prediction_confidence", "Prediction confidence", ["model"],
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+)
 
 
 class ModelService:
@@ -167,13 +184,11 @@ class ModelService:
         return np.zeros(768, dtype=np.float32)
 
     def predict_genre(self, features: np.ndarray) -> list[dict]:
+        start = time.time()
         if self._gmu_model is not None:
             try:
                 import torch
                 with torch.no_grad():
-                    # GMU expects separate tab (26) and text (768) inputs.
-                    # build_feature_vector concatenates them: [tab(26), text(768)] = 794
-                    # When no text embedding is provided, features is tab-only (26-dim).
                     tab_dim = len(self._feature_schema.get("tabular_features", [])) if self._feature_schema else 26
                     if len(features) > tab_dim:
                         tab = torch.from_numpy(features[:tab_dim]).float().unsqueeze(0)
@@ -187,19 +202,35 @@ class ModelService:
                     for i, name in enumerate(self._genre_mlb.classes_):
                         results.append({"name": name, "confidence": float(probs[i])})
                     results.sort(key=lambda x: x["confidence"], reverse=True)
-                    return [r for r in results if r["confidence"] > 0.1]
+                    top = [r for r in results if r["confidence"] > 0.1]
+                    for r in top:
+                        prediction_confidence.labels(model="genre").observe(r["confidence"])
+                    genre_predictions.labels(status="success").inc()
+                    elapsed = time.time() - start
+                    prediction_latency.labels(model="genre").observe(elapsed)
+                    return top
                 else:
+                    genre_predictions.labels(status="success").inc()
                     return [{"name": f"genre_{i}", "confidence": float(p)} for i, p in enumerate(probs[:5]) if p > 0.1]
             except Exception as e:
                 logger.warning("Genre prediction failed: %s", e)
+                genre_predictions.labels(status="error").inc()
+        genre_predictions.labels(status="no_model").inc()
         return [{"name": "unknown", "confidence": 0.0}]
 
     def predict_rating(self, features: np.ndarray) -> float:
+        start = time.time()
         if self._catboost_model is not None:
             try:
-                return float(self._catboost_model.predict(features.reshape(1, -1))[0])
+                result = float(self._catboost_model.predict(features.reshape(1, -1))[0])
+                elapsed = time.time() - start
+                prediction_latency.labels(model="rating").observe(elapsed)
+                rating_predictions.labels(status="success").inc()
+                return result
             except Exception as e:
                 logger.warning("Rating prediction failed: %s", e)
+                rating_predictions.labels(status="error").inc()
+        rating_predictions.labels(status="no_model").inc()
         return 0.0
 
     def get_models(self) -> list[dict]:

@@ -119,6 +119,16 @@ def run_stage_models(config: dict, model_name: str = "all"):
     logger.info(f"=== Stage: Models ({model_name}) ===")
     processed_dir = Path(config["paths"]["processed_dir"])
 
+    mlflow_cfg = config.get("mlflow", {})
+    mlflow_tracking_uri = mlflow_cfg.get("tracking_uri", "http://mlflow:5000")
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        MLFLOW_ACTIVE = True
+    except ImportError:
+        MLFLOW_ACTIVE = False
+        logger.warning("MLflow not available — skipping model logging")
+
     X_tab = np.load(processed_dir / "X_tab.npy")
     X_text = np.load(processed_dir / "X_text.npy")
     train_mask = np.load(processed_dir / "train_mask.npy")
@@ -171,10 +181,41 @@ def run_stage_models(config: dict, model_name: str = "all"):
 
         torch.save(gmu.state_dict(), processed_dir / "gmu_genre_best.pt")
         logger.info("GMU model saved")
+
+        genre_metrics = {}
+        if y_genre_val is not None and y_genre_test is not None:
+            gmu.eval()
+            with torch.no_grad():
+                val_logits = gmu(torch.tensor(X_val_tab, dtype=torch.float32), torch.tensor(X_val_text, dtype=torch.float32))
+                val_probs = torch.sigmoid(val_logits).numpy()
+                from sklearn.metrics import f1_score
+                genre_metrics["val_macro_f1"] = float(f1_score(y_genre_val, (val_probs > 0.5).astype(int), average="macro"))
+                test_logits = gmu(torch.tensor(X_test_tab, dtype=torch.float32), torch.tensor(X_test_text, dtype=torch.float32))
+                test_probs = torch.sigmoid(test_logits).numpy()
+                genre_metrics["test_macro_f1"] = float(f1_score(y_genre_test, (test_probs > 0.5).astype(int), average="macro"))
+            logger.info(f"GMU: val_macro_f1={genre_metrics['val_macro_f1']:.4f}, test_macro_f1={genre_metrics['test_macro_f1']:.4f}")
+
+        if MLFLOW_ACTIVE:
+            run_name = f"gmu_genre_{datetime.now():%Y%m%d_%H%M%S}"
+            with mlflow.start_run(run_name=run_name) as run:
+                mlflow.set_tag("model_type", "GMU")
+                mlflow.set_tag("training_date", datetime.now().isoformat())
+                mlflow.log_params(config["models"]["genre"]["gmu"])
+                mlflow.log_metrics(genre_metrics)
+                mlflow.log_artifact(str(processed_dir / "gmu_genre_best.pt"), artifact_path="models")
+                mlflow.log_artifact(str(processed_dir / "feature_columns.json"), artifact_path="schema")
+                mlflow.log_artifact(str(processed_dir / "genre_list_mlb.joblib"), artifact_path="encoders")
+                mlflow.log_artifact(str(processed_dir / "preprocessor.joblib"), artifact_path="preprocessor")
+                from src.registry.model_registry import ModelRegistry
+                registry = ModelRegistry(tracking_uri=mlflow_tracking_uri)
+                registry.register_model("Elyssa_Genre_GMU", run.info.run_id, genre_metrics)
+                registry.promote_to_staging("Elyssa_Genre_GMU", "1")
+                logger.info(f"GMU model logged to MLflow run {run.info.run_id}")
+
         inventory.append({
             "name": "genre_gmu",
             "type": "GMU",
-            "metrics": {},
+            "metrics": genre_metrics,
             "params": {
                 "hidden_dim": config["models"]["genre"]["gmu"]["hidden_dim"],
                 "dropout": config["models"]["genre"]["gmu"]["dropout"],
@@ -199,6 +240,22 @@ def run_stage_models(config: dict, model_name: str = "all"):
         model, metrics = train_catboost(X_rating_train, y_rating_train, X_rating_val, y_rating_val)
         model.save_model(str(processed_dir / "catboost_rating_model.cbm"))
         logger.info(f"CatBoost model saved, val_rmse: {metrics.get('val_rmse', 'N/A')}")
+
+        if MLFLOW_ACTIVE:
+            run_name = f"catboost_rating_{datetime.now():%Y%m%d_%H%M%S}"
+            with mlflow.start_run(run_name=run_name) as run:
+                mlflow.set_tag("model_type", "CatBoost")
+                mlflow.set_tag("training_date", datetime.now().isoformat())
+                mlflow.log_params(config["models"]["rating"]["catboost"])
+                mlflow.log_metrics(metrics)
+                mlflow.log_artifact(str(processed_dir / "catboost_rating_model.cbm"), artifact_path="models")
+                mlflow.log_artifact(str(processed_dir / "scaler.joblib"), artifact_path="preprocessor")
+                from src.registry.model_registry import ModelRegistry
+                registry = ModelRegistry(tracking_uri=mlflow_tracking_uri)
+                registry.register_model("Elyssa_Rating_CatBoost", run.info.run_id, metrics)
+                registry.promote_to_staging("Elyssa_Rating_CatBoost", "1")
+                logger.info(f"CatBoost model logged to MLflow run {run.info.run_id}")
+
         inventory.append({
             "name": "rating_catboost",
             "type": "CatBoost",
