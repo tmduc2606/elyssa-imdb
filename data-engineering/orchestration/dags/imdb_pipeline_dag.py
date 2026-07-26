@@ -1,15 +1,18 @@
 """
 Elyssa-IMDb Pipeline — Main DAG
 
-Orchestrates: Sensor → Bronze ingestion → Silver ETL → Gold dbt → DQ checks
+Orchestrates: Sensor → Bronze (standalone subprocess) → Silver ETL → Gold dbt → DQ checks
 Execution order:
-  0. imdb_sensor           (detect new .tsv files)
-  1. bronze_ingest          (DuckDB TSV→Parquet, with quarantine)
-  2. silver_transform       (DuckDB→CSV→psycopg2 COPY, parent+child normalization)
-  3. gold_dbt_run           (dbt run for staging → intermediate → marts)
-  4. gold_dbt_test          (dbt test for Gold validation)
-  5. dq_checks              (null-rate, referential integrity, row-count)
-  6. freshness_monitor      (check last_updated freshness SLA)
+   0. imdb_sensor           (detect new .tsv files)
+   1. run_bronze            (spawn standalone run_bronze.py via Popen with start_new_session=True)
+   2. wait_bronze           (sensor polling for .completed marker)
+   3. bronze_done            (checkpoint marker)
+   4. quarantine_check       (post-bronze validation)
+   5. silver_transform      (DuckDB→CSV→psycopg2 COPY)
+   6. gold_dbt_run          (dbt run)
+   7. gold_dbt_test         (dbt test)
+   8. dq_checks             (null-rate, referential integrity, row-count)
+   9. freshness_monitor     (check last_updated freshness SLA)
 """
 
 import json
@@ -26,7 +29,6 @@ from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 
-from operators.bronze_operator import BronzeIngestOperator
 from operators.silver_operator import SilverTransformOperator
 from operators.dbt_operator import DbtRunOperator
 from operators.dq_operator import DataQualityOperator
@@ -34,6 +36,7 @@ from operators.freshness_operator import FreshnessCheckOperator
 from operators.imdb_sensor import IMDbDataSensor
 from operators.quarantine_operator import QuarantineCheckOperator
 from operators.gold_export_operator import GoldExportOperator
+from operators.bronze_sensor import BronzeCompletionSensor
 
 # ─── Retry config (exponential backoff) ─────────────────────────────
 _RETRY_CONFIG_PATH = os.path.join(
@@ -112,9 +115,9 @@ def _on_failure_callback(context):
     dag_id = context.get("dag", {}).dag_id if context.get("dag") else "unknown"
     task_id = task_instance.task_id if task_instance else "unknown"
     exception = context.get("exception")
-    log_url = task_instance.get_log_url() if task_instance else ""
+    log_url = getattr(task_instance, "log_url", "") if task_instance else ""
 
-    severity = "HIGH" if task_id in ["bronze_ingest", "silver_transform"] else "MEDIUM"
+    severity = "HIGH" if "bronze" in task_id or task_id == "silver_transform" else "MEDIUM"
     log_msg = f"[ALERT:{severity}] DAG={dag_id} Task={task_id} FAILED | Exception: {exception} | Log: {log_url}"
     print(log_msg)
     _write_status_file("failed", dag_id, task_id, str(exception))
@@ -143,10 +146,32 @@ default_args = {
     "on_retry_callback": _on_retry_callback,
 }
 
+# ─── Bronze: standalone subprocess (bypasses supervisor heartbeat kill) ──
+# run_bronze.py is spawned with start_new_session=True so it survives
+# Airflow's supervisor killing the parent process.
+BRONZE_SCRIPT = "/opt/airflow/data-engineering/scripts/run_bronze.py"
+
+
+def _spawn_bronze(**context):
+    """Spawn run_bronze.py as detached subprocess in new session."""
+    import subprocess
+    log_path = "/tmp/bronze_runner.log"
+    with open(log_path, "w") as lf:
+        lf.write(f"[{datetime.now(timezone.utc).isoformat()}] Spawning run_bronze.py\n")
+    proc = subprocess.Popen(
+        [sys.executable, BRONZE_SCRIPT],
+        stdout=open(log_path, "a"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    print(f"Bronze subprocess spawned: PID={proc.pid}")
+    return {"bronze_pid": proc.pid}
+
+
 with DAG(
     dag_id="imdb_pipeline",
     default_args=default_args,
-    description="Elyssa IMDb Sensor → Bronze → Silver → Gold → DQ pipeline",
+    description="Elyssa IMDb Sensor → Bronze (per-table) → Silver → Gold → DQ pipeline",
     schedule=None,
     start_date=datetime(2026, 6, 1),
     catchup=False,
@@ -165,18 +190,26 @@ with DAG(
         mode="reschedule",
     )
 
-    # ─── Bronze (TSV → Parquet, with quarantine) ──────────────────────────
-    # retries=1: avoid infinite re-download loop; checkpoint resume skips
-    # tables whose parquet already exists from the first attempt.
-    bronze_ingest = BronzeIngestOperator(
-        task_id="bronze_ingest",
-        source_tables=[
-            "title.basics", "title.akas", "title.crew",
-            "title.episode", "title.principals", "title.ratings",
-            "name.basics",
-        ],
-        bronze_path=_BRONZE_PATH,
-        retries=1,
+    # ─── Bronze (standalone subprocess — bypasses supervisor kill) ────────
+    # run_bronze: spawns run_bronze.py as detached subprocess, exits immediately
+    # The subprocess runs in its own session (start_new_session=True), so when
+    # Airflow's supervisor kills this task's subprocess after heartbeat timeout,
+    # the bronze script is reparented to PID 1 and continues running.
+    run_bronze = PythonOperator(
+        task_id="run_bronze",
+        python_callable=_spawn_bronze,
+        retries=0,
+        execution_timeout=timedelta(seconds=30),
+    )
+
+    # wait_bronze: polls for .completed / .failed markers
+    wait_bronze = BronzeCompletionSensor(
+        task_id="wait_bronze",
+        bronze_dir=_BRONZE_PATH,
+        poke_interval=30,
+        timeout=28800,
+        mode="reschedule",
+        retries=0,
     )
 
     # ─── Bronze Ingestion Complete ────────────────────────────────────────
@@ -195,6 +228,7 @@ with DAG(
     silver_transform = SilverTransformOperator(
         task_id="silver_transform",
         bronze_path=_BRONZE_PATH,
+        profile_memory=True,
         jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
         jdbc_user="elyssa",
         jdbc_password="elyssa_pg_2026",
@@ -243,10 +277,13 @@ with DAG(
     end = EmptyOperator(task_id="pipeline_end")
 
     # ─── DAG Structure ────────────────────────────────────────────────────
-    # Sensor → bronze → quarantine_check → silver → gold → dq → freshness → gold_export → end
-    # gold_dbt_test depends on gold_dbt_run (tests run against fresh Gold tables)
-    # Neo4j sync removed from critical path (Phase 1 hardware limitation)
-    start >> imdb_sensor >> bronze_ingest >> bronze_done
+    # Sensor → spawn bronze → wait for bronze → quarantine → silver → gold → dq → freshness → gold_export → end
+    # run_bronze exits immediately (spawns detached subprocess).
+    # wait_bronze polls .completed marker (subprocess runs independently).
+    start >> imdb_sensor
+
+    imdb_sensor >> run_bronze >> wait_bronze >> bronze_done
+
     bronze_done >> quarantine_check >> silver_transform
     silver_transform >> gold_dbt_run >> gold_dbt_test
     gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end

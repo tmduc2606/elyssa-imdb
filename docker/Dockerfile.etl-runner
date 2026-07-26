@@ -1,16 +1,10 @@
 # Elyssa-IMDb | ETL Runner — Dedicated DuckDB ETL Engine
-# Replaces the idle duckdb container. Has its own 6 GB budget so
-# DuckDB heavy lifting doesn't compete with Airflow for memory.
+# Has its own 6 GB budget so DuckDB heavy lifting doesn't
+# compete with Airflow for memory.
 # Only depends on: duckdb + psycopg2 (no webserver, no scheduler, no dbt)
 
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
-
-# Only install ETL runtime deps (skip Airflow, dbt, Neo4j, Great Expectations)
 RUN pip install --no-cache-dir \
     duckdb==1.1.3 \
     psycopg2-binary==2.9.10 \
@@ -24,4 +18,5 @@ ENV DUCKDB_THREADS=2 \
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=10s \
     CMD python -c "import duckdb; conn = duckdb.connect(':memory:'); conn.execute('SELECT 1'); conn.close()"
 
+# Keep container alive for potential future use
 CMD ["sleep", "infinity"]

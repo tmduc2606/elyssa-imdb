@@ -11,7 +11,7 @@ def test_health_endpoint():
 
 
 def test_error_format_on_404():
-    response = client.get("/api/v1/titles/nonexistent")
+    response = client.get("/api/v1/titles/tt00000000")
     assert response.status_code == 404
     body = response.json()
     assert "error" in body
@@ -20,7 +20,7 @@ def test_error_format_on_404():
 
 
 def test_error_format_on_validation():
-    response = client.post("/api/v1/predict/rating", json={})
+    response = client.post("/api/v1/predict/rating", json={"runtime_minutes": "not-a-number"})
     assert response.status_code == 422
     body = response.json()
     assert "error" in body or "detail" in body
@@ -57,8 +57,10 @@ def test_models_endpoint():
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     body = response.json()
-    assert "models" in body
-    for model in body["models"]:
+    assert "data" in body
+    inner = body["data"]
+    assert "models" in inner
+    for model in inner["models"]:
         assert "name" in model
         assert "version" in model
         assert "stage" in model

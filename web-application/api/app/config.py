@@ -1,29 +1,42 @@
 from __future__ import annotations
 
+import secrets
+import warnings
 from pathlib import Path
 from functools import lru_cache
 
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
+
+
+_DEFAULT_JWT_SECRET = "dev-secret-change-in-production-32bytes!"
+
+
+def _default_gold_marts_path() -> str:
+    p = Path(__file__).resolve()
+    for parent in p.parents:
+        if (parent / ".git").exists():
+            return str(parent / "data-science" / "marts" / "full")
+    return str(p.parent.parent / "data" / "marts" / "full")
 
 
 class Settings(BaseSettings):
     app_name: str = "Elyssa API"
-    debug: bool = True
+    debug: bool = False
 
     host: str = "0.0.0.0"
     port: int = 8000
 
-    gold_marts_path: str = str(
-        Path(__file__).resolve().parents[3] / "data-science" / "marts" / "full"
-    )
+    gold_marts_path: str = _default_gold_marts_path()
 
     database_url: str = "sqlite:///" + str(
         Path(__file__).resolve().parent.parent / "data" / "elyssa.db"
     )
-    jwt_secret: str = "dev-secret-change-in-production-32bytes!"
+    jwt_secret: str = _DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 15
     jwt_refresh_days: int = 7
+    secure_cookies: bool = True
 
     redis_url: str = "redis://localhost:6379/0"
     redis_enabled: bool = True
@@ -34,11 +47,22 @@ class Settings(BaseSettings):
 
     rate_limit_per_minute: int = 100
 
-    class Config:
-        env_file = ".env"
-        env_prefix = "ELYSSA_"
+    feature_genre_prediction: bool = True
+    feature_rating_prediction: bool = True
+    feature_watchlist: bool = True
+    feature_recommendations: bool = False
+    feature_gsap_animations: bool = True
+
+    model_config = ConfigDict(env_file=".env", env_prefix="ELYSSA_")
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if settings.jwt_secret == _DEFAULT_JWT_SECRET:
+        warnings.warn(
+            "JWT secret is still the default dev value. "
+            "Set ELYSSA_JWT_SECRET to a secure random value in production. "
+            f"Generated: {secrets.token_hex(32)}"
+        )
+    return settings

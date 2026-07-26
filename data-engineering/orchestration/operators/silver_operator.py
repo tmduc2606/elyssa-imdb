@@ -118,19 +118,19 @@ class SilverTransformOperator(BaseOperator):
         log.log_stage(stage="silver_transform", batch_id=batch_id, status="started",
                       message="Processing parent tables + 8 child normalization tables")
 
-        conn = duckdb.connect(":memory:")
-        conn.execute("SET threads = 2")
-        conn.execute("SET memory_limit = '1.2GB'")
-        conn.execute("SET preserve_insertion_order = false")
-
-        # M4: Use etl_temp volume path (falls back to /tmp for backward compat)
+        # M1: Use file-backed DuckDB for automatic spill-to-disk
         temp_root = "/opt/airflow/output/tmp/"
         if not os.path.exists(temp_root):
             temp_root = "/tmp/"
         duckdb_temp = os.path.join(temp_root, "duckdb_spill")
         csv_dir = os.path.join(temp_root, "csv_intermediates")
+        duckdb_file = os.path.join(duckdb_temp, f"silver_{batch_id}.duckdb")
         os.makedirs(duckdb_temp, exist_ok=True)
         os.makedirs(csv_dir, exist_ok=True)
+        conn = duckdb.connect(str(duckdb_file))
+        conn.execute("SET threads = 2")
+        conn.execute("SET memory_limit = '4GB'")
+        conn.execute("SET preserve_insertion_order = false")
         conn.execute(f"SET temp_directory = '{duckdb_temp}'")
         conn.execute("SET max_temp_directory_size = '10GB'")
 
@@ -146,13 +146,10 @@ class SilverTransformOperator(BaseOperator):
         pg.autocommit = False
 
         # M5: Tune PostgreSQL session for bulk COPY
+        # max_wal_size, wal_level, archive_mode are POSTMASTER params (set in docker-compose, not per-session)
         with pg.cursor() as tune:
             tune.execute("SET maintenance_work_mem = '256MB'")
-            tune.execute("SET max_wal_size = '4GB'")
             tune.execute("SET checkpoint_timeout = '1h'")
-            # Reduce WAL level for bulk load (session-local, non-persistent)
-            tune.execute("SET wal_level = minimal")
-            tune.execute("SET archive_mode = off")
         pg.commit()
 
         # Ensure schemas and tables exist (idempotent — survives container rebuilds)
@@ -183,7 +180,6 @@ class SilverTransformOperator(BaseOperator):
         # NOTE: "types", "attributes", "characters" are normalized into child tables
         # (title_akas_type, title_akas_attribute, title_principal_char).
         # "primaryProfession" and "knownForTitles" are in name_profession/name_known_for_title.
-        # These child tables are not yet populated by this operator (TODO).
         table_defs = {
             "title.basics": (
                 "silver.title_basics",
@@ -670,11 +666,13 @@ class SilverTransformOperator(BaseOperator):
                             pass
             except Exception:
                 pass
-            # Clean up DuckDB temp files
+            # M1: Clean up DuckDB file and temp files
             try:
                 import shutil
+                if os.path.exists(duckdb_file):
+                    os.remove(duckdb_file)
                 if os.path.exists(duckdb_temp):
                     shutil.rmtree(duckdb_temp, ignore_errors=True)
             except Exception as e:
-                self.log.warning(f"Failed to clean up DuckDB temp directory: {e}")
+                self.log.warning(f"Failed to clean up DuckDB temp files: {e}")
             pg.close()

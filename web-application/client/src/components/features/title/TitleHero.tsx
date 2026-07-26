@@ -46,6 +46,7 @@ export function TitleHero({ title, className }: TitleHeroProps) {
             <img
               src={title.posterUrl}
               alt={title.primaryTitle}
+              loading="lazy"
               className="size-full object-cover"
             />
           ) : (

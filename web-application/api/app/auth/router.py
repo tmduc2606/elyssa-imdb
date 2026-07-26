@@ -13,6 +13,7 @@ from app.auth.models import (
     verify_password,
 )
 from app.auth.utils import create_access_token, create_refresh_token, decode_token
+from app.config import get_settings
 
 router = APIRouter()
 
@@ -39,6 +40,7 @@ class WatchlistAddRequest(BaseModel):
 
 @router.post("/register")
 async def register(body: RegisterRequest, response: Response):
+    settings = get_settings()
     display_name = body.get_display_name()
     try:
         user = create_user(body.email, body.password, display_name)
@@ -50,7 +52,7 @@ async def register(body: RegisterRequest, response: Response):
         "refresh_token",
         refresh_token,
         httponly=True,
-        secure=False,
+        secure=settings.secure_cookies,
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
@@ -58,17 +60,19 @@ async def register(body: RegisterRequest, response: Response):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, response: Response):
+async def login(request: Request, body: LoginRequest, response: Response):
+    settings = get_settings()
     user = get_user_by_email(body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
     access_token = create_access_token(user["id"])
     refresh_token = create_refresh_token(user["id"])
+    secure = settings.secure_cookies and request.url.scheme == "https"
     response.set_cookie(
         "refresh_token",
         refresh_token,
         httponly=True,
-        secure=False,
+        secure=secure,
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )

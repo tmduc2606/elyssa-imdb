@@ -36,11 +36,6 @@ class QuarantineCheckOperator(BaseOperator):
         import psycopg2
 
         log = get_logger()
-        batch_id = context.get("task_instance").xcom_pull(task_ids="bronze_ingest", key="batch_id") or \
-                   datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-        log.log_stage(stage="quarantine_check", batch_id=batch_id, status="started",
-                      message="Checking quarantine table for rejected records")
 
         conn = psycopg2.connect(
             host="postgres", port=5432,
@@ -49,6 +44,16 @@ class QuarantineCheckOperator(BaseOperator):
         )
         conn.autocommit = True
         cursor = conn.cursor()
+
+        # Find the most recent batch_id from quarantine (latest bronze run)
+        cursor.execute(
+            "SELECT batch_id FROM silver.quarantine ORDER BY quarantined_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        batch_id = row[0] if row else datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+        log.log_stage(stage="quarantine_check", batch_id=batch_id, status="started",
+                      message="Checking quarantine table for rejected records")
 
         # Count quarantine entries for this batch
         cursor.execute(

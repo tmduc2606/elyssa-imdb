@@ -16,9 +16,10 @@ def test_health():
 def test_list_models():
     r = client.get("/api/v1/models")
     assert r.status_code == 200
-    data = r.json()
-    assert "data" in data
-    assert len(data["data"]) == 2
+    body = r.json()
+    assert "data" in body
+    assert "models" in body["data"]
+    assert len(body["data"]["models"]) == 2
 
 
 def test_predict_genre_at_least_valid_json():

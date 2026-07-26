@@ -1,0 +1,12 @@
+numpy>=2.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+strawberry-graphql[cli,fastapi]>=0.256.0
+duckdb>=1.1.0
+pyjwt>=2.10.0
+bcrypt>=4.0.0
+pydantic-settings>=2.6.0
+redis>=5.2.0
+httpx>=0.28.0
+structlog>=24.0.0
+prometheus-fastapi-instrumentator>=7.0.0

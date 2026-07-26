@@ -79,15 +79,17 @@ def _get_con() -> duckdb.DuckDBPyConnection:
     for mart in GOLD_MARTS:
         parquet = gold_root / f"{mart}.parquet"
         if parquet.exists():
+            path = str(parquet.resolve()).replace("'", "''")
             con.execute(
-                f"CREATE OR REPLACE VIEW {mart} AS SELECT * FROM read_parquet('{parquet}')"
+                f"CREATE OR REPLACE VIEW {mart} AS SELECT * FROM read_parquet('{path}')"
             )
 
     # Also load base_features from processed/ for backward compat
     base = processed_dir / "base_features.parquet"
     if base.exists():
+        path = str(base.resolve()).replace("'", "''")
         con.execute(
-            f"CREATE OR REPLACE VIEW base_features AS SELECT * FROM read_parquet('{base}')"
+            f"CREATE OR REPLACE VIEW base_features AS SELECT * FROM read_parquet('{path}')"
         )
 
     return con
@@ -184,19 +186,18 @@ def _resolve_similar(tconst: str, genres: list[str] | None = None, limit: int = 
     con = _get_con()
     if not genres:
         return []
-    genre_conditions = " OR ".join(
-        f"genre_list ILIKE '%{g}%'" for g in genres[:3]
-    )
+    params: list[str] = [f"%{g}%" for g in genres[:3]]
+    placeholders = " OR ".join(["genre_list ILIKE ?"] * len(params))
     sql = f"""
         SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
         FROM dim_title
         WHERE tconst != ?
-          AND ({genre_conditions})
+          AND ({placeholders})
           AND average_rating IS NOT NULL
         ORDER BY average_rating DESC
         LIMIT ?
     """
-    rows = con.execute(sql, [tconst, limit]).fetchall()
+    rows = con.execute(sql, [tconst, *params, limit]).fetchall()
     return [_row_to_summary(r) for r in rows]
 
 

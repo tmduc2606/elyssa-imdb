@@ -70,12 +70,12 @@ FK_CHECKS = [
         "threshold": 0,
     },
     {
-        "name": "fact_performance_nconst_exists_in_dim_person",
+        "name": "fact_performance_nconst_exists_in_name_basics",
         "sql": """
             SELECT COUNT(*) AS orphan_count
-            FROM gold.fact_performance p
-            LEFT JOIN gold.dim_person d ON p.nconst = d.nconst
-            WHERE d.nconst IS NULL
+            FROM silver.title_principal p
+            LEFT JOIN silver.name_basics n ON p.nconst = n.nconst AND n.is_current = TRUE
+            WHERE n.nconst IS NULL
         """,
         "threshold": 0,
     },

@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter } from "react-router";
 import { RootLayout } from "@/components/layout/RootLayout";
 import { RequireAuth } from "@/components/layout/RequireAuth";
+import { ErrorBoundary } from "@/components/composites/ErrorBoundary";
+import { ErrorFallback } from "@/components/composites/ErrorFallback";
 
 function PageFallback() {
   return (
@@ -21,9 +23,11 @@ function PageFallback() {
 
 function suspenseWrapper(Component: React.LazyExoticComponent<React.ComponentType>) {
   return (
-    <Suspense fallback={<PageFallback />}>
-      <Component />
-    </Suspense>
+    <ErrorBoundary fallback={<ErrorFallback message="Something went wrong loading this page." />}>
+      <Suspense fallback={<PageFallback />}>
+        <Component />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 

@@ -39,3 +39,18 @@ export const GENRES = [
   "News", "Reality-TV", "Romance", "Sci-Fi", "Short", "Sport",
   "Talk-Show", "Thriller", "War", "Western",
 ] as const;
+
+export type FeatureFlagKey =
+  | "genrePrediction"
+  | "ratingPrediction"
+  | "watchlist"
+  | "recommendations"
+  | "gsapAnimations";
+
+export const FEATURE_FLAGS: Record<FeatureFlagKey, boolean> = {
+  genrePrediction: import.meta.env.VITE_FF_GENRE_PREDICTION !== "false",
+  ratingPrediction: import.meta.env.VITE_FF_RATING_PREDICTION !== "false",
+  watchlist: import.meta.env.VITE_FF_WATCHLIST !== "false",
+  recommendations: import.meta.env.VITE_FF_RECOMMENDATIONS === "true",
+  gsapAnimations: import.meta.env.VITE_FF_GSAP_ANIMATIONS !== "false",
+};

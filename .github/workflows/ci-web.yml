@@ -16,6 +16,16 @@ jobs:
       - run: pip install -r web-application/api/requirements.txt
       - run: pytest web-application/api/tests/ -q --tb=short
 
+  api-contract-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r web-application/api/requirements.txt
+      - run: pytest web-application/api/tests/test_contract.py -v
+
   frontend-lint:
     runs-on: ubuntu-latest
     steps:
@@ -38,6 +48,33 @@ jobs:
       - run: npm ci
         working-directory: web-application/client
       - run: npm run build
+        working-directory: web-application/client
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+        working-directory: web-application/client
+      - run: npm run test
+        working-directory: web-application/client
+
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+        working-directory: web-application/client
+      - run: npm run build
+        working-directory: web-application/client
+      - name: Run Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x && lhci autorun
         working-directory: web-application/client
 
   image-scan:

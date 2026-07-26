@@ -1,6 +1,8 @@
 # Elyssa-IMDb | Data Engineering Stack — Docker Images
 # Apache Airflow — orchestration for Elyssa pipeline DAGs
 # NOTE: Airflow does not support native Windows; runs exclusively in Docker.
+# Single-stage build to avoid Python site-packages path mismatch between
+# builder and runtime (apache/airflow uses /usr/python/bin/python3.13).
 
 FROM apache/airflow:3.3.0
 
@@ -11,6 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     procps \
     && rm -rf /var/lib/apt/lists/*
+
+# Pre-create output directories for bronze/silver/gold/tmp with correct ownership
+RUN mkdir -p /opt/airflow/output/bronze /opt/airflow/output/tmp /opt/airflow/output/gold && \
+    chown -R airflow:root /opt/airflow/output
 
 USER airflow
 

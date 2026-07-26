@@ -1,4 +1,4 @@
-# Elyssa-IMDb | Docker Compose — Full DE Stack
+# Elyssa-IMDb | Docker Compose — Full DE Stack (Memory Overhauled)
 # Ports are remapped on the host side to prevent conflicts with local services.
 #
 # Service        Internal    Host Mapping    Purpose
@@ -7,11 +7,16 @@
 # neo4j          7474/7687   7475/7688        Graph database
 # rustfs         9000/9001   9100/9101       S3-compatible Bronze storage
 # airflow        8080        8081            DAG orchestrator
+# etl-runner     —           —               Dedicated DuckDB ETL engine
 #
-# Usage:
-#   docker compose up -d          # Start all services
-#   docker compose down           # Stop all services
-#   docker compose up -d postgres # Start only PostgreSQL
+# Memory Budget (16 GB host):
+#   postgres:   512MB shared_buffers + 2G shm
+#   neo4j:      2G heap + 4G pagecache
+#   airflow:    4G (includes DuckDB for bronze tasks)
+#   etl-runner: 6G (dedicated DuckDB for silver+gold)
+#   rustfs:     default (minimal)
+#   OS/WSL2:    ~3-4 GB headroom
+#   Total:      ~14 GB (leaves ~2 GB for OS)
 
 services:
   # ─── PostgreSQL + TimescaleDB ───────────────────────────────────
@@ -42,6 +47,7 @@ services:
         -c log_min_duration_statement=1000
         -c timezone=UTC
     shm_size: '2g'
+    oom_score_adj: 500
     ports:
       - "54321:5432"
     volumes:
@@ -68,6 +74,7 @@ services:
       NEO4J_AUTH: "neo4j/elyssa_neo_2026"
       NEO4J_server_memory_heap_max__size: "2G"
       NEO4J_server_memory_pagecache_size: "4G"
+    oom_score_adj: 500
     ports:
       - "7475:7474"   # HTTP
       - "7688:7687"   # Bolt
@@ -95,6 +102,7 @@ services:
       RUSTFS_SECRET_KEY: elyssa_s3_2026
       RUSTFS_REGION: us-east-1
       RUSTFS_CONSOLE_ADDRESS: ":9001"
+    oom_score_adj: 500
     ports:
       - "9100:9000"   # S3 API
       - "9101:9001"   # Admin Console
@@ -110,8 +118,7 @@ services:
         max-file: "3"
 
   # ─── DuckDB (Ephemeral Analytics Engine) ────────────────────────
-  # Runs in-memory; reads Parquet directly from Bronze S3-compatible storage.
-  # No persistent volume — ephemeral by design per approved blueprint.
+  # Replaced by etl-runner for pipeline work; kept for interactive use.
   duckdb:
     image: elyssa-duckdb:latest
     build:
@@ -121,9 +128,42 @@ services:
     environment:
       DUCKDB_THREADS: "4"
       DUCKDB_MEMORY_LIMIT_MB: "2048"
+    oom_score_adj: 500
     networks:
       - elyssa-net
-    restart: "no"  # Ephemeral: run on demand, not persistent
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ─── ETL Runner (Dedicated DuckDB Engine) ───────────────────────
+  # Runs Silver+Gold transformations with dedicated memory budget.
+  # Does NOT share RAM with Airflow — prevents OOM from heavy ETL.
+  etl-runner:
+    image: elyssa-etl-runner:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.etl-runner
+    container_name: elyssa-etl-runner
+    mem_limit: 6g
+    memswap_limit: 8g
+    oom_score_adj: -500
+    environment:
+      DUCKDB_THREADS: "2"
+      DUCKDB_MEMORY_LIMIT: "4GB"
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: elyssa
+      POSTGRES_PASSWORD: elyssa_pg_2026
+      POSTGRES_DB: elyssa_warehouse
+    volumes:
+      - ../data-engineering:/opt/etl/data-engineering:rw
+      - etl_temp:/opt/etl/tmp:rw
+    shm_size: 2g
+    networks:
+      - elyssa-net
+    restart: "no"
     logging:
       driver: json-file
       options:
@@ -137,16 +177,26 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.airflow
     container_name: elyssa-airflow
+    mem_limit: 4g
+    memswap_limit: 6g
+    oom_score_adj: -250
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse"
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: "utc"
       AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "utc"
-      AIRFLOW__CORE__PARALLELISM: "8"
-      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "8"
+      AIRFLOW__CORE__PARALLELISM: "1"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "1"
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: "1"
+      AIRFLOW__CORE__MIN_SERIALIZED_DAG_UPDATE_INTERVAL: "300"
+      AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: "30"
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "3600"
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_SEC: "30"
+      AIRFLOW__SCHEDULER__ZOMBIE_TASK_THRESHOLD: "3600"
       AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
       AIRFLOW__CORE__LOG_FILENAME_TEMPLATE: "{{ti.dag_id}}/{{ti.task_id}}/{{ts}}/{{try_number}}.log"
+      GOLD_EXPORT_PG_PASSWORD: "elyssa_pg_2026"
     ports:
       - "8081:8080"
     volumes:
@@ -154,6 +204,7 @@ services:
       - ../data-engineering:/opt/airflow/data-engineering:rw
       - ../data-engineering/orchestration/dags:/opt/airflow/dags:ro
       - ../data-engineering/orchestration/operators:/opt/airflow/operators:rw
+      - etl_temp:/opt/airflow/output/tmp:rw
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,6 +228,8 @@ volumes:
     name: elyssa_rustfs_data
   airflow_data:
     name: elyssa_airflow_data
+  etl_temp:
+    name: elyssa_etl_temp
 
 networks:
   elyssa-net:

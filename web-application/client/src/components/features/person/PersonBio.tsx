@@ -16,6 +16,7 @@ export function PersonBio({ person, className }: PersonBioProps) {
             <img
               src={person.posterUrl}
               alt={person.primaryName}
+              loading="lazy"
               className="size-full object-cover"
             />
           ) : (

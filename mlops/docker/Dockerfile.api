@@ -1,6 +1,6 @@
 FROM python:3.13-slim AS builder
 WORKDIR /build
-COPY web-application/api/requirements.txt .
+COPY web-application/api/requirements-api.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.13-slim
