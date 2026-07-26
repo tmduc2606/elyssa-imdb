@@ -1,7 +1,51 @@
-.venv/
+# ─── Python ────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
-.env
-data/
+*.egg
+dist/
+build/
+*.whl
+
+.venv/
+venv/
+env/
+
+# ─── Testing & Linting ──────────────────────────────────────────
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Jupyter ──────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── Environment ──────────────────────────────────────────────────
+.env
+.env.local
+
+# ─── Runtime data ────────────────────────────────────────────────
+data/
+*.db
+*.db.wal
+*.sqlite
+*.sqlite3
+
+# ─── MLflow artifacts (if local) ─────────────────────────────────
+mlruns/
+mlartifacts/
+
+# ─── IDE & OS ────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+.windsurf/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,93 @@
+# ─── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+.venv/
+venv/
+env/
+
+# ─── Testing & Linting ──────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Jupyter ──────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── Environment ──────────────────────────────────────────────────
+.env
+.env.local
+
+# ─── Bronze & Silver intermediates ──────────────────────────────
+bronze/db_parquet/
+bronze/logs/
+silver/output/
+silver/tmp/
+logs/
+
+# ─── dbt ──────────────────────────────────────────────────────────
+gold/target/
+gold/dbt_packages/
+gold/logs/
+gold/dbt_project.yml.bak
+
+# ─── Airflow ──────────────────────────────────────────────────────
+orchestration/airflow.cfg
+orchestration/airflow.db
+orchestration/logs/
+orchestration/plugins/
+
+# ─── Data artifacts ──────────────────────────────────────────────
+*.parquet
+*.csv
+*.tsv
+*.db
+*.db.wal
+*.npy
+*.joblib
+*.pkl
+
+# ─── Docs (track only portfolio docs) ────────────────────────────
+docs/*
+!docs/architecture_overview.md
+!docs/etl_pipeline.md
+!docs/schema_dictionary.md
+!docs/data_quality_tests.md
+!docs/disaster_recovery.md
+!docs/phase1_summary.md
+!docs/blueprint_database_ingestion.md
+!docs/pipeline-optimization-blueprint.md
+!docs/specialized_assessment.md
+!docs/de_optimization_plan.md
+!docs/assessment_results.json
+!docs/assessment_results_table.md
+
+# ─── IDE & OS ────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+.windsurf/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ─── Agent artifacts ─────────────────────────────────────────────
+agents/
+presets/
+hooks/
+starter-packs/
+templates/
+duke/
+skills/

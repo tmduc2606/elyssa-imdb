@@ -1,0 +1,26 @@
+# ─── Environment ──────────────────────────────────────────────────
+.env
+.env.local
+!.env.example
+
+# ─── Runtime volumes (created by compose) ────────────────────────
+postgres-data/
+rustfs-data/
+mlflow-artifacts/
+data/
+
+# ─── Accidental nested builds ────────────────────────────────────
+docker/
+data-engineering/
+web-application/
+data-science/
+
+# ─── IDE & OS ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

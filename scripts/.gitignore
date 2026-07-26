@@ -1,0 +1,23 @@
+# ─── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ─── Data artifacts ──────────────────────────────────────────────
+*.parquet
+*.csv
+*.tsv
+*.db
+*.npy
+*.pkl
+*.joblib
+
+# ─── IDE & OS ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

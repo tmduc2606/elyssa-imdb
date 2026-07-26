@@ -1,0 +1,107 @@
+# ─── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+.venv/
+venv/
+env/
+
+# ─── Testing & Linting ──────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Jupyter ──────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── Environment ──────────────────────────────────────────────────
+.env
+.env.local
+!.env.example
+
+# ─── Terraform ───────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+*.tfvars
+!terraform.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ─── Kubernetes ─────────────────────────────────────────────────
+kubeconfig
+*.kubeconfig
+k3s.yaml
+
+# ─── Airflow ──────────────────────────────────────────────────────
+airflow/logs/
+airflow/airflow.cfg
+airflow/airflow.db
+airflow/unittests.cfg
+airflow/webserver_config.py
+airflow/plugins/
+
+# ─── Monitoring data ────────────────────────────────────────────
+monitoring/prometheus/data/
+monitoring/grafana/data/
+monitoring/grafana/grafana.db
+monitoring/grafana/plugins/
+
+# ─── SSL / TLS certs ─────────────────────────────────────────────
+docker/*.crt
+docker/*.key
+docker/*.pem
+docker/*.csr
+!docker/nginx-ssl.conf
+
+# ─── MLflow ──────────────────────────────────────────────────────
+mlruns/
+mlartifacts/
+wandb/
+
+# ─── Data artifacts ──────────────────────────────────────────────
+*.parquet
+*.csv
+*.tsv
+*.db
+*.db.wal
+*.npy
+*.joblib
+*.pkl
+*.pt
+*.pth
+*.onnx
+
+# ─── Docker volumes ──────────────────────────────────────────────
+docker/postgres-data/
+docker/rustfs-data/
+docker/mlflow-artifacts/
+
+# ─── Docs builds ──────────────────────────────────────────────────
+docs/.vitepress/dist/
+docs/node_modules/
+
+# ─── IDE & OS ────────────────────────────────────────────────────
+.vscode/
+.idea/
+.cursor/
+.windsurf/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
