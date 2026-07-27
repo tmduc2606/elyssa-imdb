@@ -100,9 +100,9 @@ List all registered models and their current production status.
 
 The inference pipeline builds a feature vector from:
 
-- **Tabular features** (30 dims): runtime, year, credits, episode metadata, KG aggregates
+- **Tabular features** (26 dims): runtime, year, credits, episode metadata, KG aggregates
 - **Text embedding** (768 dims): DistilBERT pooled output
-- **Total**: 798 dims
+- **Total**: 794 dims
 
 ### Excluded Features (Target Leakage)
 

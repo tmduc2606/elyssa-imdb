@@ -24,7 +24,6 @@ class FeatureConfig:
         "editor_count", "cinematographer_count", "self_count",
         "series_episode_count", "series_avg_episode_rating",
         "min_season", "max_season", "genre_cnt",
-        "avg_genre_year_rating", "avg_genre_year_votes", "avg_genre_year_popularity",
         "dir_avg_career_len", "dir_max_career_len", "dir_avg_experience", "dir_avg_recent_activity",
         "wri_avg_career_len", "wri_max_career_len", "wri_avg_experience", "wri_avg_recent_activity",
     ])

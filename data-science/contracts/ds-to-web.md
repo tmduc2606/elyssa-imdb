@@ -21,7 +21,7 @@ them via MLflow model registry and local artifact files.
 |-------|-------|
 | Purpose | Multi-label genre classification |
 | Architecture | Gated Multimodal Unit (GMU) |
-| Input | Tabular (30 dims) + Text embedding (768 dims) = 798 dims |
+| Input | Tabular (26 dims) + Text embedding (768 dims) = 794 dims |
 | Output | 28-dim sigmoid (multi-label) |
 | Primary metric | `macro_f1` |
 | Threshold | `macro_f1 > 0.60` |
@@ -34,7 +34,7 @@ them via MLflow model registry and local artifact files.
 |-------|-------|
 | Purpose | Rating regression (1.0–10.0) |
 | Architecture | CatBoost regressor |
-| Input | All features (798 dims) — average_rating/num_votes EXCLUDED |
+| Input | All features (794 dims) — average_rating/num_votes EXCLUDED |
 | Output | Single float (predicted rating) |
 | Primary metric | `rmse` |
 | Threshold | `rmse <= 0.55` |
@@ -167,9 +167,9 @@ with open("feature_columns.json") as f:
     schema = json.load(f)
 
 # schema = {
-#   "tabular_features": ["start_year", "runtime_minutes", ...],  # 30 columns
+#   "tabular_features": ["start_year", "runtime_minutes", ...],  # 26 columns (avg_genre_year_* removed)
 #   "text_features": ["text_emb_0", ..., "text_emb_767"],         # 768 columns
-#   "total_features": 798
+#   "total_features": 794
 # }
 
 def build_feature_vector(raw_input: dict, text_embedding: np.ndarray) -> np.ndarray:
