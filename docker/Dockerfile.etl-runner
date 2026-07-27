@@ -1,7 +1,7 @@
 # Elyssa-IMDb | ETL Runner — Dedicated DuckDB ETL Engine
-# Has its own 6 GB budget so DuckDB heavy lifting doesn't
-# compete with Airflow for memory.
-# Only depends on: duckdb + psycopg2 (no webserver, no scheduler, no dbt)
+# Runs Silver transform (UNNEST-heavy) on its own memory budget.
+# DuckDB spills to DUCKDB_TEMP_DIR when memory is exhausted.
+# Override limits via container env vars (docker-compose.yml).
 
 FROM python:3.11-slim
 
@@ -13,10 +13,12 @@ RUN pip install --no-cache-dir \
     python-dotenv==1.0.1
 
 ENV DUCKDB_THREADS=2 \
-    DUCKDB_MEMORY_LIMIT=4GB
+    DUCKDB_MEMORY_LIMIT=2GB \
+    DUCKDB_TEMP_DIR=/tmp/duckdb_spill
+
+RUN mkdir -p /tmp/duckdb_spill && chmod 777 /tmp/duckdb_spill
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=10s \
     CMD python -c "import duckdb; conn = duckdb.connect(':memory:'); conn.execute('SELECT 1'); conn.close()"
 
-# Keep container alive for potential future use
 CMD ["sleep", "infinity"]

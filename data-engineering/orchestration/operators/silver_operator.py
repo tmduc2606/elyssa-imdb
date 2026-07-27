@@ -1,10 +1,26 @@
-from airflow.models import BaseOperator
+try:
+    from airflow.models import BaseOperator
+except ImportError:
+    class BaseOperator:  # type: ignore[no-redef]
+        """Stub BaseOperator when Airflow is not installed (standalone etl-runner)."""
+        def __init__(self, *args, **kwargs):
+            self.log = _StubLogger()
+        template_fields = ()
+
+    class _StubLogger:
+        def info(self, *a, **kw): print(a[0] if a else "")
+        def warning(self, *a, **kw): print("[WARN]", a[0] if a else "")
+        def error(self, *a, **kw): print("[ERROR]", a[0] if a else "")
 from typing import Optional
 import os
 import sys
 from datetime import datetime, timezone
 
-sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
+# Support both Airflow container (/opt/airflow/...) and etl-runner (/opt/etl/...)
+_orch_path = "/opt/airflow/data-engineering/orchestration"
+if not os.path.isdir(_orch_path):
+    _orch_path = "/opt/etl/data-engineering/orchestration"
+sys.path.insert(0, _orch_path)
 from pipeline_logger import get_logger
 
 # Threshold for chunked processing: tables with >5M source rows
@@ -28,11 +44,11 @@ def _log_memory(conn, logger, stage_name):
 
 
 def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, batch_size=CHUNK_BATCH_SIZE):
-    """Process a child table in chunks to bound peak memory during array explosion (M3).
+    """Process a child table in chunks to bound peak memory during array explosion.
 
-    For large source tables (e.g. title.principals with 100M rows),
-    the UNNEST operation on the full table can cause OOM. This function
-    reads the source Parquet in row-range chunks and explodes each chunk.
+    Uses LIMIT/OFFSET for O(1) pagination instead of ROW_NUMBER() OVER ()
+    which would require a full sort of the source parquet. The sql_template
+    receives {source} which resolves to a LIMIT/OFFSET subquery.
     """
     import os as _os
 
@@ -46,22 +62,17 @@ def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, 
 
     log.info(f"  {dst_table}: {total_src} source rows, processing in chunks of {batch_size}")
 
+    if total_src == 0:
+        log.info(f"  {dst_table}: 0 source rows, skipping")
+        return 0
+
     offset = 0
     chunk_total = 0
     chunk_idx = 0
     while offset < total_src:
         chunk_idx += 1
-        # Read a row-range window of the source parquet
-        # DuckDB: use a subquery with row_number to paginate
-        chunk_table = f"_chunk_{dst_table.replace('.', '_')}_{chunk_idx}"
-        conn.execute(f"""
-            CREATE TEMPORARY VIEW {chunk_table} AS
-            SELECT * FROM (
-                SELECT *, ROW_NUMBER() OVER () AS _rn
-                FROM read_parquet('{parquet_path}')
-            ) sub WHERE _rn > {offset} AND _rn <= {offset + batch_size}
-        """)
-        chunk_sql = sql_template.format(source=chunk_table)
+        source_expr = f"(SELECT * FROM read_parquet('{parquet_path}') LIMIT {batch_size} OFFSET {offset})"
+        chunk_sql = sql_template.format(source=source_expr)
         csv_path = f"/tmp/silver_{dst_table.replace('.', '_')}_chunk_{chunk_idx}.csv"
         conn.execute(f"COPY ({chunk_sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
 
@@ -73,7 +84,6 @@ def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, 
             )
 
         _os.remove(csv_path)
-        conn.execute(f"DROP VIEW IF EXISTS {chunk_table}")
         chunk_rows = pg_cursor.rowcount
         chunk_total += chunk_rows
         offset += batch_size
@@ -129,7 +139,8 @@ class SilverTransformOperator(BaseOperator):
         os.makedirs(csv_dir, exist_ok=True)
         conn = duckdb.connect(str(duckdb_file))
         conn.execute("SET threads = 2")
-        conn.execute("SET memory_limit = '4GB'")
+        mem_limit = os.environ.get("DUCKDB_MEMORY_LIMIT", "2GB")
+        conn.execute(f"SET memory_limit = '{mem_limit}'")
         conn.execute("SET preserve_insertion_order = false")
         conn.execute(f"SET temp_directory = '{duckdb_temp}'")
         conn.execute("SET max_temp_directory_size = '10GB'")
@@ -149,7 +160,6 @@ class SilverTransformOperator(BaseOperator):
         # max_wal_size, wal_level, archive_mode are POSTMASTER params (set in docker-compose, not per-session)
         with pg.cursor() as tune:
             tune.execute("SET maintenance_work_mem = '256MB'")
-            tune.execute("SET checkpoint_timeout = '1h'")
         pg.commit()
 
         # Ensure schemas and tables exist (idempotent — survives container rebuilds)
@@ -162,6 +172,12 @@ class SilverTransformOperator(BaseOperator):
             self.log.info("Schema applied from schema.sql")
         else:
             self.log.warning(f"schema.sql not found at {schema_path}")
+
+        # Clean partial/corrupted Silver state from previous failed runs
+        with pg.cursor() as cleanup:
+            cleanup.execute("TRUNCATE silver.title_genre, silver.title_director, silver.title_writer, silver.title_akas_type, silver.title_akas_attribute, silver.title_principal_char, silver.name_profession, silver.name_known_for_title")
+        pg.commit()
+        self.log.info("Truncated Silver child tables to clear partial/corrupted state")
 
         # ── Schema migrations for SCD2 (drop old UNIQUE constraints) ─────
         for _tbl, _old_con in [
@@ -449,9 +465,9 @@ class SilverTransformOperator(BaseOperator):
                     "snake_cols": ["tconst", "genre"],
                     "src_table": "title.basics",
                     "sql": """
-                        SELECT tconst,
-                               UNNEST(string_split(NULLIF(genres, '\\N'), ',')) AS genre
-                        FROM {source}
+                        SELECT tconst, genre
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(genres, '\\N'), ',')) AS t(genre)
                         WHERE genres IS NOT NULL
                           AND genres != ''
                           AND genres != '\\N'
@@ -463,16 +479,14 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "title.crew",
                     "sql": """
                         SELECT tconst,
-                               CAST(ROW_NUMBER() OVER (PARTITION BY tconst) AS SMALLINT) AS ordering,
+                               CAST(ordinality AS SMALLINT) AS ordering,
                                director AS nconst
-                        FROM (
-                            SELECT tconst,
-                                   UNNEST(string_split(NULLIF(directors, '\\N'), ',')) AS director
-                            FROM {source}
-                            WHERE directors IS NOT NULL
-                              AND directors != ''
-                              AND directors != '\\N'
-                        ) sub
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(directors, '\\N'), ','))
+                          WITH ORDINALITY AS t(director, ordinality)
+                        WHERE directors IS NOT NULL
+                          AND directors != ''
+                          AND directors != '\\N'
                     """,
                 },
                 {
@@ -481,16 +495,14 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "title.crew",
                     "sql": """
                         SELECT tconst,
-                               CAST(ROW_NUMBER() OVER (PARTITION BY tconst) AS SMALLINT) AS ordering,
+                               CAST(ordinality AS SMALLINT) AS ordering,
                                writer AS nconst
-                        FROM (
-                            SELECT tconst,
-                                   UNNEST(string_split(NULLIF(writers, '\\N'), ',')) AS writer
-                            FROM {source}
-                            WHERE writers IS NOT NULL
-                              AND writers != ''
-                              AND writers != '\\N'
-                        ) sub
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(writers, '\\N'), ','))
+                          WITH ORDINALITY AS t(writer, ordinality)
+                        WHERE writers IS NOT NULL
+                          AND writers != ''
+                          AND writers != '\\N'
                     """,
                 },
                 {
@@ -500,8 +512,9 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT titleId AS title_id,
                                ordering,
-                               UNNEST(string_split(NULLIF(types, '\\N'), ',')) AS type
-                        FROM {source}
+                               type
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(types, '\\N'), ',')) AS t(type)
                         WHERE types IS NOT NULL
                           AND types != ''
                           AND types != '\\N'
@@ -514,8 +527,9 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT titleId AS title_id,
                                ordering,
-                               UNNEST(string_split(NULLIF(attributes, '\\N'), ',')) AS attr
-                        FROM {source}
+                               attr
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(attributes, '\\N'), ',')) AS t(attr)
                         WHERE attributes IS NOT NULL
                           AND attributes != ''
                           AND attributes != '\\N'
@@ -528,10 +542,11 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT tconst,
                                ordering,
-                               TRIM(UNNEST(
-                                   string_split(TRIM(NULLIF(characters, '\\N'), '[]'), '","')
-                               ), '"') AS character_name
-                        FROM {source}
+                               TRIM(character_val, '"') AS character_name
+                        FROM {source},
+                        LATERAL UNNEST(
+                            string_split(TRIM(NULLIF(characters, '\\N'), '[]'), '","')
+                        ) AS t(character_val)
                         WHERE characters IS NOT NULL
                           AND characters != ''
                           AND characters != '\\N'
@@ -543,16 +558,14 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "name.basics",
                     "sql": """
                         SELECT nconst,
-                               CAST(ROW_NUMBER() OVER (PARTITION BY nconst) AS SMALLINT) AS profession_order,
-                               profession AS profession
-                        FROM (
-                            SELECT nconst,
-                                   UNNEST(string_split(NULLIF(primaryProfession, '\\N'), ',')) AS profession
-                            FROM {source}
-                            WHERE primaryProfession IS NOT NULL
-                              AND primaryProfession != ''
-                              AND primaryProfession != '\\N'
-                        ) sub
+                               CAST(ordinality AS SMALLINT) AS profession_order,
+                               profession
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(primaryProfession, '\\N'), ','))
+                          WITH ORDINALITY AS t(profession, ordinality)
+                        WHERE primaryProfession IS NOT NULL
+                          AND primaryProfession != ''
+                          AND primaryProfession != '\\N'
                     """,
                 },
                 {
@@ -561,16 +574,14 @@ class SilverTransformOperator(BaseOperator):
                     "src_table": "name.basics",
                     "sql": """
                         SELECT nconst,
-                               CAST(ROW_NUMBER() OVER (PARTITION BY nconst) AS SMALLINT) AS known_for_order,
+                               CAST(ordinality AS SMALLINT) AS known_for_order,
                                title AS tconst
-                        FROM (
-                            SELECT nconst,
-                                   UNNEST(string_split(NULLIF(knownForTitles, '\\N'), ',')) AS title
-                            FROM {source}
-                            WHERE knownForTitles IS NOT NULL
-                              AND knownForTitles != ''
-                              AND knownForTitles != '\\N'
-                        ) sub
+                        FROM {source},
+                        LATERAL UNNEST(string_split(NULLIF(knownForTitles, '\\N'), ','))
+                          WITH ORDINALITY AS t(title, ordinality)
+                        WHERE knownForTitles IS NOT NULL
+                          AND knownForTitles != ''
+                          AND knownForTitles != '\\N'
                     """,
                 },
             ]
@@ -637,6 +648,9 @@ class SilverTransformOperator(BaseOperator):
                 if self.profile_memory:
                     _log_memory(conn, self.log, f"child_{child['dst_table']}")
 
+                # Flush DuckDB temp between child-table UNNESTs to bound peak RSS
+                conn.execute("CHECKPOINT")
+
             pg.commit()
             elapsed = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
             self.log.info(f"Silver ETL complete: {total_rows} parent rows + {child_rows} child rows across {len(table_defs) + len(child_table_defs)} tables")
@@ -676,3 +690,10 @@ class SilverTransformOperator(BaseOperator):
             except Exception as e:
                 self.log.warning(f"Failed to clean up DuckDB temp files: {e}")
             pg.close()
+
+
+if __name__ == "__main__":
+    operator = SilverTransformOperator(
+        task_id="silver_transform_standalone",
+    )
+    operator.execute({})

@@ -96,6 +96,32 @@ This stack runs independently from the web app compose.
 $dc = "docker compose -f docker/docker-compose.yml"
 ```
 
+### Pipeline Mode (Selective Execution)
+
+Use `docker/pipeline-mode.ps1` to start/stop selective pipeline stages without running the full dev stack:
+
+```powershell
+# Start pipeline-only services (postgres + airflow + etl-runner)
+.\docker\pipeline-mode.ps1 start
+
+# Run a single stage (requires bronze Parquet / silver tables already present)
+.\docker\pipeline-mode.ps1 run bronze     # Bronze ingestion only
+.\docker\pipeline-mode.ps1 run silver     # Silver ETL only
+.\docker\pipeline-mode.ps1 run gold       # Gold dbt + export only
+
+# Full end-to-end
+.\docker\pipeline-mode.ps1 run full
+
+# Clean (drop silver/gold schemas, wipe Parquet, restart)
+.\docker\pipeline-mode.ps1 clean
+
+# Resume full dev stack (neo4j + rustfs + duckdb)
+.\docker\pipeline-mode.ps1 resume
+
+# Stop everything
+.\docker\pipeline-mode.ps1 stop
+```
+
 ## 1. Build & Start
 
 ```powershell
@@ -174,14 +200,20 @@ print(f'  batch_metadata records: {cur.fetchone()[0]}')
 ```
 
 ### Silver Layer (~3h 39m)
+
+**Parents (6):** `title_basics`, `name_basics`, `title_rating`, `title_episode`, `title_principal`, `title_crew`  
+**Children (8):** `title_genre`, `title_director`, `title_writer`, `name_profession`, `name_known_for_title`, `title_principal_char`, `title_akas`, `title_episode_relation`
+
 Look for task `silver_transform` completing. Check output:
 ```powershell
-# Silver table row counts
+# Silver table row counts (all 14 tables)
 docker exec elyssa-airflow python -c "
 import psycopg2
 con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password='elyssa_pg_2026', dbname='elyssa_warehouse')
 cur = con.cursor()
-for t in ['title_basics','name_basics','title_rating','title_episode','title_principal','title_genre','title_director','title_writer','name_profession','name_known_for_title','title_principal_char']:
+for t in ['title_basics','name_basics','title_rating','title_episode','title_principal','title_crew',
+          'title_genre','title_director','title_writer','name_profession','name_known_for_title',
+          'title_principal_char','title_akas','title_episode_relation']:
     cur.execute(f'SELECT count(*) FROM silver.{t}')
     print(f'  silver.{t}: {cur.fetchone()[0]:>12,} rows')
 cur.execute('SELECT count(*) FROM silver.title_basics WHERE is_current = FALSE')
@@ -254,6 +286,34 @@ docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
 # Run with memory profiling (build sizing matrix)
 docker exec elyssa-airflow python /opt/airflow/data-engineering/orchestration/operators/silver_operator.py --profile-memory
 ```
+
+---
+
+## Known Issues & Fixes
+
+### Child Table UNNEST Hang
+**Symptom:** Silver parent tables load but child tables (e.g. `title_genre`, `title_director`) stay empty indefinitely. DuckDB process shows `futex_wait_queue` — kernel scheduler stall due to massive `ROW_NUMBER() OVER (PARTITION BY ...)` inside UNNEST subquery that cannot spill to disk.
+
+**Fix applied:** All 8 child SQL templates rewritten to use `LATERAL UNNEST(...) WITH ORDINALITY` — no window functions, no intermediate sort. Chunk pagination uses simple `LIMIT/OFFSET` instead of `ROW_NUMBER() OVER ()`. DuckDB `memory_limit` is read from `DUCKDB_MEMORY_LIMIT` env var (default `2GB`).
+
+**If it reoccurs:** Lower `DUCKDB_MEMORY_LIMIT` in `docker/docker-compose.yml` (etl-runner env) and ensure spill dir exists — DuckDB will spill to disk instead of hanging.
+
+### dbt Lock Contention
+**Symptom:** `gold_dbt_run` hangs or fails with `relation "gold.fact_episode" already exists`. Multiple concurrent dbt processes from retried DAG runs collide on same PG relations; stale `__dbt_tmp` tables accumulate; partial-parse cache serves stale metadata.
+
+**Fix applied:** `dbt_operator.py` now acquires an exclusive file lock (`/tmp/dbt_run.lock`) before any dbt invocation; kills stale dbt PIDs before starting; cleans `__dbt_tmp` tables and partial-parse cache from PG; always uses `--full-refresh --no-partial-parse`.
+
+**If it reoccurs:** Manually clean dbt artifacts:
+```sql
+DROP SCHEMA IF EXISTS gold CASCADE;
+CREATE SCHEMA gold;
+DELETE FROM pg_stat_activity WHERE state = 'idle in transaction' AND state_change < now() - interval '5 minutes';
+```
+
+### wait_silver Only Checks Parents
+**Symptom:** `SilverDoneSensor` reports all tables ready but child tables are still empty — the sensor only polls the 6 parent tables.
+
+**Fix applied:** `SilverDoneSensor` now polls all 14 tables (6 parents + 8 children), up to 480 attempts (4 hours), logging every 4th attempt.
 
 ---
 

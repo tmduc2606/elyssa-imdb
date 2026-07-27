@@ -18,7 +18,8 @@ Execution order:
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, timedelta, timezone
 
 # ─── Ensure data-engineering module is importable ───────────────────
 for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-engineering", "/opt/airflow"):
@@ -28,8 +29,10 @@ for _p in ("/opt/airflow/data-engineering/orchestration", "/opt/airflow/data-eng
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
+from airflow.sensors.base import BaseSensorOperator
 
-from operators.silver_operator import SilverTransformOperator
+from pipeline_logger import get_logger
+
 from operators.dbt_operator import DbtRunOperator
 from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
@@ -168,6 +171,97 @@ def _spawn_bronze(**context):
     return {"bronze_pid": proc.pid}
 
 
+def _spawn_silver(**context):
+    """Spawn silver_operator.py as a detached subprocess inside etl-runner.
+
+    Uses start_new_session=True so the process survives Airflow's
+    supervisor heartbeat timeout. The task returns immediately and
+    SilverDoneSensor polls Postgres for completion.
+    """
+    import subprocess
+    log_path = "/tmp/silver_etl.log"
+    with open(log_path, "w") as lf:
+        lf.write(f"[{datetime.now(timezone.utc).isoformat()}] Spawning silver ETL\n")
+    proc = subprocess.Popen(
+        [
+            "docker", "exec", "elyssa-etl-runner",
+            "python", "/opt/etl/data-engineering/orchestration/operators/silver_operator.py",
+        ],
+        stdout=open(log_path, "a"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    print(f"Silver subprocess spawned: PID={proc.pid}")
+    return {"silver_pid": proc.pid}
+
+
+class SilverDoneSensor(BaseSensorOperator):
+    """Poll Postgres until all 14 silver tables (6 parent + 8 child) have rows."""
+
+    template_fields = ()
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def execute(self, context):
+        import psycopg2
+        log = get_logger()
+        batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        all_tables = [
+            "title_basics", "title_akas", "title_episode",
+            "title_rating", "title_principal", "name_basics",
+            "title_genre", "title_director", "title_writer",
+            "title_akas_type", "title_akas_attribute", "title_principal_char",
+            "name_profession", "name_known_for_title",
+        ]
+        populated = 0
+        max_attempts = 480
+        attempt = 0
+        while attempt < max_attempts:
+            try:
+                pg = psycopg2.connect(
+                    host="postgres", port=5432,
+                    user="elyssa", password="elyssa_pg_2026",
+                    dbname="elyssa_warehouse",
+                )
+                cur = pg.cursor()
+                populated = 0
+                for tbl in all_tables:
+                    cur.execute(
+                        "SELECT n_live_tup FROM pg_stat_user_tables "
+                        "WHERE schemaname='silver' AND relname=%s",
+                        (tbl,),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0] > 0:
+                        populated += 1
+                    else:
+                        cur.execute(f"SELECT 1 FROM silver.{tbl} LIMIT 1")
+                        if cur.fetchone():
+                            populated += 1
+                cur.close()
+                pg.close()
+                if populated >= len(all_tables):
+                    log.log_stage(
+                        stage="silver_wait", batch_id=batch_id,
+                        status="complete",
+                        message=f"{populated}/{len(all_tables)} tables populated",
+                    )
+                    return
+            except Exception as e:
+                self.log.warning(f"Poll error: {e}")
+            attempt += 1
+            if attempt % 4 == 0:
+                self.log.info(
+                    f"Waiting for silver... ({populated}/{len(all_tables)} tables, attempt {attempt}/{max_attempts})"
+                )
+            time.sleep(30)
+        raise RuntimeError(
+            f"Silver load did not complete within timeout: {populated}/{len(all_tables)} tables populated after {max_attempts} attempts"
+        )
+
+
+# ─── DAG Definition ─────────────────────────────────────────────────────
 with DAG(
     dag_id="imdb_pipeline",
     default_args=default_args,
@@ -224,14 +318,25 @@ with DAG(
         fail_threshold=1000,
     )
 
-    # ─── Silver (parent + child normalization) ────────────────────────────
-    silver_transform = SilverTransformOperator(
+    # ─── Silver (detached subprocess in etl-runner) ──────────────────
+    # Spawns silver_operator.py inside etl-runner and returns immediately.
+    # SilverDoneSensor polls Postgres until all parent tables have rows.
+    silver_transform = PythonOperator(
         task_id="silver_transform",
-        bronze_path=_BRONZE_PATH,
-        profile_memory=True,
-        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
-        jdbc_user="elyssa",
-        jdbc_password="elyssa_pg_2026",
+        python_callable=_spawn_silver,
+        retries=0,
+        execution_timeout=timedelta(seconds=30),
+    )
+
+    wait_silver = SilverDoneSensor(
+        task_id="wait_silver",
+        poke_interval=30,
+        timeout=28800,
+        mode="reschedule",
+        retries=_retry_cfg.get("max_retries", 4),
+        retry_delay=timedelta(seconds=_retry_cfg.get("base_delay_s", 60)),
+        retry_exponential_backoff=True,
+        max_retry_delay=timedelta(seconds=_retry_cfg.get("max_delay_s", 1800)),
     )
 
     # ─── Gold (dbt run + test) ────────────────────────────────────────────
@@ -284,6 +389,6 @@ with DAG(
 
     imdb_sensor >> run_bronze >> wait_bronze >> bronze_done
 
-    bronze_done >> quarantine_check >> silver_transform
-    silver_transform >> gold_dbt_run >> gold_dbt_test
+    bronze_done >> quarantine_check >> silver_transform >> wait_silver
+    wait_silver >> gold_dbt_run >> gold_dbt_test
     gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end

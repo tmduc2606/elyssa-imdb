@@ -33,7 +33,7 @@ class GoldExportOperator(BaseOperator):
         conn = duckdb.connect(':memory:')
         conn.execute("INSTALL postgres_scanner; LOAD postgres_scanner;")
         dsn = f"host={self.pg_host} port={self.pg_port} dbname={self.pg_db} user={self.pg_user} password={pg_password}"
-        conn.execute(f"ATTACH '{dsn}' AS pg (TYPE POSTGRES, SCHEMA 'gold_gold');")
+        conn.execute(f"ATTACH '{dsn}' AS pg (TYPE POSTGRES, SCHEMA 'gold');")
 
         tables = ['dim_person', 'dim_title', 'fact_episode', 'fact_performance', 'fact_title_principal', 'fact_title_rating']
         row_counts = {}
@@ -42,13 +42,13 @@ class GoldExportOperator(BaseOperator):
             if t == 'dim_title':
                 conn.execute(f"""
                     COPY (
-                        SELECT * FROM pg.gold_gold."{t}"
+                        SELECT * FROM pg.gold."{t}"
                         WHERE NOT (title_type = 'movie' AND (runtime_minutes IS NULL OR runtime_minutes <= 0))
                     ) TO '{path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
                 """)
             else:
-                conn.execute(f'COPY (SELECT * FROM pg.gold_gold."{t}") TO \'{path}\' (FORMAT PARQUET, COMPRESSION SNAPPY)')
-            r = conn.execute(f'SELECT count(*) FROM pg.gold_gold."{t}"').fetchone()[0]
+                conn.execute(f'COPY (SELECT * FROM pg.gold."{t}") TO \'{path}\' (FORMAT PARQUET, COMPRESSION SNAPPY)')
+            r = conn.execute(f'SELECT count(*) FROM pg.gold."{t}"').fetchone()[0]
             row_counts[t] = r
             self.log.info(f"Exported {t}: {r:,} rows -> {path}")
 

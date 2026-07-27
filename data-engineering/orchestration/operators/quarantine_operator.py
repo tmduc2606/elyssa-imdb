@@ -45,6 +45,21 @@ class QuarantineCheckOperator(BaseOperator):
         conn.autocommit = True
         cursor = conn.cursor()
 
+        # Ensure quarantine table exists (idempotent — handles dropped schemas)
+        cursor.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS silver.quarantine (
+                quarantine_id  SERIAL PRIMARY KEY,
+                table_name     VARCHAR(200) NOT NULL,
+                batch_id       VARCHAR(20),
+                check_name     VARCHAR(200) NOT NULL,
+                failed_value   TEXT,
+                error_message  TEXT,
+                raw_record     JSONB,
+                quarantined_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
         # Find the most recent batch_id from quarantine (latest bronze run)
         cursor.execute(
             "SELECT batch_id FROM silver.quarantine ORDER BY quarantined_at DESC LIMIT 1"
