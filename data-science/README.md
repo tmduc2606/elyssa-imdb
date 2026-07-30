@@ -28,7 +28,7 @@ Gold Parquet → src/data/loader.py → src/features/ → src/models/ → src/ev
 ## Pipeline Usage
 
 ```bash
-# Full pipeline (after DE marts are available at marts/full/)
+# Full pipeline (after DE marts are available at marts/gold/)
 python scripts/run_pipeline.py --stage all
 
 # Checkpoint resume — skip stages that already completed
@@ -49,8 +49,8 @@ python scripts/generate_model_cards.py
 ```powershell
 # Use pre-packaged sample data
 python scripts/generate_sample_data.py
-New-Item -ItemType Junction -Path marts\full -Target marts\sample
-New-Item -ItemType Junction -Path marts\processed -Target marts\sample_processed
+New-Item -ItemType Junction -Path marts\gold -Target marts\sample
+New-Item -ItemType Junction -Path notebooks\models -Target marts\sample_models
 python scripts/run_pipeline.py --stage all --sample
 ```
 
@@ -58,28 +58,28 @@ python scripts/run_pipeline.py --stage all --sample
 
 | Artifact | Path | Consumer |
 |----------|------|----------|
-| GMU model | `marts/processed/gmu_genre_best.pt` | Web API |
-| CatBoost model | `marts/processed/catboost_rating_model.cbm` | Web API |
-| Feature schema | `marts/processed/feature_columns.json` | Web API |
-| Preprocessor | `marts/processed/preprocessor.joblib` | Web API |
-| Scaler | `marts/processed/scaler.joblib` | Web API |
+| GMU model | `notebooks/models/genre/gmu_genre_best.pt` | Web API |
+| CatBoost model | `notebooks/models/rating/catboost_rating_model.cbm` | Web API |
+| Feature schema | `notebooks/models/shared/feature_columns.json` | Web API |
+| Preprocessor | `notebooks/models/shared/preprocessor.joblib` | Web API |
+| Scaler | `notebooks/models/shared/scaler.joblib` | Web API |
 
 ## Upstream Dependency
 
-Gold Parquet marts from `data-engineering/` pipeline at `marts/full/`.
+Gold Parquet marts from `data-engineering/` pipeline at `marts/gold/`.
 
 ## Downstream Consumer
 
-Web Application API at `web-application/` reads from `marts/processed/` and `marts/full/`.
+Web Application API at `web-application/` reads from `notebooks/models/` and `marts/gold/`.
 
 ## Checkpoint Resume
 
-After each stage, artifacts are saved in `marts/processed/`. The pipeline detects existing artifacts and can skip completed stages:
+After each stage, artifacts are saved in `notebooks/models/`. The pipeline detects existing artifacts and can skip completed stages:
 
 ```python
 from pathlib import Path
-processed = Path("marts/processed")
-if (processed / "X_tab.npy").exists():
+models = Path("notebooks/models")
+if (models / "shared" / "X_tab.npy").exists():
     print("Features already built — skipping FE stage")
 ```
 

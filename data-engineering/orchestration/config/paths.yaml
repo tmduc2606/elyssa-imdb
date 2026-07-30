@@ -6,7 +6,7 @@ bronze:
   quarantine_path: /opt/airflow/output/bronze/quarantine/
 
 silver:
-  source_dir: /opt/airflow/data-engineering/duke/gate0/source/
+  source_dir: s3://imdb-source/
 
 gold:
   project_dir: /opt/airflow/data-engineering/gold

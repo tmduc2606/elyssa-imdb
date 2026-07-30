@@ -11,6 +11,7 @@ except ImportError:
         def info(self, *a, **kw): print(a[0] if a else "")
         def warning(self, *a, **kw): print("[WARN]", a[0] if a else "")
         def error(self, *a, **kw): print("[ERROR]", a[0] if a else "")
+import json
 from typing import Optional
 import os
 import sys
@@ -43,12 +44,15 @@ def _log_memory(conn, logger, stage_name):
         pass
 
 
-def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, batch_size=CHUNK_BATCH_SIZE):
+def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, batch_size=CHUNK_BATCH_SIZE, src_table=None):
     """Process a child table in chunks to bound peak memory during array explosion.
 
     Uses LIMIT/OFFSET for O(1) pagination instead of ROW_NUMBER() OVER ()
     which would require a full sort of the source parquet. The sql_template
     receives {source} which resolves to a LIMIT/OFFSET subquery.
+    Each chunk COPYs into a per-chunk temp table, then INSERT ... ON CONFLICT
+    DO NOTHING into the destination, so a cross-chunk duplicate from
+    non-deterministic LIMIT/OFFSET is silently skipped.
     """
     import os as _os
 
@@ -56,9 +60,12 @@ def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, 
     snake_cols = child_def["snake_cols"]
     sql_template = child_def["sql"]
 
-    total_src = conn.execute(
-        f"SELECT count(*) FROM read_parquet('{parquet_path}')"
-    ).fetchone()[0]
+    if src_table:
+        total_src = conn.execute(f"SELECT count(*) FROM {src_table}").fetchone()[0]
+    else:
+        total_src = conn.execute(
+            f"SELECT count(*) FROM read_parquet('{parquet_path}')"
+        ).fetchone()[0]
 
     log.info(f"  {dst_table}: {total_src} source rows, processing in chunks of {batch_size}")
 
@@ -71,24 +78,37 @@ def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, 
     chunk_idx = 0
     while offset < total_src:
         chunk_idx += 1
-        source_expr = f"(SELECT * FROM read_parquet('{parquet_path}') LIMIT {batch_size} OFFSET {offset})"
+        if src_table:
+            source_expr = f"(SELECT * FROM {src_table} LIMIT {batch_size} OFFSET {offset})"
+        else:
+            source_expr = f"(SELECT * FROM read_parquet('{parquet_path}') LIMIT {batch_size} OFFSET {offset})"
         chunk_sql = sql_template.format(source=source_expr)
         csv_path = f"/tmp/silver_{dst_table.replace('.', '_')}_chunk_{chunk_idx}.csv"
         conn.execute(f"COPY ({chunk_sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
 
+        # Per-chunk temp table — COPY then INSERT ... ON CONFLICT DO NOTHING
+        stg_table = f"stg_chunk_{dst_table.replace('.', '_')}_{chunk_idx}"
+        cols = ", ".join(snake_cols)
+        pg_cursor.execute(f"CREATE TEMP TABLE {stg_table} (LIKE {dst_table} INCLUDING DEFAULTS)")
         with open(csv_path, "r") as f:
-            cols = ", ".join(snake_cols)
             pg_cursor.copy_expert(
-                f"COPY {dst_table} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
+                f"COPY {stg_table} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
                 f,
             )
+        pg_cursor.execute(f"""
+            INSERT INTO {dst_table} ({cols})
+            SELECT DISTINCT {cols} FROM {stg_table}
+            ON CONFLICT DO NOTHING
+        """)
+        chunk_rows = pg_cursor.rowcount
+        pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
 
         _os.remove(csv_path)
-        chunk_rows = pg_cursor.rowcount
         chunk_total += chunk_rows
         offset += batch_size
         log.info(f"  {dst_table}: chunk {chunk_idx} loaded ({chunk_rows} rows)")
 
+    log.info(f"  {dst_table}: {chunk_total} total rows loaded (deduplicated)")
     return chunk_total
 
 
@@ -173,11 +193,51 @@ class SilverTransformOperator(BaseOperator):
         else:
             self.log.warning(f"schema.sql not found at {schema_path}")
 
-        # Clean partial/corrupted Silver state from previous failed runs
-        with pg.cursor() as cleanup:
-            cleanup.execute("TRUNCATE silver.title_genre, silver.title_director, silver.title_writer, silver.title_akas_type, silver.title_akas_attribute, silver.title_principal_char, silver.name_profession, silver.name_known_for_title")
+        # Ensure checkpoint table exists (might not be in older schema.sql)
+        with pg.cursor() as ck:
+            ck.execute("""
+                CREATE TABLE IF NOT EXISTS silver.pipeline_checkpoints (
+                    pipeline_name VARCHAR(100) NOT NULL,
+                    stage VARCHAR(100) NOT NULL,
+                    batch_id VARCHAR(20),
+                    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    metadata JSONB,
+                    PRIMARY KEY (pipeline_name, stage)
+                )
+            """)
         pg.commit()
-        self.log.info("Truncated Silver child tables to clear partial/corrupted state")
+
+        # ── Checkpoint Recovery: skip completed stages ─────────────────────
+        skip_parents = False
+        skip_children = False
+        with pg.cursor() as cp:
+            cp.execute("SELECT stage, batch_id, completed_at FROM silver.pipeline_checkpoints WHERE pipeline_name = 'silver'")
+            for row in cp.fetchall():
+                stage = row[0]
+                if stage == 'parents_done':
+                    skip_parents = True
+                    self.log.info(f"[CHECKPOINT] Parents already completed (batch={row[1]}, at={row[2]}), skipping parents")
+                elif stage == 'children_done':
+                    skip_parents = True
+                    skip_children = True
+                    self.log.info(f"[CHECKPOINT] Children already completed (batch={row[1]}, at={row[2]}), skipping all Silver ETL")
+        pg.commit()
+
+        if skip_children:
+            self.log.info("Silver ETL fully complete from prior checkpoint — nothing to do")
+            log.log_stage(stage="silver_transform", batch_id=batch_id,
+                          status="complete", message="Skipped — all stages done from checkpoint")
+            pg.close()
+            conn.close()
+            return
+
+        # Clean partial/corrupted Silver state from previous failed runs
+        # (only if not resuming from a parents_done checkpoint)
+        if not skip_parents:
+            with pg.cursor() as cleanup:
+                cleanup.execute("TRUNCATE silver.title_genre, silver.title_director, silver.title_writer, silver.title_akas_type, silver.title_akas_attribute, silver.title_principal_char, silver.name_profession, silver.name_known_for_title")
+            pg.commit()
+            self.log.info("Truncated Silver child tables to clear partial/corrupted state")
 
         # ── Schema migrations for SCD2 (drop old UNIQUE constraints) ─────
         for _tbl, _old_con in [
@@ -283,8 +343,7 @@ class SilverTransformOperator(BaseOperator):
 
         try:
             total_rows = 0
-            table_items = list(table_defs.items())
-            for table_idx, (src_table, (dst_table, camel_cols, pk_cols)) in enumerate(table_items):
+            table_items = list(table_defs.items()) if not skip_parents else []
                 self.log.info(f"  [{table_idx+1}/{len(table_items)}] Starting {src_table} -> {dst_table}...")
                 parquet_path = os.path.join(self.bronze_path, f"{src_table}.parquet")
                 if not os.path.exists(parquet_path):
@@ -318,14 +377,20 @@ class SilverTransformOperator(BaseOperator):
                         f" AND \"{not_null_col}\" != '\\N'"
                     )
 
+                # M2: Materialize Parquet into DuckDB table to avoid double read_parquet()
+                duck_src = f"src_{src_table.replace('.', '_')}"
+                conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
+                conn.execute(f"CREATE TABLE {duck_src} AS SELECT * FROM read_parquet('{parquet_path}')")
+
                 # Count rows (after NOT NULL filter)
-                count_sql = "SELECT COUNT(*) FROM read_parquet('" + parquet_path + "')"
+                count_sql = f"SELECT COUNT(*) FROM {duck_src}"
                 if not_null_col:
                     count_sql += where_clause
                 row_count = conn.execute(count_sql).fetchone()[0]
 
                 if row_count == 0:
                     self.log.info(f"  {src_table}: 0 rows, skipping")
+                    conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
                     continue
 
                 self.log.info(f"  {src_table}: {row_count} rows -> {dst_table}")
@@ -333,9 +398,10 @@ class SilverTransformOperator(BaseOperator):
                 # Copy to CSV for PostgreSQL COPY (M4: use volume-backed csv_dir)
                 csv_path = os.path.join(csv_dir, f"silver_{src_table.replace('.', '_')}.csv")
                 conn.execute(
-                    "COPY (SELECT " + select_sql + " FROM read_parquet('" + parquet_path + "')"
+                    "COPY (SELECT " + select_sql + " FROM " + duck_src
                     + where_clause + ") TO '" + csv_path + "' (FORMAT CSV, HEADER true, DELIMITER '|')"
                 )
+                conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
 
                 # Build snake_case column list
                 snake_cols = [camel_to_snake_map.get(c, c) for c in camel_cols]
@@ -354,6 +420,7 @@ class SilverTransformOperator(BaseOperator):
                         pk_col = scd2_pk_map[dst_table]
                         # Drop indexes for the specific table to speed up SCD2
                         # (recreated after load; if failure occurs mid-way, indexes are rebuilt)
+                        pg_cursor.execute("SAVEPOINT sp_drop_idx")
                         try:
                             if dst_table == "silver.title_basics":
                                 pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_title_basics_tconst")
@@ -361,8 +428,9 @@ class SilverTransformOperator(BaseOperator):
                             elif dst_table == "silver.name_basics":
                                 pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_nconst")
                                 pg_cursor.execute("DROP INDEX IF EXISTS silver.idx_name_basics_current")
-                        except Exception:
-                            pass  # non-fatal; indexes will be recreated
+                        except Exception as e:
+                            self.log.warning(f"Failed to drop index on {dst_table}: {e} — rolling back to savepoint")
+                            pg_cursor.execute("ROLLBACK TO SAVEPOINT sp_drop_idx")
                         # Temp tables must be unqualified (no schema prefix)
                         stg_table = f"stg_{dst_table.replace('.', '_')}"
 
@@ -450,7 +518,18 @@ class SilverTransformOperator(BaseOperator):
                 if self.profile_memory:
                     _log_memory(conn, self.log, f"parent_{src_table}")
 
-            # Per-stage cleanup: flush DuckDB temp between parent and child stages
+            # Commit parents before children — so a child failure doesn't roll back 2h of parent work
+            pg.commit()
+            # Save checkpoint: parents done
+            with pg.cursor() as ck:
+                ck.execute("""
+                    INSERT INTO silver.pipeline_checkpoints (pipeline_name, stage, batch_id, completed_at, metadata)
+                    VALUES ('silver', 'parents_done', %s, NOW(), %s)
+                    ON CONFLICT (pipeline_name, stage)
+                    DO UPDATE SET batch_id = EXCLUDED.batch_id, completed_at = NOW(), metadata = EXCLUDED.metadata
+                """, (batch_id, json.dumps({"total_parent_rows": total_rows})))
+            pg.commit()
+            self.log.info(f"[CHECKPOINT] parents_done saved (batch={batch_id}, rows={total_rows})")
             conn.execute("CHECKPOINT")
             self.log.info("DuckDB temp checkpoint after parent tables, starting child normalization")
             if self.profile_memory:
@@ -465,7 +544,7 @@ class SilverTransformOperator(BaseOperator):
                     "snake_cols": ["tconst", "genre"],
                     "src_table": "title.basics",
                     "sql": """
-                        SELECT tconst, genre
+                        SELECT DISTINCT tconst, genre
                         FROM {source},
                         LATERAL UNNEST(string_split(NULLIF(genres, '\\N'), ',')) AS t(genre)
                         WHERE genres IS NOT NULL
@@ -480,13 +559,16 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT tconst,
                                CAST(ordinality AS SMALLINT) AS ordering,
-                               director AS nconst
-                        FROM {source},
-                        LATERAL UNNEST(string_split(NULLIF(directors, '\\N'), ','))
-                          WITH ORDINALITY AS t(director, ordinality)
-                        WHERE directors IS NOT NULL
-                          AND directors != ''
-                          AND directors != '\\N'
+                               nconst
+                        FROM (
+                          SELECT tconst,
+                                 UNNEST(string_split(NULLIF(directors, '\\N'), ',')) AS nconst,
+                                 generate_subscripts(string_split(NULLIF(directors, '\\N'), ','), 1) AS ordinality
+                          FROM {source}
+                          WHERE directors IS NOT NULL
+                            AND directors != ''
+                            AND directors != '\\N'
+                        ) sub
                     """,
                 },
                 {
@@ -496,13 +578,16 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT tconst,
                                CAST(ordinality AS SMALLINT) AS ordering,
-                               writer AS nconst
-                        FROM {source},
-                        LATERAL UNNEST(string_split(NULLIF(writers, '\\N'), ','))
-                          WITH ORDINALITY AS t(writer, ordinality)
-                        WHERE writers IS NOT NULL
-                          AND writers != ''
-                          AND writers != '\\N'
+                               nconst
+                        FROM (
+                          SELECT tconst,
+                                 UNNEST(string_split(NULLIF(writers, '\\N'), ',')) AS nconst,
+                                 generate_subscripts(string_split(NULLIF(writers, '\\N'), ','), 1) AS ordinality
+                          FROM {source}
+                          WHERE writers IS NOT NULL
+                            AND writers != ''
+                            AND writers != '\\N'
+                        ) sub
                     """,
                 },
                 {
@@ -510,7 +595,7 @@ class SilverTransformOperator(BaseOperator):
                     "snake_cols": ["title_id", "ordering", "type"],
                     "src_table": "title.akas",
                     "sql": """
-                        SELECT titleId AS title_id,
+                        SELECT DISTINCT titleId AS title_id,
                                ordering,
                                type
                         FROM {source},
@@ -525,7 +610,7 @@ class SilverTransformOperator(BaseOperator):
                     "snake_cols": ["title_id", "ordering", "attr"],
                     "src_table": "title.akas",
                     "sql": """
-                        SELECT titleId AS title_id,
+                        SELECT DISTINCT titleId AS title_id,
                                ordering,
                                attr
                         FROM {source},
@@ -540,7 +625,7 @@ class SilverTransformOperator(BaseOperator):
                     "snake_cols": ["tconst", "ordering", "character_name"],
                     "src_table": "title.principals",
                     "sql": """
-                        SELECT tconst,
+                        SELECT DISTINCT tconst,
                                ordering,
                                TRIM(character_val, '"') AS character_name
                         FROM {source},
@@ -560,12 +645,15 @@ class SilverTransformOperator(BaseOperator):
                         SELECT nconst,
                                CAST(ordinality AS SMALLINT) AS profession_order,
                                profession
-                        FROM {source},
-                        LATERAL UNNEST(string_split(NULLIF(primaryProfession, '\\N'), ','))
-                          WITH ORDINALITY AS t(profession, ordinality)
-                        WHERE primaryProfession IS NOT NULL
-                          AND primaryProfession != ''
-                          AND primaryProfession != '\\N'
+                        FROM (
+                          SELECT nconst,
+                                 UNNEST(string_split(NULLIF(primaryProfession, '\\N'), ',')) AS profession,
+                                 generate_subscripts(string_split(NULLIF(primaryProfession, '\\N'), ','), 1) AS ordinality
+                          FROM {source}
+                          WHERE primaryProfession IS NOT NULL
+                            AND primaryProfession != ''
+                            AND primaryProfession != '\\N'
+                        ) sub
                     """,
                 },
                 {
@@ -575,13 +663,16 @@ class SilverTransformOperator(BaseOperator):
                     "sql": """
                         SELECT nconst,
                                CAST(ordinality AS SMALLINT) AS known_for_order,
-                               title AS tconst
-                        FROM {source},
-                        LATERAL UNNEST(string_split(NULLIF(knownForTitles, '\\N'), ','))
-                          WITH ORDINALITY AS t(title, ordinality)
-                        WHERE knownForTitles IS NOT NULL
-                          AND knownForTitles != ''
-                          AND knownForTitles != '\\N'
+                               tconst
+                        FROM (
+                          SELECT nconst,
+                                 UNNEST(string_split(NULLIF(knownForTitles, '\\N'), ',')) AS tconst,
+                                 generate_subscripts(string_split(NULLIF(knownForTitles, '\\N'), ','), 1) AS ordinality
+                          FROM {source}
+                          WHERE knownForTitles IS NOT NULL
+                            AND knownForTitles != ''
+                            AND knownForTitles != '\\N'
+                        ) sub
                     """,
                 },
             ]
@@ -595,10 +686,11 @@ class SilverTransformOperator(BaseOperator):
 
                 self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
 
-                # Determine if chunked processing is needed (M3)
-                total_src = conn.execute(
-                    f"SELECT count(*) FROM read_parquet('{parquet_path}')"
-                ).fetchone()[0]
+                # M2: Materialize source Parquet into DuckDB table once to avoid re-parsing per chunk
+                src_tbl = f"src_{child['src_table'].replace('.', '_')}"
+                conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
+                conn.execute(f"CREATE TABLE {src_tbl} AS SELECT * FROM read_parquet('{parquet_path}')")
+                total_src = conn.execute(f"SELECT count(*) FROM {src_tbl}").fetchone()[0]
 
                 use_chunked = total_src > CHUNKED_CHILD_THRESHOLD
 
@@ -607,7 +699,7 @@ class SilverTransformOperator(BaseOperator):
                         pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
                         self.log.info(f"  {child['dst_table']}: large source ({total_src:,} rows), using chunked UNNEST")
                         chunk_loaded = _process_child_table_chunked(
-                            conn, pg_cursor, child, parquet_path, self.log
+                            conn, pg_cursor, child, None, self.log, src_table=src_tbl
                         )
                     child_rows += chunk_loaded
                     self.log.info(f"  {child['dst_table']}: {chunk_loaded} rows loaded (chunked)")
@@ -615,18 +707,25 @@ class SilverTransformOperator(BaseOperator):
                                   status="success", row_count=chunk_loaded,
                                   message=f"child {child['dst_table']} (chunked)")
                 else:
-                    source_expr = f"read_parquet('{parquet_path}')"
+                    source_expr = f"(SELECT * FROM {src_tbl})"
                     sql = child["sql"].format(source=source_expr)
-                    row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
+                    # M2: Materialize UNNEST result into DuckDB temp table to avoid double evaluation
+                    tmp_tbl = f"tmp_{child['dst_table'].replace('.', '_')}"
+                    conn.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
+                    conn.execute(f"CREATE TABLE {tmp_tbl} AS {sql}")
+                    row_count = conn.execute(f"SELECT COUNT(*) FROM {tmp_tbl}").fetchone()[0]
 
                     if row_count == 0:
                         self.log.info(f"  {child['dst_table']}: 0 rows, skipping")
+                        conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
+                        conn.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
                         continue
 
                     self.log.info(f"  {child['dst_table']}: {row_count} rows to load (full COPY)")
 
                     csv_path = os.path.join(csv_dir, f"silver_{child['dst_table'].replace('.', '_')}.csv")
-                    conn.execute(f"COPY ({sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
+                    conn.execute(f"COPY (SELECT * FROM {tmp_tbl}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
+                    conn.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
                     self.log.info(f"  {child['dst_table']}: CSV export done")
 
                     with pg.cursor() as pg_cursor:
@@ -639,6 +738,7 @@ class SilverTransformOperator(BaseOperator):
                                 f,
                             )
                     os.remove(csv_path)
+                    conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
                     child_rows += row_count
                     self.log.info(f"  {child['dst_table']}: {row_count} rows loaded")
                     log.log_stage(stage="silver_transform", batch_id=batch_id,
@@ -652,6 +752,16 @@ class SilverTransformOperator(BaseOperator):
                 conn.execute("CHECKPOINT")
 
             pg.commit()
+            # Save checkpoint: children done
+            with pg.cursor() as ck:
+                ck.execute("""
+                    INSERT INTO silver.pipeline_checkpoints (pipeline_name, stage, batch_id, completed_at, metadata)
+                    VALUES ('silver', 'children_done', %s, NOW(), %s)
+                    ON CONFLICT (pipeline_name, stage)
+                    DO UPDATE SET batch_id = EXCLUDED.batch_id, completed_at = NOW(), metadata = EXCLUDED.metadata
+                """, (batch_id, json.dumps({"total_parent_rows": total_rows, "total_child_rows": child_rows})))
+            pg.commit()
+            self.log.info(f"[CHECKPOINT] children_done saved (batch={batch_id}, parent_rows={total_rows}, child_rows={child_rows})")
             elapsed = int((datetime.now(timezone.utc) - start_ts).total_seconds() * 1000)
             self.log.info(f"Silver ETL complete: {total_rows} parent rows + {child_rows} child rows across {len(table_defs) + len(child_table_defs)} tables")
             log.log_stage(stage="silver_transform", batch_id=batch_id,

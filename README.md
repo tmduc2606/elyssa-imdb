@@ -59,7 +59,7 @@ The project is split into independent compose stacks to fit 16 GB RAM:
 
 | Stack | Compose File | Services | Est. RAM |
 |-------|-------------|----------|----------|
-| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, neo4j, rustfs, airflow, etl-runner | ~5-7 GB |
+| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, airflow, etl-runner | ~7.75 GB |
 | **Web Application** | `docker-compose.yml` (root) | api, redis | ~1 GB |
 | **MLOps** | `mlops/docker-compose.yml` | mlflow, prometheus, grafana + exporters | ~2-3 GB |
 
@@ -130,7 +130,7 @@ elyssa-imdb/
 │   ├── qa_catalog_template.md  58-check QA checklist
 │   └── plug_and_play_improvement_plan.md  Master improvement plan
 ├── docker/               # DE Dockerfiles + DE compose stack
-│   └── docker-compose.yml  DE Infra + Orchestration (postgres, neo4j, rustfs, airflow, etl-runner)
+│   └── docker-compose.yml  DE pipeline (postgres, airflow, etl-runner)
 ├── docker-compose.yml    # Web Application stack (api, redis) — separate from DE infra
 ├── Makefile              # Build targets (DE: -f docker/docker-compose.yml, Web: default)
 ├── .env.example          # Environment variable reference
@@ -145,7 +145,6 @@ elyssa-imdb/
 |---------|-----|-------------|
 | Airflow | http://localhost:8081 | `admin` / generated password |
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
-| RustFS Console | http://localhost:9101 | `elyssa` / `elyssa_s3_2026` |
 | API | http://localhost:8000 | — |
 | Frontend | http://localhost:5173 | — |
 | MLflow | http://localhost:5000 | — |

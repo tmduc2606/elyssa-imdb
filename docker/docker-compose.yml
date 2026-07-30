@@ -1,22 +1,24 @@
-# Elyssa-IMDb | Docker Compose — Full DE Stack (Memory Overhauled)
-# Ports are remapped on the host side to prevent conflicts with local services.
+# Elyssa-IMDb | Docker Compose — DE Stack (Trimmed for Athlon 200GE)
+# Ports remapped on host to prevent conflicts with local services.
 #
 # Service        Internal    Host Mapping    Purpose
 # ─────────────  ──────────  ─────────────  ──────────────────────────
 # postgres       5432        54321           Silver/Gold warehouse
-# neo4j          7474/7687   7475/7688        Graph database
-# rustfs         9000/9001   9100/9101       S3-compatible Bronze storage
 # airflow        8080        8081            DAG orchestrator
 # etl-runner     —           —               Dedicated DuckDB ETL engine
 #
-# Memory Budget (7 GB WSL):
-#   postgres:   1.5g limit + 1g shm
-#   neo4j:      1g limit + 256m shm (heap 512m + pagecache 512m)
-#   rustfs:     256m limit
+# Note: Neo4j and RustFS were removed from this file — both are unused
+# in the current pipeline. Restore from git history if needed for Phase 2.
+#
+# Bronze/Silver/Gold are bind-mounted to ../data-science/marts/ so they
+# survive Docker wipes. The DS EDA notebook Part D reads from those paths.
+#
+# Memory Budget (7.75 GB out of 13.9 GB usable):
+#   postgres:   3g limit + 1g shm
 #   airflow:    2g limit + 1g shm
-#   etl-runner: 2.5g limit + 1g shm
-#   OS/WSL2:    ~1 GB headroom
-#   Total:      ~7.5 GB (fits in 7 GB WSL + swap)
+#   etl-runner: 2.5g limit + 2g shm
+#   OS/WSL2:    ~4 GB headroom
+#   Total:      ~7.75 GB (≤56% of 13.9 GB, well within peak ≤91%)
 
 services:
   # ─── PostgreSQL + TimescaleDB ───────────────────────────────────
@@ -35,20 +37,20 @@ services:
         -c config_file=/etc/postgresql/custom.conf
         -c shared_preload_libraries=timescaledb
         -c max_connections=200
-        -c shared_buffers=512MB
-        -c work_mem=128MB
-        -c maintenance_work_mem=256MB
+        -c shared_buffers=1GB
+        -c work_mem=256MB
+        -c maintenance_work_mem=512MB
         -c wal_level=replica
         -c max_wal_size=4GB
-        -c effective_cache_size=1536MB
+        -c effective_cache_size=4GB
         -c checkpoint_completion_target=0.9
         -c random_page_cost=1.1
         -c effective_io_concurrency=200
         -c log_min_duration_statement=1000
         -c timezone=UTC
     shm_size: '1g'
-    mem_limit: '1.5g'
-    memswap_limit: '2g'
+    mem_limit: '3g'
+    memswap_limit: '4g'
     oom_score_adj: 500
     ports:
       - "54321:5432"
@@ -65,65 +67,6 @@ services:
         max-size: "50m"
         max-file: "3"
 
-  # ─── Neo4j ──────────────────────────────────────────────────────
-  neo4j:
-    image: elyssa-neo4j:latest
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.neo4j
-    container_name: elyssa-neo4j
-    environment:
-      NEO4J_AUTH: "neo4j/elyssa_neo_2026"
-      NEO4J_server_memory_heap_max__size: "512M"
-      NEO4J_server_memory_pagecache_size: "512M"
-    mem_limit: '1g'
-    memswap_limit: '1.5g'
-    shm_size: '256m'
-    oom_score_adj: 500
-    ports:
-      - "7475:7474"   # HTTP
-      - "7688:7687"   # Bolt
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    networks:
-      - elyssa-net
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "3"
-
-  # ─── RustFS (S3-compatible) ─────────────────────────────────────
-  rustfs:
-    image: elyssa-rustfs:latest
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.rustfs
-    container_name: elyssa-rustfs
-    environment:
-      RUSTFS_ACCESS_KEY: elyssa
-      RUSTFS_SECRET_KEY: elyssa_s3_2026
-      RUSTFS_REGION: us-east-1
-      RUSTFS_CONSOLE_ADDRESS: ":9001"
-    oom_score_adj: 500
-    ports:
-      - "9100:9000"   # S3 API
-      - "9101:9001"   # Admin Console
-    volumes:
-      - rustfs_data:/data
-    networks:
-      - elyssa-net
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "3"
-    mem_limit: '256m'
-    memswap_limit: '256m'
-
   # ─── ETL Runner (Dedicated DuckDB Engine) ───────────────────────
   # Runs Silver+Gold transformations with dedicated memory budget.
   # Does NOT share RAM with Airflow — prevents OOM from heavy ETL.
@@ -137,6 +80,7 @@ services:
     memswap_limit: 3g
     oom_score_adj: -500
     environment:
+      PYTHONUNBUFFERED: "1"
       DUCKDB_THREADS: "2"
       DUCKDB_MEMORY_LIMIT: "2GB"
       DUCKDB_TEMP_DIR: "/tmp/duckdb_spill"
@@ -193,6 +137,9 @@ services:
       - ../data-engineering/orchestration/dags:/opt/airflow/dags:ro
       - ../data-engineering/orchestration/operators:/opt/airflow/operators:rw
       - etl_temp:/opt/airflow/output/tmp:rw
+      - ../data-science/marts/full:/opt/airflow/output/gold:rw
+      - ../data-science/marts/bronze:/opt/airflow/output/bronze:rw
+      - ../data-science/marts/silver:/opt/airflow/output/silver:rw
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
@@ -209,12 +156,6 @@ services:
 volumes:
   pg_data:
     name: elyssa_pg_data
-  neo4j_data:
-    name: elyssa_neo4j_data
-  neo4j_logs:
-    name: elyssa_neo4j_logs
-  rustfs_data:
-    name: elyssa_rustfs_data
   airflow_data:
     name: elyssa_airflow_data
   etl_temp:

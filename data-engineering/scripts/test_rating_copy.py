@@ -3,7 +3,7 @@ import duckdb, psycopg2
 conn = duckdb.connect(':memory:')
 conn.execute("SET threads = 2")
 
-tsv_path = '/opt/airflow/data-engineering/duke/gate0/source/title.ratings.tsv'
+tsv_path = 's3://imdb-source/title.ratings.tsv.gz'
 row_count = conn.execute(
     "SELECT COUNT(*) FROM read_csv(?, sep='\t', header=true, all_varchar=true)",
     [tsv_path]

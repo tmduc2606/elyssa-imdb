@@ -39,6 +39,7 @@ from operators.freshness_operator import FreshnessCheckOperator
 from operators.imdb_sensor import IMDbDataSensor
 from operators.quarantine_operator import QuarantineCheckOperator
 from operators.gold_export_operator import GoldExportOperator
+from operators.silver_export_operator import SilverExportOperator
 from operators.bronze_sensor import BronzeCompletionSensor
 
 # ─── Retry config (exponential backoff) ─────────────────────────────
@@ -277,7 +278,7 @@ with DAG(
     # ─── Sensor (detect new data) ─────────────────────────────────────────
     imdb_sensor = IMDbDataSensor(
         task_id="imdb_data_sensor",
-        source_dir="/opt/airflow/data-engineering/duke/gate0/source/",
+        source_dir="s3://imdb-source/",
         file_pattern="*.tsv",
         poke_interval=300,
         timeout=3600,
@@ -339,6 +340,12 @@ with DAG(
         max_retry_delay=timedelta(seconds=_retry_cfg.get("max_delay_s", 1800)),
     )
 
+    # ─── Silver Export (Parquet snapshot for DS benchmarking, persists across Docker wipes) ─
+    silver_export = SilverExportOperator(
+        task_id="silver_export",
+        output_dir="/opt/airflow/output/silver/",
+    )
+
     # ─── Gold (dbt run + test) ────────────────────────────────────────────
     gold_dbt_run = DbtRunOperator(
         task_id="gold_dbt_run",
@@ -373,10 +380,11 @@ with DAG(
         sla_hours=24,
     )
 
-    # ─── Gold Export (DuckDB postgres_scanner → Snappy Parquet) ──────────────
+    # ─── Gold Export (DuckDB postgres_scanner → Snappy Parquet → tar archive) ─
     gold_export = GoldExportOperator(
         task_id="gold_export",
         output_dir="/opt/airflow/output/gold/",
+        tar_path="/tmp/gold_marts.tar.gz",
     )
 
     end = EmptyOperator(task_id="pipeline_end")
@@ -390,5 +398,5 @@ with DAG(
     imdb_sensor >> run_bronze >> wait_bronze >> bronze_done
 
     bronze_done >> quarantine_check >> silver_transform >> wait_silver
-    wait_silver >> gold_dbt_run >> gold_dbt_test
+    wait_silver >> silver_export >> gold_dbt_run >> gold_dbt_test
     gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end

@@ -91,7 +91,7 @@ class BronzeIngestOperator(BaseOperator):
         self,
         source_tables: List[str],
         bronze_path: str = "/opt/airflow/output/bronze/",
-        source_dir: str = "/opt/airflow/data-engineering/duke/gate0/source/",
+        source_dir: str = "s3://imdb-source/",
         quarantine_root: str = "/opt/airflow/output/bronze/quarantine/",
         *args,
         **kwargs,

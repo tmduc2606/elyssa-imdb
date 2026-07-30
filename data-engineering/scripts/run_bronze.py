@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 # ─── Paths ──────────────────────────────────────────────────────────
 BRONZE_PATH = "/opt/airflow/output/bronze/"
-SOURCE_DIR = "/opt/airflow/data-engineering/duke/gate0/source/"
+SOURCE_DIR = "s3://imdb-source/"
 QUARANTINE_ROOT = "/opt/airflow/output/bronze/quarantine/"
 DUCKDB_TEMP_ROOT = "/opt/airflow/output/tmp/"
 BATCH_METADATA_FILE = os.path.join(BRONZE_PATH, ".batch_metadata.json")

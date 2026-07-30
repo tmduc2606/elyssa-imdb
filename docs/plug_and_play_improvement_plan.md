@@ -523,7 +523,7 @@ docker compose ps
 # Step 2: Download source data (if not already downloaded)
 Write-Host "=== Step 2: Download IMDb data ===" -ForegroundColor Cyan
 $files = @("title.basics","title.akas","title.ratings","title.episode","title.crew","title.principals","name.basics")
-$dest = "data-engineering/duke/gate0/source"
+$dest = "s3://imdb-source"  # or local: use download_imdb.py instead
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 foreach ($f in $files) {
     $url = "https://datasets.imdbws.com/$f.tsv.gz"

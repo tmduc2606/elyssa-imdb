@@ -11,9 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import duckdb
 
-BRONZE_PARQUET_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "duke", "gate0", "bronze")
-)
+BRONZE_PARQUET_DIR = "s3://bronze/"
 
 SOURCE_TABLES = [
     "title.basics",

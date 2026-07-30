@@ -27,7 +27,7 @@ class IMDbDataSensor(BaseSensorOperator):
 
     def __init__(
         self,
-        source_dir: str = "/opt/airflow/data-engineering/duke/gate0/source/",
+        source_dir: str = "s3://imdb-source/",
         file_pattern: str = "*.tsv",
         poke_interval: int = 300,
         timeout: int = 3600,

@@ -140,6 +140,7 @@ debug/
 *.pkl
 *.joblib
 *.h5
+*.keras
 *.pt
 *.pth
 *.onnx
@@ -157,10 +158,8 @@ wandb/
 *.db.wal
 *.npy
 
-# Processed marts output (notebook-generated artifacts)
-data-science/marts/
-# EXCEPT: export manifest is tracked for audit trail
-!data-science/marts/full/_MANIFEST.json
+# Gold-layer manifest is tracked for audit trail
+!data-science/marts/gold/_MANIFEST.json
 catboost_info/
 
 # ─── Docker ────────────────────────────────────────────────────────

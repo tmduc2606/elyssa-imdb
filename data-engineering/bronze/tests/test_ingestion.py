@@ -60,11 +60,11 @@ def test_metadata_columns():
     finally:
         spark.stop()
 
-def test_config_matches_duke_column_profiles():
-    duke_basics_cols = ["tconst", "titleType", "primaryTitle", "originalTitle",
-                        "isAdult", "startYear", "endYear", "runtimeMinutes", "genres"]
-    assert SOURCE_CONFIG["title.basics"]["columns"] == duke_basics_cols
+def test_config_matches_bronze_schema():
+    expected_basics_cols = ["tconst", "titleType", "primaryTitle", "originalTitle",
+                            "isAdult", "startYear", "endYear", "runtimeMinutes", "genres"]
+    assert SOURCE_CONFIG["title.basics"]["columns"] == expected_basics_cols
 
-    duke_akas_cols = ["titleId", "ordering", "title", "region", "language",
-                      "types", "attributes", "isOriginalTitle"]
-    assert SOURCE_CONFIG["title.akas"]["columns"] == duke_akas_cols
+    expected_akas_cols = ["titleId", "ordering", "title", "region", "language",
+                          "types", "attributes", "isOriginalTitle"]
+    assert SOURCE_CONFIG["title.akas"]["columns"] == expected_akas_cols

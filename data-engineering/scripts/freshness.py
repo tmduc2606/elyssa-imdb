@@ -38,7 +38,29 @@ def check_freshness(jdbc_url: str, jdbc_user: str, jdbc_password: str, sla_hours
             else:
                 print(f"[FRESHNESS] EMPTY: {table} has no data")
         except Exception as e:
-            print(f"[FRESHNESS] ERROR: {table} — {e}")
+            # Check if ingested_at column is missing; add it if so
+            try:
+                schema, tbl = table.split('.')
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = %s AND table_name = %s AND column_name = 'ingested_at'
+                """, (schema, tbl))
+                if not cursor.fetchone():
+                    print(f"[FRESHNESS] Adding ingested_at column to {table}")
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN ingested_at TIMESTAMPTZ DEFAULT NOW()")
+                    cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_ingested_at ON {table}(ingested_at)")
+                    conn.commit()
+                    print(f"[FRESHNESS] Added ingested_at to {table} — re-running check")
+                    cursor.execute(f"SELECT MAX(ingested_at) FROM {table}")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        print(f"[FRESHNESS] PASS: {table} now has ingested_at")
+                    else:
+                        print(f"[FRESHNESS] EMPTY: {table} has no data after column add")
+                else:
+                    print(f"[FRESHNESS] ERROR: {table} — {e}")
+            except Exception as e2:
+                print(f"[FRESHNESS] ERROR: {table} — failed to patch ingested_at: {e2}")
 
     cursor.close()
     conn.close()

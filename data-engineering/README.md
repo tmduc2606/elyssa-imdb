@@ -67,7 +67,7 @@ The net effect: **completes reliably instead of crashing at ~2h 23m**. Once stab
 - Docker 24+ with compose plugin
 - 16 GB RAM (with `mem_limit` on all containers — see service table below)
 - 20 GB free disk
-- Raw IMDb `.tsv.gz` files in `duke/gate0/source/` (7 files, ~1.9 GB compressed)
+- Raw IMDb `.tsv.gz` files in RustFS S3 `s3://imdb-source/` (download via `scripts/download_imdb.py`)
 
 ### Service Memory Budgets
 
@@ -181,7 +181,7 @@ docker exec elyssa-airflow python -c "
 import duckdb
 con = duckdb.connect(':memory:')
 for t in ['title.basics','name.basics','title.ratings','title.principals','title.episode','title.crew','title.akas']:
-    path = f'/opt/airflow/data-engineering/duke/gate0/source/{t}.tsv.gz'
+    path = f's3://imdb-source/{t}.tsv.gz'
     cnt = con.execute(f\"SELECT count(*) FROM read_csv('{path}', delim='\\t', header=true, all_varchar=true, ignore_errors=true, quote='', escape='')\").fetchone()[0]
     print(f'  {t}: {cnt:>12,} rows')
 "

@@ -313,3 +313,19 @@ CREATE INDEX IF NOT EXISTS idx_title_akas_attribute_ref ON silver.title_akas_att
 CREATE INDEX IF NOT EXISTS idx_title_principal_char_ref ON silver.title_principal_char(tconst, ordering);
 CREATE INDEX IF NOT EXISTS idx_quarantine_batch ON silver.quarantine(batch_id);
 CREATE INDEX IF NOT EXISTS idx_dq_log_batch ON silver.data_quality_log(batch_id);
+
+-- ─── Checkpoint Table (Unified Resume Mechanism) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS silver.pipeline_checkpoints (
+    pipeline_name VARCHAR(100) NOT NULL,
+    stage         VARCHAR(100) NOT NULL,
+    batch_id      VARCHAR(20) NOT NULL,
+    completed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata      JSONB,
+    PRIMARY KEY (pipeline_name, stage)
+);
+
+COMMENT ON TABLE silver.pipeline_checkpoints IS 'Pipeline checkpoint table for resuming from failures';
+COMMENT ON COLUMN silver.pipeline_checkpoints.pipeline_name IS 'e.g. silver, gold, bronze';
+COMMENT ON COLUMN silver.pipeline_checkpoints.stage IS 'e.g. parents_done, children_done';
+COMMENT ON COLUMN silver.pipeline_checkpoints.batch_id IS 'Batch ID of the successful run';
+COMMENT ON COLUMN silver.pipeline_checkpoints.metadata IS 'Additional context (row counts, table list)';

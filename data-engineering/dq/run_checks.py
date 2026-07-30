@@ -45,8 +45,9 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
             cursor = conn.cursor()
             cursor.execute("SET max_parallel_workers_per_gather = 0")
             value = None
-            passed = False
             error = None
+            passed = False
+            alert_threshold_pct = check.get("alert_threshold_pct", 20)
             if metric == "null_rate":
                 col = check["column"]
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
@@ -54,6 +55,7 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {col} IS NULL")
                 nulls = cursor.fetchone()[0]
                 value = nulls / max(total, 1)
+                passed = value <= threshold
             elif metric == "orphan_rate":
                 fk_col = check["fk_column"]
                 pk_table = check["pk_table"]
@@ -67,10 +69,10 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 """)
                 orphans = cursor.fetchone()[0]
                 value = orphans / max(total, 1)
+                passed = value <= threshold
             elif metric == "row_count_variance":
                 expected_min = check.get("expected_min", 0)
                 expected_count = check.get("expected_count", 0)
-                alert_threshold_pct = check.get("alert_threshold_pct", 20)
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 count = cursor.fetchone()[0]
                 if expected_count > 0:
@@ -80,17 +82,16 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 else:
                     value = 0.0
                 passed = value <= threshold
-            if not passed:
+            if value is None:
+                passed = False
+            if passed and alert_threshold_pct > 0 and value > (alert_threshold_pct / 100.0):
+                passed = False
                 cursor.execute(f"""
                     INSERT INTO silver.data_quality_log
                         (check_name, table_name, metric_name, metric_value, threshold, passed, batch_id, logged_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 """, (f"{name}_alert", table, "row_count_deviation",
                       value, alert_threshold_pct / 100.0, False, batch_id))
-            else:
-                return {"name": name, "passed": False, "value": 0.0, "threshold": threshold, "error": "Unknown metric"}
-            if metric != "row_count_variance":
-                passed = value <= threshold
             # Log the result to the database
             cursor.execute("""
                 INSERT INTO silver.data_quality_log
