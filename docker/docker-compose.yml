@@ -6,19 +6,18 @@
 # postgres       5432        54321           Silver/Gold warehouse
 # airflow        8080        8081            DAG orchestrator
 # etl-runner     —           —               Dedicated DuckDB ETL engine
-#
-# Note: Neo4j and RustFS were removed from this file — both are unused
-# in the current pipeline. Restore from git history if needed for Phase 2.
+# rustfs         9000/9001   9100/9101       S3-compatible object store
 #
 # Bronze/Silver/Gold are bind-mounted to ../data-science/marts/ so they
 # survive Docker wipes. The DS EDA notebook Part D reads from those paths.
 #
-# Memory Budget (7.75 GB out of 13.9 GB usable):
+# Memory Budget (~8 GB out of 13.9 GB usable):
 #   postgres:   3g limit + 1g shm
 #   airflow:    2g limit + 1g shm
 #   etl-runner: 2.5g limit + 2g shm
+#   rustfs:     256m limit
 #   OS/WSL2:    ~4 GB headroom
-#   Total:      ~7.75 GB (≤56% of 13.9 GB, well within peak ≤91%)
+#   Total:      ~8 GB (≤58% of 13.9 GB, well within peak ≤91%)
 
 services:
   # ─── PostgreSQL + TimescaleDB ───────────────────────────────────
@@ -67,6 +66,34 @@ services:
         max-size: "50m"
         max-file: "3"
 
+  # ─── RustFS (S3-compatible Object Store) ─────────────────────────
+  # S3 endpoint for all pipeline layers: imdb-source/, bronze/, gold-exports/
+  # See https://github.com/rustfs/rustfs for documentation.
+  rustfs:
+    image: elyssa-rustfs:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rustfs
+    container_name: elyssa-rustfs
+    mem_limit: 256m
+    memswap_limit: 512m
+    environment:
+      RUSTFS_ACCESS_KEY: elyssa
+      RUSTFS_SECRET_KEY: elyssa_s3_2026
+      RUSTFS_REGION: us-east-1
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    ports:
+      - "9100:9000"
+      - "9101:9001"
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
   # ─── ETL Runner (Dedicated DuckDB Engine) ───────────────────────
   # Runs Silver+Gold transformations with dedicated memory budget.
   # Does NOT share RAM with Airflow — prevents OOM from heavy ETL.
@@ -84,6 +111,10 @@ services:
       DUCKDB_THREADS: "2"
       DUCKDB_MEMORY_LIMIT: "2GB"
       DUCKDB_TEMP_DIR: "/tmp/duckdb_spill"
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY: elyssa
+      S3_SECRET_KEY: elyssa_s3_2026
+      S3_REGION: us-east-1
       POSTGRES_HOST: postgres
       POSTGRES_USER: elyssa
       POSTGRES_PASSWORD: elyssa_pg_2026
@@ -129,6 +160,10 @@ services:
       AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
       AIRFLOW__CORE__LOG_FILENAME_TEMPLATE: "{{ti.dag_id}}/{{ti.task_id}}/{{ts}}/{{try_number}}.log"
       GOLD_EXPORT_PG_PASSWORD: "elyssa_pg_2026"
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY: elyssa
+      S3_SECRET_KEY: elyssa_s3_2026
+      S3_REGION: us-east-1
     ports:
       - "8081:8080"
     volumes:
@@ -144,6 +179,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs:
+        condition: service_started
     networks:
       - elyssa-net
     restart: unless-stopped

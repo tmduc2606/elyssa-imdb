@@ -3,12 +3,14 @@
 ## Overview
 Medallion architecture processing IMDb `.tsv.gz` into queryable star-schema marts.
 
-| Layer | Engine | Output | Est. Time |
-|-------|--------|--------|-----------|
-| **Bronze** | DuckDB | Raw Parquet (7 tables) | ~47 min |
-| **Silver** | DuckDB → psycopg2 COPY | PostgreSQL 3NF/BCNF (14 tables, SCD2) | ~3h 39m |
-| **Gold** | dbt | Star-schema (6 fact/dim tables, 4.9 GB) | ~63 min |
-| **Export** | DuckDB | Snappy Parquet → `marts/full/` | ~15 min |
+| Layer | Engine | I/O | Output | Est. Time |
+|-------|--------|-----|--------|-----------|
+| **Bronze** | DuckDB + httpfs | S3 (imdb-source/) → S3 (bronze/) + bind mount | Raw Parquet (7 tables) | ~47 min |
+| **Silver** | DuckDB + httpfs → psycopg2 COPY | S3 (bronze/) → PostgreSQL | PostgreSQL 3NF/BCNF (14 tables, SCD2) | ~3h 39m |
+| **Gold** | dbt | PostgreSQL → PostgreSQL | Star-schema (6 fact/dim tables, 4.9 GB) | ~63 min |
+| **Export** | DuckDB | PostgreSQL → bind mount `marts/` | Snappy Parquet → `marts/silver/` + `marts/full/` | ~15 min |
+
+All layers read/write through **RustFS** (S3-compatible, localhost), with bind mounts for DS notebook consumption.
 
 ## Critical: WSL2 Memory Constraint
 
@@ -67,7 +69,17 @@ The net effect: **completes reliably instead of crashing at ~2h 23m**. Once stab
 - Docker 24+ with compose plugin
 - 16 GB RAM (with `mem_limit` on all containers — see service table below)
 - 20 GB free disk
-- Raw IMDb `.tsv.gz` files in RustFS S3 `s3://imdb-source/` (download via `scripts/download_imdb.py`)
+
+### Initial Setup: Download IMDb Data to RustFS S3
+```powershell
+# Build and start all services
+docker compose -f docker/docker-compose.yml up -d
+
+# Download 7 .tsv.gz files directly to RustFS S3 (streaming, no local disk)
+docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/download_imdb.py
+```
+
+This populates `s3://imdb-source/` with the 7 IMDb source files. The pipeline DAG sensor detects them and triggers Bronze ingestion.
 
 ### Service Memory Budgets
 
@@ -75,11 +87,10 @@ The net effect: **completes reliably instead of crashing at ~2h 23m**. Once stab
 
 | Service | `mem_limit` | `oom_score_adj` | Idle (RSS) | Peak (RSS) | Why |
 |---------|-------------|-----------------|------------|------------|-----|
-| postgres | 1 GB | +500 | ~300 MB | ~500 MB | 128 MB shared_buffers, no shm_size |
-| neo4j | 2 GB | +500 | ~800 MB | ~800 MB | Heap 512M + pagecache 256M (not on critical path) |
-| rustfs | 256 MB | +500 | ~50 MB | ~50 MB | Stateless, negligible |
-| **etl-runner** | **6 GB** | **−500** | **~10 MB** | **~4 GB** | **sleeps until ETL, then DuckDB peak** |
-| airflow | **1 GB** | **−250** | **~400 MB** | **~500 MB** | Webserver + scheduler (parallelism=2) |
+| postgres | 3 GB | +500 | ~300 MB | ~500 MB | Silver/Gold warehouse |
+| rustfs | 256 MB | +500 | ~50 MB | ~50 MB | S3 object store (negligible) |
+| **etl-runner** | **2.5 GB** | **−500** | **~10 MB** | **~2 GB** | **DuckDB ETL engine** |
+| airflow | **2 GB** | **−250** | **~400 MB** | **~500 MB** | DAG orchestrator + webserver |
 
 **Idle total:** ~1.6 GB / 8 GB WSL2 — **plenty of headroom for OS + Docker engine**.  
 **Peak total (during ETL):** ~5.9 GB / 8 GB WSL2 — **73%, safe**.
@@ -176,14 +187,17 @@ docker compose -f docker/docker-compose.yml logs -f airflow
 ### Bronze Layer (~47 min)
 Look for task `bronze_ingest` completing. Check output:
 ```powershell
-# Check Bronze row counts per source
+# Check Bronze row counts from S3 Parquet
 docker exec elyssa-airflow python -c "
-import duckdb
+import duckdb, sys
+sys.path.insert(0, '/opt/airflow/data-engineering')
+from bronze.s3_config import configure_s3
 con = duckdb.connect(':memory:')
+configure_s3(con)
 for t in ['title.basics','name.basics','title.ratings','title.principals','title.episode','title.crew','title.akas']:
-    path = f's3://imdb-source/{t}.tsv.gz'
-    cnt = con.execute(f\"SELECT count(*) FROM read_csv('{path}', delim='\\t', header=true, all_varchar=true, ignore_errors=true, quote='', escape='')\").fetchone()[0]
-    print(f'  {t}: {cnt:>12,} rows')
+    path = f's3://bronze/{t}.parquet'
+    cnt = con.execute(f'SELECT count(*) FROM read_parquet(\"{path}\")').fetchone()[0]
+    print(f'  bronze.{t}: {cnt:>12,} rows')
 "
 
 # Check quarantine
@@ -326,6 +340,8 @@ DELETE FROM pg_stat_activity WHERE state = 'idle in transaction' AND state_chang
 |---------|-----|-------------|
 | Airflow UI | http://localhost:8081 | `admin` / auto-generated |
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
+| RustFS S3 API | http://localhost:9100 | `elyssa` / `elyssa_s3_2026` |
+| RustFS Console | http://localhost:9101 | — |
 
 ## Key Docs
 - [`docs/specialized_assessment.md`](docs/specialized_assessment.md) — 56-check DE assessment

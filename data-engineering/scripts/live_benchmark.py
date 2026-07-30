@@ -41,6 +41,9 @@ REAL_ROW_COUNTS = {
 
 def _init_duckdb() -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(":memory:")
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from bronze.s3_config import configure_s3
+    configure_s3(conn)
     conn.execute("SET threads = 4")
     conn.execute("SET memory_limit = '2GB'")
     return conn

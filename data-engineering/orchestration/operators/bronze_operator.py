@@ -133,6 +133,8 @@ class BronzeIngestOperator(BaseOperator):
         duckdb_file = os.path.join(duckdb_temp, f"bronze_{batch_id}.duckdb")
         os.makedirs(duckdb_temp, exist_ok=True)
         conn = duckdb.connect(str(duckdb_file))
+        from bronze.s3_config import configure_s3
+        configure_s3(conn)
         conn.execute("SET threads = 2")
         conn.execute("SET memory_limit = '1.5GB'")
         conn.execute("SET preserve_insertion_order = false")
@@ -171,94 +173,64 @@ class BronzeIngestOperator(BaseOperator):
 
             for table in self.source_tables:
                 filename = source_files.get(table, f"{table}.tsv")
-                file_path = os.path.join(self.source_dir, filename)
+                source_url = os.path.join(self.source_dir, filename)
 
-                if not os.path.exists(file_path):
-                    self.log.warning(f"Source file not found: {file_path}, skipping {table}")
-                    continue
+                s3_output = f"s3://bronze/{table}.parquet"
+                local_output = os.path.join(self.bronze_path, f"{table}.parquet")
 
-                output_path = os.path.join(self.bronze_path, f"{table}.parquet")
-                if os.path.exists(output_path):
-                    existing_count = conn.execute(f"SELECT COUNT(*) FROM '{output_path}'").fetchone()[0]
-                    self.log.info(f"  {table}: CHECKPOINT (already exists at {output_path}, {existing_count} rows)")
+                # Checkpoint resume from local bind mount
+                if os.path.exists(local_output):
+                    existing_count = conn.execute(f"SELECT COUNT(*) FROM '{local_output}'").fetchone()[0]
+                    self.log.info(f"  {table}: CHECKPOINT (already exists at {local_output}, {existing_count} rows)")
                     total_rows += existing_count
                     processed.append({"table": table, "rows": existing_count, "checkpoint": True})
                     continue
 
-                # ── Validate file before processing ────────────────────────
-                expected_cols = self.EXPECTED_COLUMNS.get(table)
-                if expected_cols is not None:
-                    try:
-                        sys.path.insert(0, "/opt/airflow/data-engineering")
-                        from bronze.quarantine import validate_source_file
-
-                        is_valid, error_msg, row_count = validate_source_file(
-                            file_path, table, expected_cols, self.quarantine_root
-                        )
-                        if not is_valid:
-                            self.log.warning(f"QUARANTINE {table}: {error_msg}")
-                            quarantined.append({"table": table, "error": error_msg})
-                            if pg:
-                                with pg.cursor() as cur:
-                                    self._quarantine_record(cur, table, file_path, error_msg, batch_id)
-                            continue
-                    except ImportError:
-                        self.log.info("quarantine module not available, skipping validation")
-                    except Exception as e:
-                        self.log.warning(f"Validation error for {table}: {e}")
-
-                # ── Process valid file ─────────────────────────────────────
-                now_ts = datetime.now(timezone.utc).isoformat()
-
-                # ── Compute file checksum for lineage ───────────────────────
-                file_checksum = ""
+                # Get row count from S3 via DuckDB
                 try:
-                    import hashlib
-                    sha256 = hashlib.sha256()
-                    with open(file_path, "rb") as fh:
-                        for chunk in iter(lambda: fh.read(8192), b""):
-                            sha256.update(chunk)
-                    file_checksum = sha256.hexdigest()
-                except Exception:
-                    pass
+                    source_rows = conn.execute(
+                        f"SELECT COUNT(*) FROM read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, ignore_errors=true, quote='', escape='')"
+                    ).fetchone()[0]
+                except Exception as e:
+                    self.log.warning(f"Cannot read {source_url}: {e}, skipping {table}")
+                    continue
+
+                now_ts = datetime.now(timezone.utc).isoformat()
 
                 schema_def = self.BRONZE_SCHEMAS.get(table, {})
                 if schema_def:
                     cols_str = ", ".join(f"'{k}': '{v}'" for k, v in schema_def.items())
-                    read_csv_sql = f"read_csv(?, columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+                    read_csv_sql = f"read_csv('{source_url}', columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
                 else:
-                    read_csv_sql = "read_csv(?, delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+                    read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
 
-                # M4: Use fast wc -l instead of DuckDB COUNT full-scan (halves TSV processing time)
-                import subprocess as _sp
-                try:
-                    _result = _sp.run(["wc", "-l", file_path], capture_output=True, text=True, timeout=30)
-                    source_rows = int(_result.stdout.strip().split()[0]) - 1  # subtract header
-                except Exception:
-                    source_rows = 0
-                row_count = source_rows
-
-                self.log.info(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
-
-                # Inline file paths in SQL (internal/trusted — avoids ? conflict in COPY subquery)
-                fp = file_path.replace("'", "''")
-                op = output_path.replace("'", "''")
-                copy_sql = read_csv_sql.replace("?", f"'{fp}'")
-                conn.execute(
-                    f"COPY ("
-                    f"  SELECT *, '{fp}' AS _source_file, '{table}' AS _source_table, '{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, {row_count} AS _row_count, '{file_checksum}' AS _file_checksum "
-                    f"  FROM {copy_sql}"
-                    f") TO '{op}' (FORMAT PARQUET, COMPRESSION snappy)"
+                base_sql = (
+                    f"SELECT *, '{source_url}' AS _source_file, '{table}' AS _source_table, "
+                    f"'{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, "
+                    f"{source_rows} AS _row_count, '' AS _file_checksum "
+                    f"FROM ({read_csv_sql})"
                 )
 
-                total_rows += row_count
-                processed.append({"table": table, "rows": row_count})
-                self.log.info(f"  {table} written -> {output_path}")
-                log.log_stage(stage="bronze_ingest", batch_id=batch_id,
-                              status="success", row_count=row_count,
-                              message=f"{table} -> {output_path}")
+                # Write to S3 bronze bucket
+                try:
+                    conn.execute(f"COPY ({base_sql}) TO '{s3_output}' (FORMAT PARQUET, COMPRESSION snappy)")
+                    self.log.info(f"  {table} written -> {s3_output}")
+                except Exception as e:
+                    self.log.warning(f"S3 write failed for {table}: {e}")
 
-                # ── Persist batch metadata (checksum lineage) ───────────
+                # Write to local bind mount (DS notebook)
+                try:
+                    conn.execute(f"COPY ({base_sql}) TO '{local_output}' (FORMAT PARQUET, COMPRESSION snappy)")
+                except Exception as e:
+                    self.log.warning(f"Local write failed for {table}: {e}")
+
+                total_rows += source_rows
+                processed.append({"table": table, "rows": source_rows})
+                self.log.info(f"  {table}: {source_rows} rows")
+                log.log_stage(stage="bronze_ingest", batch_id=batch_id,
+                              status="success", row_count=source_rows,
+                              message=f"{table} -> {local_output}")
+
                 if pg:
                     try:
                         meta_cursor = pg.cursor()
@@ -266,12 +238,11 @@ class BronzeIngestOperator(BaseOperator):
                             """INSERT INTO silver.batch_metadata
                                (batch_id, table_name, source_file, file_checksum, row_count, ingested_at)
                                VALUES (%s, %s, %s, %s, %s, NOW())""",
-                            (batch_id, table, file_path, file_checksum, row_count)
+                            (batch_id, table, source_url, "", source_rows)
                         )
                     except Exception as e:
                         self.log.warning(f"Failed to persist batch metadata for {table}: {e}")
 
-                # Per-table cleanup: flush DuckDB temp to free space between large tables
                 conn.execute("CHECKPOINT")
 
             # ── Summary ────────────────────────────────────────────────────

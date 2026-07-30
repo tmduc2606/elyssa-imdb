@@ -59,7 +59,7 @@ The project is split into independent compose stacks to fit 16 GB RAM:
 
 | Stack | Compose File | Services | Est. RAM |
 |-------|-------------|----------|----------|
-| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, airflow, etl-runner | ~7.75 GB |
+| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, airflow, etl-runner, rustfs | ~8 GB |
 | **Web Application** | `docker-compose.yml` (root) | api, redis | ~1 GB |
 | **MLOps** | `mlops/docker-compose.yml` | mlflow, prometheus, grafana + exporters | ~2-3 GB |
 
@@ -145,6 +145,7 @@ elyssa-imdb/
 |---------|-----|-------------|
 | Airflow | http://localhost:8081 | `admin` / generated password |
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
+| RustFS S3 Console | http://localhost:9101 | — |
 | API | http://localhost:8000 | — |
 | Frontend | http://localhost:5173 | — |
 | MLflow | http://localhost:5000 | — |

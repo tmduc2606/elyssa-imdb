@@ -1,6 +1,9 @@
-import duckdb, psycopg2
+import duckdb, psycopg2, sys, os
 
 conn = duckdb.connect(':memory:')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from bronze.s3_config import configure_s3
+configure_s3(conn)
 conn.execute("SET threads = 2")
 
 tsv_path = 's3://imdb-source/title.ratings.tsv.gz'

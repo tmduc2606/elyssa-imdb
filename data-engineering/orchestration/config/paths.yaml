@@ -1,14 +1,21 @@
 # Elyssa-IMDb | Centralized path configuration
-# Single source of truth for all bronze/silver/gold paths across operators.
+# S3 paths are primary for the pipeline hot path.
+# Bind mounts serve DS notebook consumption and survive Docker wipes.
+
+s3:
+  imdb_source: s3://imdb-source/
+  bronze: s3://bronze/
+  gold_exports: s3://gold-exports/
 
 bronze:
   output_path: /opt/airflow/output/bronze/
   quarantine_path: /opt/airflow/output/bronze/quarantine/
 
 silver:
-  source_dir: s3://imdb-source/
+  output_path: /opt/airflow/output/silver/
 
 gold:
+  output_path: /opt/airflow/output/gold/
   project_dir: /opt/airflow/data-engineering/gold
 
 database:

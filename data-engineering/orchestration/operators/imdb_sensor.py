@@ -1,12 +1,11 @@
 """
-IMDb Data Sensor — Airflow sensor for new source data.
+IMDb Data Sensor — Airflow sensor for new source data on S3.
 
-Detects new .tsv files in the source directory.
+Detects new .tsv.gz files in the s3://imdb-source/ bucket via DuckDB httpfs.
 Wired as upstream of bronze_ingest in the pipeline DAG.
 """
 
 import os
-import glob
 import sys
 from datetime import datetime, timezone
 from airflow.sensors.base import BaseSensorOperator
@@ -17,10 +16,10 @@ from pipeline_logger import get_logger
 
 class IMDbDataSensor(BaseSensorOperator):
     """
-    Sensors for new IMDb .tsv files in the source directory.
+    Sensors for new IMDb .tsv.gz files in the s3://imdb-source/ bucket.
 
-    Returns True when at least one .tsv file matching the pattern exists
-    and has non-zero size, False otherwise.
+    Uses DuckDB httpfs with glob pattern to detect source files.
+    Returns True when at least one matching file exists, False otherwise.
     """
 
     template_fields = ("source_dir", "file_pattern")
@@ -28,7 +27,7 @@ class IMDbDataSensor(BaseSensorOperator):
     def __init__(
         self,
         source_dir: str = "s3://imdb-source/",
-        file_pattern: str = "*.tsv",
+        file_pattern: str = "*.tsv.gz",
         poke_interval: int = 300,
         timeout: int = 3600,
         mode: str = "reschedule",
@@ -48,22 +47,35 @@ class IMDbDataSensor(BaseSensorOperator):
     def poke(self, context):
         log = get_logger()
         batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        search_path = os.path.join(self.source_dir, self.file_pattern)
-        files = glob.glob(search_path)
-        # Filter to non-zero size files
-        valid = [f for f in files if os.path.getsize(f) > 0]
-        if valid:
-            file_list = [os.path.basename(f) for f in valid]
-            self.log.info(f"Detected {len(valid)} source file(s): {file_list}")
+        glob_pattern = os.path.join(self.source_dir, self.file_pattern)
+
+        import duckdb
+        conn = duckdb.connect(":memory:")
+        sys.path.insert(0, "/opt/airflow/data-engineering")
+        try:
+            from bronze.s3_config import configure_s3
+            configure_s3(conn)
+        except Exception:
+            pass
+        try:
+            count = conn.execute(
+                f"SELECT count(*) FROM read_csv('{glob_pattern}', delim='\\t', header=true, all_varchar=true, ignore_errors=true)"
+            ).fetchone()[0]
+        except Exception as e:
+            self.log.warning(f"S3 source check failed: {e}")
+            conn.close()
+            return False
+        conn.close()
+
+        if count > 0:
+            self.log.info(f"Detected source files at {glob_pattern} ({count} rows accessible)")
             log.log_stage(stage="imdb_sensor", batch_id=batch_id,
-                          status="success", row_count=len(valid),
-                          message=f"Found {len(valid)} files: {', '.join(file_list)}")
-            ti = context.get("task_instance")
-            if ti:
-                ti.xcom_push(key="source_files", value=valid)
+                          status="success", row_count=count,
+                          message=f"Source files found at {glob_pattern}")
             return True
-        self.log.info(f"No source files found matching {search_path}")
+
+        self.log.info(f"No source files at {glob_pattern}")
         log.log_stage(stage="imdb_sensor", batch_id=batch_id,
                       status="pending",
-                      message=f"No files at {search_path}, will retry")
+                      message=f"No files at {glob_pattern}, will retry")
         return False

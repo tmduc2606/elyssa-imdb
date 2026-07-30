@@ -1,20 +1,20 @@
 """
-Elyssa-IMDb | Standalone Bronze Ingestion
+Elyssa-IMDb | Standalone Bronze Ingestion (S3-Centric)
 Runs all 7 bronze tables via DuckDB, outside Airflow's supervisor.
-Status markers: .running, .completed, .failed (written to bronze_path).
+Reads TSV from s3://imdb-source/, writes Parquet to s3://bronze/
+and to local bind mount /opt/airflow/output/bronze/ for DS notebook.
 """
 
 import os
 import sys
-import subprocess as _sp
 import hashlib
 import shutil
 import time
 import json
 from datetime import datetime, timezone
 
-# ─── Paths ──────────────────────────────────────────────────────────
 BRONZE_PATH = "/opt/airflow/output/bronze/"
+S3_BRONZE_PATH = "s3://bronze/"
 SOURCE_DIR = "s3://imdb-source/"
 QUARANTINE_ROOT = "/opt/airflow/output/bronze/quarantine/"
 DUCKDB_TEMP_ROOT = "/opt/airflow/output/tmp/"
@@ -24,16 +24,6 @@ STATUS_RUNNING = os.path.join(BRONZE_PATH, ".running")
 STATUS_COMPLETED = os.path.join(BRONZE_PATH, ".completed")
 STATUS_FAILED = os.path.join(BRONZE_PATH, ".failed")
 PID_FILE = os.path.join(BRONZE_PATH, ".bronze_pid")
-
-EXPECTED_COLUMNS = {
-    "title.basics": 9,
-    "title.akas": 8,
-    "title.crew": 3,
-    "title.episode": 4,
-    "title.principals": 6,
-    "title.ratings": 3,
-    "name.basics": 6,
-}
 
 BRONZE_SCHEMAS = {
     "title.basics": {
@@ -107,81 +97,72 @@ def quarantine_record(pg_cursor, table, file_path, error, batch_id):
 
 def ingest_table(conn, table, batch_id, pg):
     filename = SOURCE_FILES.get(table, f"{table}.tsv")
-    file_path = os.path.join(SOURCE_DIR, filename)
-    output_path = os.path.join(BRONZE_PATH, f"{table}.parquet")
+    source_url = f"{SOURCE_DIR}{filename}"
+    s3_output = f"{S3_BRONZE_PATH}{table}.parquet"
+    local_output = os.path.join(BRONZE_PATH, f"{table}.parquet")
 
-    if not os.path.exists(file_path):
-        log(f"  SKIP {table}: source file not found: {file_path}")
-        return {"table": table, "rows": 0, "skipped": True}
-
-    # Checkpoint resume
-    if os.path.exists(output_path):
-        existing_count = conn.execute(f"SELECT COUNT(*) FROM '{output_path}'").fetchone()[0]
-        log(f"  CHECKPOINT {table}: {existing_count} rows already at {output_path}")
+    # Checkpoint resume from local bind mount (survives Docker wipes)
+    if os.path.exists(local_output):
+        existing_count = conn.execute(f"SELECT COUNT(*) FROM '{local_output}'").fetchone()[0]
+        log(f"  CHECKPOINT {table}: {existing_count} rows already at {local_output}")
         return {"table": table, "rows": existing_count, "checkpoint": True}
 
-    # Validate
-    expected_cols = EXPECTED_COLUMNS.get(table)
-    if expected_cols is not None:
-        try:
-            sys.path.insert(0, "/opt/airflow/data-engineering")
-            from bronze.quarantine import validate_source_file
-            is_valid, error_msg, row_count = validate_source_file(
-                file_path, table, expected_cols, QUARANTINE_ROOT
-            )
-            if not is_valid:
-                log(f"  QUARANTINE {table}: {error_msg}")
-                if pg:
-                    with pg.cursor() as cur:
-                        quarantine_record(cur, table, file_path, error_msg, batch_id)
-                return {"table": table, "rows": 0, "quarantined": True, "error": error_msg}
-        except ImportError:
-            log("  quarantine module not available, skipping validation")
-        except Exception as e:
-            log(f"  [WARN] Validation error for {table}: {e}")
+    # Row count via DuckDB from S3 (fast range request — no full download)
+    try:
+        source_rows = conn.execute(
+            f"SELECT COUNT(*) FROM read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, ignore_errors=true, quote='', escape='')"
+        ).fetchone()[0]
+    except Exception as e:
+        log(f"  SKIP {table}: cannot read from {source_url}: {e}")
+        return {"table": table, "rows": 0, "skipped": True, "error": str(e)}
 
-    # File checksum for lineage
+    now_ts = datetime.now(timezone.utc).isoformat()
+
+    schema_def = BRONZE_SCHEMAS.get(table, {})
+    if schema_def:
+        cols_str = ", ".join(f"'{k}': '{v}'" for k, v in schema_def.items())
+        read_csv_sql = f"read_csv('{source_url}', columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+    else:
+        read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+
+    base_sql = (
+        f"SELECT *, '{source_url}' AS _source_file, '{table}' AS _source_table, "
+        f"'{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, "
+        f"{source_rows} AS _row_count, '' AS _file_checksum "
+        f"FROM ({read_csv_sql})"
+    )
+
+    # Write to S3 bronze bucket (pipeline hot path)
+    try:
+        conn.execute(
+            f"COPY ({base_sql}) TO '{s3_output}' (FORMAT PARQUET, COMPRESSION snappy)"
+        )
+        log(f"  {table} written -> {s3_output}")
+    except Exception as e:
+        log(f"  [WARN] S3 write failed for {table}: {e}")
+
+    # Write to local bind mount (DS notebook consumption)
+    try:
+        conn.execute(
+            f"COPY ({base_sql}) TO '{local_output}' (FORMAT PARQUET, COMPRESSION snappy)"
+        )
+        log(f"  {table} written -> {local_output}")
+    except Exception as e:
+        log(f"  [WARN] Local write failed for {table}: {e}")
+
+    # Compute checksum from local Parquet for lineage
     file_checksum = ""
     try:
         sha256 = hashlib.sha256()
-        with open(file_path, "rb") as fh:
+        with open(local_output, "rb") as fh:
             for chunk in iter(lambda: fh.read(8192), b""):
                 sha256.update(chunk)
         file_checksum = sha256.hexdigest()
     except Exception:
         pass
 
-    # wc -l for fast row counting (M4)
-    try:
-        result = _sp.run(["wc", "-l", file_path], capture_output=True, text=True, timeout=30)
-        source_rows = int(result.stdout.strip().split()[0]) - 1
-    except Exception:
-        source_rows = 0
-    row_count = source_rows
+    log(f"  {table}: {source_rows} rows (sha256={file_checksum[:12]}...)")
 
-    now_ts = datetime.now(timezone.utc).isoformat()
-    log(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
-
-    schema_def = BRONZE_SCHEMAS.get(table, {})
-    if schema_def:
-        cols_str = ", ".join(f"'{k}': '{v}'" for k, v in schema_def.items())
-        read_csv_sql = f"read_csv(?, columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
-    else:
-        read_csv_sql = "read_csv(?, delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
-
-    fp = file_path.replace("'", "''")
-    op = output_path.replace("'", "''")
-    copy_sql = read_csv_sql.replace("?", f"'{fp}'")
-    conn.execute(
-        f"COPY ("
-        f"  SELECT *, '{fp}' AS _source_file, '{table}' AS _source_table, '{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, {row_count} AS _row_count, '{file_checksum}' AS _file_checksum "
-        f"  FROM {copy_sql}"
-        f") TO '{op}' (FORMAT PARQUET, COMPRESSION snappy)"
-    )
-
-    log(f"  {table} written -> {output_path}")
-
-    # Persist batch metadata
     if pg:
         try:
             cur = pg.cursor()
@@ -189,17 +170,17 @@ def ingest_table(conn, table, batch_id, pg):
                 """INSERT INTO silver.batch_metadata
                    (batch_id, table_name, source_file, file_checksum, row_count, ingested_at)
                    VALUES (%s, %s, %s, %s, %s, NOW())""",
-                (batch_id, table, file_path, file_checksum, row_count),
+                (batch_id, table, source_url, file_checksum, source_rows),
             )
         except Exception as e:
             log(f"  [WARN] Failed to persist batch metadata for {table}: {e}")
 
     conn.execute("CHECKPOINT")
-    return {"table": table, "rows": row_count}
+    return {"table": table, "rows": source_rows}
 
 
 def run():
-    log("=== Bronze Ingestion Starting ===")
+    log("=== Bronze Ingestion Starting (S3-Centric) ===")
     write_status(STATUS_RUNNING)
     write_pid()
 
@@ -208,7 +189,6 @@ def run():
     os.makedirs(BRONZE_PATH, exist_ok=True)
     os.makedirs(QUARANTINE_ROOT, exist_ok=True)
 
-    # ── DuckDB file-backed (M1) ─────────────────────────────────────
     if not os.path.exists(DUCKDB_TEMP_ROOT):
         os.makedirs(DUCKDB_TEMP_ROOT, exist_ok=True)
     duckdb_temp = os.path.join(DUCKDB_TEMP_ROOT, f"bronze_{batch_id}")
@@ -217,13 +197,15 @@ def run():
 
     import duckdb
     conn = duckdb.connect(str(duckdb_file))
+    sys.path.insert(0, "/opt/airflow/data-engineering")
+    from bronze.s3_config import configure_s3
+    configure_s3(conn)
     conn.execute("SET threads = 2")
     conn.execute("SET memory_limit = '1.5GB'")
     conn.execute("SET preserve_insertion_order = false")
     conn.execute(f"SET temp_directory = '{duckdb_temp}'")
     conn.execute("SET max_temp_directory_size = '10GB'")
 
-    # ── PostgreSQL (quarantine + metadata) ──────────────────────────
     pg = None
     try:
         import psycopg2

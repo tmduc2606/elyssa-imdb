@@ -122,7 +122,7 @@ class SilverTransformOperator(BaseOperator):
 
     def __init__(
         self,
-        bronze_path: str = "/opt/airflow/output/bronze/",
+        bronze_path: str = "s3://bronze/",
         jdbc_url: str = "postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
         jdbc_user: str = "elyssa",
         jdbc_password: str = "elyssa_pg_2026",
@@ -158,6 +158,9 @@ class SilverTransformOperator(BaseOperator):
         os.makedirs(duckdb_temp, exist_ok=True)
         os.makedirs(csv_dir, exist_ok=True)
         conn = duckdb.connect(str(duckdb_file))
+        sys.path.insert(0, "/opt/airflow/data-engineering")
+        from bronze.s3_config import configure_s3
+        configure_s3(conn)
         conn.execute("SET threads = 2")
         mem_limit = os.environ.get("DUCKDB_MEMORY_LIMIT", "2GB")
         conn.execute(f"SET memory_limit = '{mem_limit}'")
@@ -344,10 +347,13 @@ class SilverTransformOperator(BaseOperator):
         try:
             total_rows = 0
             table_items = list(table_defs.items()) if not skip_parents else []
+            for table_idx, (src_table, (dst_table, camel_cols, pk_cols)) in enumerate(table_items):
                 self.log.info(f"  [{table_idx+1}/{len(table_items)}] Starting {src_table} -> {dst_table}...")
-                parquet_path = os.path.join(self.bronze_path, f"{src_table}.parquet")
-                if not os.path.exists(parquet_path):
-                    self.log.warning(f"Parquet not found: {parquet_path}, skipping")
+                parquet_url = f"{self.bronze_path}{src_table}.parquet"
+                try:
+                    conn.execute(f"SELECT 1 FROM read_parquet('{parquet_url}') LIMIT 0")
+                except Exception:
+                    self.log.warning(f"Parquet not found at {parquet_url}, skipping {src_table}")
                     continue
 
                 # Build SELECT with column names from parquet (matches TSV headers)
@@ -380,7 +386,7 @@ class SilverTransformOperator(BaseOperator):
                 # M2: Materialize Parquet into DuckDB table to avoid double read_parquet()
                 duck_src = f"src_{src_table.replace('.', '_')}"
                 conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
-                conn.execute(f"CREATE TABLE {duck_src} AS SELECT * FROM read_parquet('{parquet_path}')")
+                conn.execute(f"CREATE TABLE {duck_src} AS SELECT * FROM read_parquet('{parquet_url}')")
 
                 # Count rows (after NOT NULL filter)
                 count_sql = f"SELECT COUNT(*) FROM {duck_src}"
@@ -679,9 +685,11 @@ class SilverTransformOperator(BaseOperator):
 
             child_rows = 0
             for child_idx, child in enumerate(child_table_defs):
-                parquet_path = os.path.join(self.bronze_path, f"{child['src_table']}.parquet")
-                if not os.path.exists(parquet_path):
-                    self.log.warning(f"Child parquet not found: {parquet_path}, skipping")
+                child_parquet_url = f"{self.bronze_path}{child['src_table']}.parquet"
+                try:
+                    conn.execute(f"SELECT 1 FROM read_parquet('{child_parquet_url}') LIMIT 0")
+                except Exception:
+                    self.log.warning(f"Child parquet not found at {child_parquet_url}, skipping {child['dst_table']}")
                     continue
 
                 self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
@@ -689,7 +697,7 @@ class SilverTransformOperator(BaseOperator):
                 # M2: Materialize source Parquet into DuckDB table once to avoid re-parsing per chunk
                 src_tbl = f"src_{child['src_table'].replace('.', '_')}"
                 conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
-                conn.execute(f"CREATE TABLE {src_tbl} AS SELECT * FROM read_parquet('{parquet_path}')")
+                conn.execute(f"CREATE TABLE {src_tbl} AS SELECT * FROM read_parquet('{child_parquet_url}')")
                 total_src = conn.execute(f"SELECT count(*) FROM {src_tbl}").fetchone()[0]
 
                 use_chunked = total_src > CHUNKED_CHILD_THRESHOLD
