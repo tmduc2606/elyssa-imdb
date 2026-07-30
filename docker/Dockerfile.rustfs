@@ -6,12 +6,14 @@
 # Port: 9000 (S3 API), 9001 (admin console)
 FROM rustfs/rustfs:latest
 
-# Download rc CLI (RustFS client, equivalent to MinIO's mc)
+# Download rc CLI (RustFS client) — base image runs as non-root, so elevate for install
+USER root
 ARG RC_VERSION=v0.1.30
 ARG RC_URL=https://github.com/rustfs/cli/releases/download/${RC_VERSION}/rustfs-cli-linux-amd64-${RC_VERSION}.tar.gz
 RUN wget -qO /tmp/rc.tar.gz ${RC_URL} \
     && tar -xzf /tmp/rc.tar.gz -C /usr/local/bin/ rc \
     && rm /tmp/rc.tar.gz
+USER rustfs
 
 # Environment
 ENV RUSTFS_ACCESS_KEY=elyssa \
