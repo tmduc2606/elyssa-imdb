@@ -121,18 +121,18 @@ def ingest_table(conn, table, batch_id, pg):
     schema_def = BRONZE_SCHEMAS.get(table, {})
     if schema_def:
         cols_str = ", ".join(f"'{k}': '{v}'" for k, v in schema_def.items())
-        read_csv_sql = f"read_csv('{source_url}', columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+        read_csv_sql = f"read_csv('{source_url}', columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true)"
     else:
-        read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
+        read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true)"
 
     base_sql = (
         f"SELECT *, '{source_url}' AS _source_file, '{table}' AS _source_table, "
         f"'{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, "
         f"{source_rows} AS _row_count, '' AS _file_checksum "
-        f"FROM ({read_csv_sql})"
+        f"FROM {read_csv_sql}"
     )
 
-    # Materialize to temp table first (avoids nested subquery in COPY)
+    # Materialize to temp table first (avoids subquery issues in COPY)
     temp_table = f"_bronze_{table.replace('.', '_')}"
     conn.execute(f"CREATE OR REPLACE TEMP TABLE {temp_table} AS {base_sql}")
 
