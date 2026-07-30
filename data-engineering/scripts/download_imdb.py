@@ -69,7 +69,7 @@ def download_and_upload(filename: str) -> dict:
             total_bytes += len(chunk)
 
     buf.seek(0)
-    s3_client.upload_fileobj(buf, BUCKET, filename)
+    s3_client.put_object(Bucket=BUCKET, Key=filename, Body=buf)
     buf.close()
 
     elapsed = time.time() - start
