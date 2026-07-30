@@ -8,6 +8,7 @@ Wired as upstream of bronze_ingest in the pipeline DAG.
 
 import os
 import re
+import sys
 from datetime import datetime, timezone
 
 import boto3
