@@ -279,7 +279,6 @@ with DAG(
     imdb_sensor = IMDbDataSensor(
         task_id="imdb_data_sensor",
         source_dir="s3://imdb-source/",
-        file_pattern="*.tsv.gz",
         poke_interval=300,
         timeout=3600,
         mode="reschedule",

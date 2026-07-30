@@ -1,33 +1,52 @@
 """
 IMDb Data Sensor — Airflow sensor for new source data on S3.
 
-Detects new .tsv.gz files in the s3://imdb-source/ bucket via DuckDB httpfs.
+Detects new .tsv.gz files in the s3://imdb-source/ bucket via boto3
+list_objects_v2 (zero data transfer, no OOM risk).
 Wired as upstream of bronze_ingest in the pipeline DAG.
 """
 
 import os
-import sys
+import re
 from datetime import datetime, timezone
+
+import boto3
 from airflow.sensors.base import BaseSensorOperator
+from botocore.config import Config
 
 sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
 from pipeline_logger import get_logger
 
 
+S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "elyssa")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026")
+
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=S3_ENDPOINT,
+    aws_access_key_id=S3_ACCESS_KEY,
+    aws_secret_access_key=S3_SECRET_KEY,
+    config=Config(signature_version="s3v4"),
+    region_name="us-east-1",
+)
+
+
 class IMDbDataSensor(BaseSensorOperator):
     """
-    Sensors for new IMDb .tsv.gz files in the s3://imdb-source/ bucket.
+    Sensor for new IMDb .tsv.gz files in the s3://imdb-source/ bucket.
 
-    Uses DuckDB httpfs with glob pattern to detect source files.
-    Returns True when at least one matching file exists, False otherwise.
+    Lists objects via boto3 (metadata only, no data transfer).
     """
 
     template_fields = ("source_dir", "file_pattern")
 
+    EXPECTED = 7
+
     def __init__(
         self,
         source_dir: str = "s3://imdb-source/",
-        file_pattern: str = "*.tsv.gz",
+        file_pattern: str = r"\.tsv\.gz$",
         poke_interval: int = 300,
         timeout: int = 3600,
         mode: str = "reschedule",
@@ -43,39 +62,39 @@ class IMDbDataSensor(BaseSensorOperator):
         )
         self.source_dir = source_dir
         self.file_pattern = file_pattern
+        self._bucket = source_dir.replace("s3://", "").rstrip("/")
 
     def poke(self, context):
         log = get_logger()
         batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        glob_pattern = os.path.join(self.source_dir, self.file_pattern)
 
-        import duckdb
-        conn = duckdb.connect(":memory:")
-        sys.path.insert(0, "/opt/airflow/data-engineering")
         try:
-            from bronze.s3_config import configure_s3
-            configure_s3(conn)
-        except Exception:
-            pass
-        try:
-            count = conn.execute(
-                f"SELECT count(*) FROM read_csv('{glob_pattern}', delim='\\t', header=true, all_varchar=true, ignore_errors=true)"
-            ).fetchone()[0]
+            resp = s3_client.list_objects_v2(Bucket=self._bucket)
         except Exception as e:
-            self.log.warning(f"S3 source check failed: {e}")
-            conn.close()
+            self.log.warning(f"S3 list failed: {e}")
             return False
-        conn.close()
 
-        if count > 0:
-            self.log.info(f"Detected source files at {glob_pattern} ({count} rows accessible)")
-            log.log_stage(stage="imdb_sensor", batch_id=batch_id,
-                          status="success", row_count=count,
-                          message=f"Source files found at {glob_pattern}")
+        keys = resp.get("Contents", [])
+        matched = [k for k in keys if re.search(self.file_pattern, k["Key"])]
+        count = len(matched)
+
+        if count >= self.EXPECTED:
+            self.log.info(
+                f"Detected {count}/{self.EXPECTED} source files in s3://{self._bucket}/"
+            )
+            log.log_stage(
+                stage="imdb_sensor", batch_id=batch_id,
+                status="success", row_count=count,
+                message=f"Source files found: {count}/{self.EXPECTED}",
+            )
             return True
 
-        self.log.info(f"No source files at {glob_pattern}")
-        log.log_stage(stage="imdb_sensor", batch_id=batch_id,
-                      status="pending",
-                      message=f"No files at {glob_pattern}, will retry")
+        self.log.info(
+            f"Waiting for source files: {count}/{self.EXPECTED} in s3://{self._bucket}/"
+        )
+        log.log_stage(
+            stage="imdb_sensor", batch_id=batch_id,
+            status="pending", row_count=count,
+            message=f"Files: {count}/{self.EXPECTED}",
+        )
         return False
