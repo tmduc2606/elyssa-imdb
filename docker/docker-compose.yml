@@ -11,13 +11,13 @@
 # Bronze/Silver/Gold are bind-mounted to ../data-science/marts/ so they
 # survive Docker wipes. The DS EDA notebook Part D reads from those paths.
 #
-# Memory Budget (~8 GB out of 13.9 GB usable):
-#   postgres:   3g limit + 1g shm
-#   airflow:    2g limit + 1g shm
-#   etl-runner: 2.5g limit + 2g shm
+# Memory Budget (~7.4 GB idle, ~11.5-12 GB peak out of 13.9 GB usable):
+#   postgres:   2.5g limit (shared_buffers=512MB, work_mem=64MB)
+#   airflow:    1.5g limit (single-task, parallelism=1)
+#   etl-runner: 2g limit (idle until silver/gold runs)
 #   rustfs:     256m limit
 #   OS/WSL2:    ~4 GB headroom
-#   Total:      ~8 GB (≤58% of 13.9 GB, well within peak ≤91%)
+#   Total idle: ~7.4 GB (53%), peak: ~11.5 GB (83%)
 
 services:
   # ─── PostgreSQL + TimescaleDB ───────────────────────────────────
@@ -36,20 +36,19 @@ services:
         -c config_file=/etc/postgresql/custom.conf
         -c shared_preload_libraries=timescaledb
         -c max_connections=200
-        -c shared_buffers=1GB
-        -c work_mem=256MB
-        -c maintenance_work_mem=512MB
+        -c shared_buffers=512MB
+        -c work_mem=64MB
+        -c maintenance_work_mem=256MB
         -c wal_level=replica
-        -c max_wal_size=4GB
-        -c effective_cache_size=4GB
+        -c max_wal_size=1GB
+        -c effective_cache_size=2GB
         -c checkpoint_completion_target=0.9
         -c random_page_cost=1.1
         -c effective_io_concurrency=200
         -c log_min_duration_statement=1000
         -c timezone=UTC
-    shm_size: '1g'
-    mem_limit: '3g'
-    memswap_limit: '4g'
+    shm_size: '64m'
+    mem_limit: '2.5g'
     oom_score_adj: 500
     ports:
       - "54321:5432"
@@ -76,7 +75,6 @@ services:
       dockerfile: docker/Dockerfile.rustfs
     container_name: elyssa-rustfs
     mem_limit: 256m
-    memswap_limit: 512m
     environment:
       RUSTFS_ACCESS_KEY: elyssa
       RUSTFS_SECRET_KEY: elyssa_s3_2026
@@ -103,8 +101,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.etl-runner
     container_name: elyssa-etl-runner
-    mem_limit: 2.5g
-    memswap_limit: 3g
+    mem_limit: 2g
     oom_score_adj: -500
     environment:
       PYTHONUNBUFFERED: "1"
@@ -123,7 +120,6 @@ services:
       - ../data-engineering:/opt/etl/data-engineering:rw
       - etl_temp:/opt/etl/tmp:rw
       - airflow_data:/opt/airflow:rw
-    shm_size: 2g
     networks:
       - elyssa-net
     restart: "no"
@@ -140,8 +136,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.airflow
     container_name: elyssa-airflow
-    mem_limit: 2g
-    memswap_limit: 3g
+    mem_limit: 1.5g
     oom_score_adj: -250
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
