@@ -15,6 +15,7 @@ docker/.env
 !docs/SMOKE_TEST.md
 !docs/RUNBOOK.md
 !docs/qa_catalog_template.md
+!docs/pipeline_plug_and_play_test.md
 !docs/scripts/
 
 # ─── Documentation (not source code — agent planning docs excluded) ─
