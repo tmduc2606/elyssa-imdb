@@ -53,7 +53,55 @@ docker exec elyssa-rustfs mc ls local/imdb-source/
 docker exec elyssa-rustfs mc cat local/imdb-source/download_metadata.json
 ```
 
-**Plug-and-play check:** Sensor `imdb_data_sensor` should now detect files via DuckDB httpfs `read_csv('s3://imdb-source/*.tsv.gz')`.
+**Plug-and-play check:** Files now live in `s3://imdb-source/`. The `imdb_data_sensor` polls this bucket every 300s and detects them via DuckDB httpfs `read_csv('s3://imdb-source/*.tsv.gz')`.
+
+---
+
+## Trigger Phase: Start Pipeline Execution
+
+After data is in S3, the pipeline must be kickstarted. Choose **one** path:
+
+### Path A — Airflow DAG (Automated Sensor + Orchestration)
+
+```powershell
+# 1. Unpause the DAG (one-time; persists across restarts)
+docker exec elyssa-airflow airflow dags unpause imdb_pipeline
+
+# 2. Trigger a DAG run
+docker exec elyssa-airflow airflow dags trigger -r manual_$(Get-Date -Format 'yyyyMMddHHmmss') imdb_pipeline
+
+# 3. Monitor the sensor phase (polls S3 every 300s, timeout 3600s)
+docker compose -f docker/docker-compose.yml logs -f airflow --tail 50
+```
+
+**Expected sensor log** (once files are detected):
+```
+[YYYY-MM-DDTHH:MM:SS] {imdb_sensor.py:XX} INFO - IMDb source files detected:
+  title.basics.tsv.gz (123.4 MB)
+  title.akas.tsv.gz (456.7 MB)
+  ...
+[YYYY-MM-DDTHH:MM:SS] {imdb_sensor.py:XX} INFO - All 7 source files present — sensor passed
+```
+
+### Path B — Direct Bronze Execution (Bypasses Airflow)
+
+Skips the sensor entirely; runs bronze ingestion directly:
+
+```powershell
+# Confirm files exist first
+docker exec elyssa-rustfs mc ls local/imdb-source/
+
+# Run bronze directly (no sensor needed)
+docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/run_bronze.py
+```
+
+### Path C — Using pipeline-mode.ps1 (Recommended for Manual Testing)
+
+```powershell
+.\docker\pipeline-mode.ps1 run bronze
+```
+
+This triggers the DAG via Airflow CLI and prints the tail command for live monitoring.
 
 ---
 
@@ -272,7 +320,8 @@ for t in ['dim_person','dim_title','fact_episode','fact_performance','fact_title
 
 | Layer | Reads From | Writes To | Downstream Consumer | Idempotent? |
 |-------|-----------|-----------|--------------------|-------------|
-| **Download** | IMDb HTTPS | `s3://imdb-source/` | Bronze (sensor + runner) | Yes (overwrites) |
+| **Download** | IMDb HTTPS | `s3://imdb-source/` | Sensor, Bronze runner | Yes (overwrites) |
+| **Trigger** | `s3://imdb-source/` (sensor poll) | DAG run ID / subprocess PID | Bronze subprocess | Yes (re-triggerable) |
 | **Bronze** | `s3://imdb-source/` | `s3://bronze/` + local bind mount | Silver, DS notebooks | Yes (checkpoint resume) |
 | **Silver** | `s3://bronze/` | PostgreSQL `silver.*` | Gold (dbt) | Yes (checkpoint skip) |
 | **Gold dbt** | `silver.*` | `gold.*` (PostgreSQL) | Gold Export | Yes (full-refresh) |
@@ -315,6 +364,7 @@ Or via `pipeline-mode.ps1`:
 
 | You Want | Command |
 |----------|---------|
+| DAG sensor status | `docker compose -f docker/docker-compose.yml logs --tail 20 elyssa-airflow \| grep -i "sensor\|imdb_data\|source"` |
 | RustFS S3 files | `docker exec elyssa-rustfs mc ls local/<bucket>/` |
 | Bronze live log | `docker exec elyssa-airflow tail -f /tmp/bronze_runner.log` |
 | Bronze completion | `docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.completed"` |
