@@ -7,8 +7,14 @@ import os
 
 
 def get_s3_config() -> dict:
+    raw_endpoint = os.environ.get("S3_ENDPOINT", "rustfs:9000")
+    # Strip protocol prefix if present — DuckDB httpfs expects bare host:port
+    for prefix in ("https://", "http://"):
+        if raw_endpoint.startswith(prefix):
+            raw_endpoint = raw_endpoint[len(prefix):]
+            break
     return {
-        "endpoint": os.environ.get("S3_ENDPOINT", "rustfs:9000"),
+        "endpoint": raw_endpoint,
         "access_key": os.environ.get("S3_ACCESS_KEY", "elyssa"),
         "secret_key": os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026"),
         "region": os.environ.get("S3_REGION", "us-east-1"),
