@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Download IMDb .tsv.gz files directly to RustFS S3 via HTTP PUT (streaming).
+"""Download IMDb .tsv.gz files to RustFS S3 via boto3 (AWS V4 signing).
 
 Usage:
     python scripts/download_imdb.py
 
-Requires: requests library (pip install requests)
+Requires: boto3, requests
 S3 endpoint defaults to http://rustfs:9000, overridden by S3_ENDPOINT env var.
 """
 
 import hashlib
+import io
 import json
 import os
-import sys
 import time
 from datetime import datetime, timezone
 
+import boto3
 import requests
+from botocore.config import Config
 
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "elyssa")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026")
 BUCKET = "imdb-source"
 BASE_URL = "https://datasets.imdbws.com"
 
@@ -31,6 +35,15 @@ FILES = [
     "name.basics.tsv.gz",
 ]
 
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=S3_ENDPOINT,
+    aws_access_key_id=S3_ACCESS_KEY,
+    aws_secret_access_key=S3_SECRET_KEY,
+    config=Config(signature_version="s3v4"),
+    region_name="us-east-1",
+)
+
 
 def log(msg: str):
     ts = datetime.now(timezone.utc).isoformat()
@@ -39,7 +52,6 @@ def log(msg: str):
 
 def download_and_upload(filename: str) -> dict:
     url = f"{BASE_URL}/{filename}"
-    put_url = f"{S3_ENDPOINT}/{BUCKET}/{filename}"
     log(f"Downloading {url}")
 
     sha256 = hashlib.sha256()
@@ -49,16 +61,16 @@ def download_and_upload(filename: str) -> dict:
     resp = requests.get(url, stream=True, timeout=300)
     resp.raise_for_status()
 
-    def content_iter():
-        nonlocal total_bytes
-        for chunk in resp.iter_content(chunk_size=65536):
-            if chunk:
-                sha256.update(chunk)
-                total_bytes += len(chunk)
-                yield chunk
+    buf = io.BytesIO()
+    for chunk in resp.iter_content(chunk_size=65536):
+        if chunk:
+            buf.write(chunk)
+            sha256.update(chunk)
+            total_bytes += len(chunk)
 
-    put_resp = requests.put(put_url, data=content_iter(), timeout=600)
-    put_resp.raise_for_status()
+    buf.seek(0)
+    s3_client.upload_fileobj(buf, BUCKET, filename)
+    buf.close()
 
     elapsed = time.time() - start
     digest = sha256.hexdigest()
@@ -113,11 +125,13 @@ def main():
         },
     }
 
-    meta_url = f"{S3_ENDPOINT}/{BUCKET}/download_metadata.json"
     try:
-        resp = requests.put(meta_url, data=json.dumps(meta, indent=2), timeout=30)
-        resp.raise_for_status()
-        log(f"Metadata written to {meta_url}")
+        s3_client.put_object(
+            Bucket=BUCKET,
+            Key="download_metadata.json",
+            Body=json.dumps(meta, indent=2).encode(),
+        )
+        log(f"Metadata written to s3://{BUCKET}/download_metadata.json")
     except Exception as e:
         log(f"WARN: Could not write metadata: {e}")
 
@@ -131,4 +145,5 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
     main()
