@@ -6,14 +6,20 @@
 # Port: 9000 (S3 API), 9001 (admin console)
 FROM rustfs/rustfs:latest
 
+# Download rc CLI (RustFS client, equivalent to MinIO's mc)
+ARG RC_VERSION=v0.1.30
+ARG RC_URL=https://github.com/rustfs/cli/releases/download/${RC_VERSION}/rustfs-cli-linux-amd64-${RC_VERSION}.tar.gz
+RUN wget -qO /tmp/rc.tar.gz ${RC_URL} \
+    && tar -xzf /tmp/rc.tar.gz -C /usr/local/bin/ rc \
+    && rm /tmp/rc.tar.gz
+
 # Environment
 ENV RUSTFS_ACCESS_KEY=elyssa \
     RUSTFS_SECRET_KEY=elyssa_s3_2026 \
     RUSTFS_REGION=us-east-1 \
     RUSTFS_CONSOLE_ADDRESS=":9001"
 
-# Create Bronze bucket at startup
-# RustFS runs as non-root; use bash to execute script without chmod
+# Create buckets at startup using rc CLI
 COPY docker/rustfs/entrypoint.sh /tmp/entrypoint.sh
 
 ENTRYPOINT ["/bin/sh", "/tmp/entrypoint.sh"]

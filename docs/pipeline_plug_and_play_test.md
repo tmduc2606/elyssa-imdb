@@ -11,7 +11,7 @@ Sequential instructions + live log per layer for testing the once "plug-and-play
 docker compose -f docker/docker-compose.yml ps
 
 # Check RustFS buckets exist (should show: imdb-source, bronze, gold-exports)
-docker exec elyssa-rustfs mc ls local/
+docker exec elyssa-rustfs rc bucket list local/
 
 # Check Airflow is healthy
 docker inspect --format '{{json .State.Health.Status}}' elyssa-airflow
@@ -23,7 +23,7 @@ docker exec elyssa-postgres pg_isready -U elyssa -d elyssa_warehouse
 docker exec elyssa-etl-runner python -c "import duckdb; print('DuckDB ok')"
 ```
 
-**Expected:** All 4 services `Up (healthy)`, RustFS shows 3 buckets, both Python envs importable.
+**Expected:** All 4 services `Up (healthy)`, `rc bucket list local/` shows 3 buckets, both Python envs importable.
 
 ---
 
@@ -46,11 +46,11 @@ docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/download
 **Verify:**
 ```powershell
 # List files in RustFS imdb-source bucket
-docker exec elyssa-rustfs mc ls local/imdb-source/
+docker exec elyssa-rustfs rc object list local/imdb-source
 # Should show 8 files (7 .tsv.gz + download_metadata.json)
 
 # Check metadata
-docker exec elyssa-rustfs mc cat local/imdb-source/download_metadata.json
+docker exec elyssa-rustfs sh -c "rc cat local/imdb-source/download_metadata.json"
 ```
 
 **Plug-and-play check:** Files now live in `s3://imdb-source/`. The `imdb_data_sensor` polls this bucket every 300s and detects them via DuckDB httpfs `read_csv('s3://imdb-source/*.tsv.gz')`.
@@ -89,7 +89,7 @@ Skips the sensor entirely; runs bronze ingestion directly:
 
 ```powershell
 # Confirm files exist first
-docker exec elyssa-rustfs mc ls local/imdb-source/
+docker exec elyssa-rustfs rc object list local/imdb-source
 
 # Run bronze directly (no sensor needed)
 docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/run_bronze.py
@@ -136,7 +136,7 @@ Or if checkpoint resume triggers:
 **Verify S3 (pipeline hot path):**
 ```powershell
 # List S3 bronze bucket
-docker exec elyssa-rustfs mc ls local/bronze/
+docker exec elyssa-rustfs rc object list local/bronze
 # Should show 7 .parquet files
 ```
 
@@ -365,7 +365,7 @@ Or via `pipeline-mode.ps1`:
 | You Want | Command |
 |----------|---------|
 | DAG sensor status | `docker compose -f docker/docker-compose.yml logs --tail 20 elyssa-airflow \| grep -i "sensor\|imdb_data\|source"` |
-| RustFS S3 files | `docker exec elyssa-rustfs mc ls local/<bucket>/` |
+| RustFS S3 files | `docker exec elyssa-rustfs rc object list local/<bucket>` |
 | Bronze live log | `docker exec elyssa-airflow tail -f /tmp/bronze_runner.log` |
 | Bronze completion | `docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.completed"` |
 | Silver live log | `docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py 2>&1` |
