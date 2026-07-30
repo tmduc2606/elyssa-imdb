@@ -44,13 +44,13 @@ BRONZE_SCHEMAS = {
 }
 
 SOURCE_FILES = {
-    "title.basics": "title.basics.tsv",
-    "title.akas": "title.akas.tsv",
-    "title.crew": "title.crew.tsv",
-    "title.episode": "title.episode.tsv",
-    "title.principals": "title.principals.tsv",
-    "title.ratings": "title.ratings.tsv",
-    "name.basics": "name.basics.tsv",
+    "title.basics": "title.basics.tsv.gz",
+    "title.akas": "title.akas.tsv.gz",
+    "title.crew": "title.crew.tsv.gz",
+    "title.episode": "title.episode.tsv.gz",
+    "title.principals": "title.principals.tsv.gz",
+    "title.ratings": "title.ratings.tsv.gz",
+    "name.basics": "name.basics.tsv.gz",
 }
 
 BRONZE_TABLES = [
@@ -96,7 +96,7 @@ def quarantine_record(pg_cursor, table, file_path, error, batch_id):
 
 
 def ingest_table(conn, table, batch_id, pg):
-    filename = SOURCE_FILES.get(table, f"{table}.tsv")
+    filename = SOURCE_FILES.get(table, f"{table}.tsv.gz")
     source_url = f"{SOURCE_DIR}{filename}"
     s3_output = f"{S3_BRONZE_PATH}{table}.parquet"
     local_output = os.path.join(BRONZE_PATH, f"{table}.parquet")
