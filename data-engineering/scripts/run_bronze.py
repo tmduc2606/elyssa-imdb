@@ -132,10 +132,14 @@ def ingest_table(conn, table, batch_id, pg):
         f"FROM ({read_csv_sql})"
     )
 
+    # Materialize to temp table first (avoids nested subquery in COPY)
+    temp_table = f"_bronze_{table.replace('.', '_')}"
+    conn.execute(f"CREATE OR REPLACE TEMP TABLE {temp_table} AS {base_sql}")
+
     # Write to S3 bronze bucket (pipeline hot path)
     try:
         conn.execute(
-            f"COPY ({base_sql}) TO '{s3_output}' (FORMAT PARQUET, COMPRESSION snappy)"
+            f"COPY {temp_table} TO '{s3_output}' (FORMAT PARQUET, COMPRESSION snappy)"
         )
         log(f"  {table} written -> {s3_output}")
     except Exception as e:
@@ -144,7 +148,7 @@ def ingest_table(conn, table, batch_id, pg):
     # Write to local bind mount (DS notebook consumption)
     try:
         conn.execute(
-            f"COPY ({base_sql}) TO '{local_output}' (FORMAT PARQUET, COMPRESSION snappy)"
+            f"COPY {temp_table} TO '{local_output}' (FORMAT PARQUET, COMPRESSION snappy)"
         )
         log(f"  {table} written -> {local_output}")
     except Exception as e:
