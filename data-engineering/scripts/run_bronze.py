@@ -100,12 +100,18 @@ def ingest_table(conn, table, batch_id, pg):
     source_url = f"{SOURCE_DIR}{filename}"
     s3_output = f"{S3_BRONZE_PATH}{table}.parquet"
     local_output = os.path.join(BRONZE_PATH, f"{table}.parquet")
+    marker_path = os.path.join(BRONZE_PATH, f".{table}.completed")
 
-    # Checkpoint resume from local bind mount (survives Docker wipes)
-    if os.path.exists(local_output):
-        existing_count = conn.execute(f"SELECT COUNT(*) FROM '{local_output}'").fetchone()[0]
-        log(f"  CHECKPOINT {table}: {existing_count} rows already at {local_output}")
-        return {"table": table, "rows": existing_count, "checkpoint": True}
+    # Checkpoint resume from marker file (avoids loading full Parquet for count)
+    if os.path.exists(marker_path) and os.path.exists(local_output):
+        try:
+            with open(marker_path, "r") as f:
+                marker = json.load(f)
+            existing_count = marker.get("rows", 0)
+            log(f"  CHECKPOINT {table}: {existing_count} rows already processed (marker found)")
+            return {"table": table, "rows": existing_count, "checkpoint": True}
+        except Exception:
+            pass  # Fall through to reprocess if marker is corrupt
 
     # Row count via DuckDB from S3 (fast range request — no full download)
     try:
@@ -132,14 +138,11 @@ def ingest_table(conn, table, batch_id, pg):
         f"FROM {read_csv_sql}"
     )
 
-    # Materialize to temp table first (avoids subquery issues in COPY)
-    temp_table = f"_bronze_{table.replace('.', '_')}"
-    conn.execute(f"CREATE OR REPLACE TEMP TABLE {temp_table} AS {base_sql}")
-
+    # Stream directly to Parquet without materializing a temp table
     # Write to S3 bronze bucket (pipeline hot path)
     try:
         conn.execute(
-            f"COPY {temp_table} TO '{s3_output}' (FORMAT PARQUET, COMPRESSION snappy)"
+            f"COPY ({base_sql}) TO '{s3_output}' (FORMAT PARQUET, COMPRESSION snappy)"
         )
         log(f"  {table} written -> {s3_output}")
     except Exception as e:
@@ -148,7 +151,7 @@ def ingest_table(conn, table, batch_id, pg):
     # Write to local bind mount (DS notebook consumption)
     try:
         conn.execute(
-            f"COPY {temp_table} TO '{local_output}' (FORMAT PARQUET, COMPRESSION snappy)"
+            f"COPY ({base_sql}) TO '{local_output}' (FORMAT PARQUET, COMPRESSION snappy)"
         )
         log(f"  {table} written -> {local_output}")
     except Exception as e:
@@ -166,6 +169,13 @@ def ingest_table(conn, table, batch_id, pg):
         pass
 
     log(f"  {table}: {source_rows} rows (sha256={file_checksum[:12]}...)")
+
+    # Write checkpoint marker after successful ingestion
+    try:
+        with open(marker_path, "w") as f:
+            json.dump({"rows": source_rows, "checksum": file_checksum, "batch_id": batch_id}, f)
+    except Exception as e:
+        log(f"  [WARN] Failed to write checkpoint marker for {table}: {e}")
 
     if pg:
         try:
@@ -208,7 +218,7 @@ def run():
     conn.execute("SET memory_limit = '1.5GB'")
     conn.execute("SET preserve_insertion_order = false")
     conn.execute(f"SET temp_directory = '{duckdb_temp}'")
-    conn.execute("SET max_temp_directory_size = '10GB'")
+    conn.execute("SET max_temp_directory_size = '1.25GB'")
 
     pg = None
     try:

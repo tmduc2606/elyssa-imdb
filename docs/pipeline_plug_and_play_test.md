@@ -165,42 +165,54 @@ docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.completed"
 docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.batch_metadata.json"
 ```
 
+**Checkpoint behavior:** Bronze now writes per-table marker files (e.g., `.title.akas.completed`) containing `{"rows", "checksum", "batch_id"}`. On resume, it skips tables with valid markers instead of scanning full Parquet files.
+
 **Plug-and-play check:** Bronze writes to both S3 (for Silver pipeline hot path) and local bind mount (for DS notebooks). Silver operator defaults to `bronze_path="s3://bronze/"`.
 
 ---
 
 ## Layer 2: Silver ETL → PostgreSQL
 
-**Live log command (in separate terminal):**
+> **Concurrency note:** Silver ETL uses a file-based exclusive lock (`silver.lock`) to prevent concurrent runs from stepping on each other during `TRUNCATE CASCADE`. The lock auto-releases if the process crashes. If two runs collide, the second fails fast with `RuntimeError`.
+
+**Live log via Airflow task log (recommended):**
 ```powershell
-# Silver writes structured JSON to stdout
+# Find the current DAG run ID
+docker exec elyssa-airflow airflow dags list-runs imdb_pipeline | Select-Object -First 5
+
+# Tail the Silver task log for that run
+docker exec elyssa-airflow sh -c "find /opt/airflow/logs -path '<run_id>' -name '*silver_transform*' -type f | head -1 | xargs cat"
+```
+
+**Direct execution (only when no Airflow run is active):**
+```powershell
 docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py 2>&1
 ```
 
-Or for live routing to a local log:
-```powershell
-docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py > silver_live.log 2>&1
-Get-Content -Path silver_live.log -Wait
+**Expected log pattern** (`[1/6]` parent tables, then `[1/8]` child normalization tables):
 ```
-
-**Expected log pattern** (~1-2 hours for all 14 tables with 20M+ rows):
-```
-{"timestamp": "2026-07-30T...", "level": "INFO", "stage": "silver_transform", "status": "started", "message": "Processing parent tables + 8 child normalization tables"}
-...
+{"timestamp": "...", "level": "INFO", "stage": "silver_transform", "status": "started", "message": "Processing parent tables + 8 child normalization tables"}
+Schema applied from /opt/etl/data-engineering/silver/schema.sql
+Truncated Silver child tables to clear partial/corrupted state
   [1/6] Starting title.basics -> silver.title_basics...
-  title.basics: 10187504 rows -> silver.title_basics
-  silver.title_basics: 10187504 rows loaded
-  silver.title_basics: 10187504 expired, 10187504 inserted (SCD2)
+  title.basics: 2228464 rows -> silver.title_basics
+  silver.title_basics: -1 expired, 2228464 inserted (SCD2)
+  silver.title_basics: 2228464 rows loaded
   [2/6] Starting title.akas -> silver.title_akas...
+  title.akas: 18769691 rows -> silver.title_akas
   ...
-  [CHECKPOINT] parents_done saved (batch=20260730_..., rows=20658345)
-...
+[CHECKPOINT] parents_done saved (batch=20260730_..., parent_rows=20658345)
   [1/8] Starting silver.title_genre...
   ...
-  [CHECKPOINT] children_done saved (batch=20260730_..., parent_rows=20658345, child_rows=...)
-...
+[CHECKPOINT] children_done saved (batch=20260730_..., parent_rows=20658345, child_rows=...)
 "status": "complete", "message": "20658345 parent + ... child rows"
 ```
+
+**Key behavior changes from previous version:**
+- No DuckDB temp tables are materialized for parent tables — `COPY` reads directly from `read_parquet()`
+- For child tables, a source temp table is materialized **only** when chunked processing is required (>5M rows); otherwise streams directly
+- `max_temp_directory_size` is capped at `1.25GB` to respect the Airflow container memory limit
+- Checkpoint resume uses marker files, not full Parquet row-count scans
 
 **Verify PostgreSQL tables:**
 ```powershell
@@ -323,7 +335,7 @@ for t in ['dim_person','dim_title','fact_episode','fact_performance','fact_title
 | **Download** | IMDb HTTPS | `s3://imdb-source/` | Sensor, Bronze runner | Yes (overwrites) |
 | **Trigger** | `s3://imdb-source/` (sensor poll) | DAG run ID / subprocess PID | Bronze subprocess | Yes (re-triggerable) |
 | **Bronze** | `s3://imdb-source/` | `s3://bronze/` + local bind mount | Silver, DS notebooks | Yes (checkpoint resume) |
-| **Silver** | `s3://bronze/` | PostgreSQL `silver.*` | Gold (dbt) | Yes (checkpoint skip) |
+| **Silver** | `s3://bronze/` | PostgreSQL `silver.*` | Gold (dbt) | Yes (checkpoint resume + file lock serializes runs) |
 | **Gold dbt** | `silver.*` | `gold.*` (PostgreSQL) | Gold Export | Yes (full-refresh) |
 | **Gold Export** | `gold.*` (PostgreSQL) | `data-science/marts/full/*.parquet` | DS Feature Eng, Web API | Yes (overwrites) |
 
@@ -339,6 +351,8 @@ docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/download
 docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/run_bronze.py
 
 # 3. Silver
+# Uses a file-based lock (silver.lock) to prevent concurrent runs. Direct execution
+# will fail fast if another Silver ETL is already running.
 docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py
 
 # 4. Gold dbt
@@ -368,7 +382,7 @@ Or via `pipeline-mode.ps1`:
 | RustFS S3 files | `docker exec elyssa-rustfs rc object list local/<bucket>` |
 | Bronze live log | `docker exec elyssa-airflow tail -f /tmp/bronze_runner.log` |
 | Bronze completion | `docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.completed"` |
-| Silver live log | `docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py 2>&1` |
+| Silver live log | Airflow task log: `find /opt/airflow/logs -path '<run_id>' -name '*silver_transform*' -type f | head -1 | xargs cat` |
 | Silver table rows | `docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT tablename, n_live_tup FROM pg_stat_user_tables WHERE schemaname='silver' ORDER BY tablename;"` |
 | Gold dbt live | stdout from `dbt run` / `dbt test` commands |
 | Gold export manifest | `docker exec elyssa-airflow python -c "import json; m=json.load(open('/opt/airflow/output/gold/_MANIFEST.json')); print(json.dumps(m,indent=2))"` |

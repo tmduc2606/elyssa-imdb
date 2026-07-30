@@ -56,7 +56,10 @@ class GoldExportOperator(BaseOperator):
 
         conn = duckdb.connect(':memory:')
         conn.execute("INSTALL postgres_scanner; LOAD postgres_scanner;")
-        sys.path.insert(0, "/opt/airflow/data-engineering")
+        _root_path = "/opt/airflow/data-engineering"
+        if not os.path.isdir(os.path.join(_root_path, "bronze")):
+            _root_path = "/opt/etl/data-engineering"
+        sys.path.insert(0, _root_path)
         from bronze.s3_config import configure_s3
         configure_s3(conn)
         dsn = f"host={self.pg_host} port={self.pg_port} dbname={self.pg_db} user={self.pg_user} password={pg_password}"

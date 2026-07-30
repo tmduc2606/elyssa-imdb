@@ -24,9 +24,96 @@ if not os.path.isdir(_orch_path):
 sys.path.insert(0, _orch_path)
 from pipeline_logger import get_logger
 
+_root_path = "/opt/airflow/data-engineering"
+if not os.path.isdir(os.path.join(_root_path, "bronze")):
+    _root_path = "/opt/etl/data-engineering"
+
 # Threshold for chunked processing: tables with >5M source rows
 CHUNKED_CHILD_THRESHOLD = 5_000_000
 CHUNK_BATCH_SIZE = 1_000_000
+
+
+def _pid_exists(pid: int) -> bool:
+    """Check if a process with the given PID still exists."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def _acquire_silver_file_lock(lock_path: str, logger):
+    """Acquire an exclusive file lock for Silver ETL serialization.
+
+    Uses fcntl.flock with LOCK_EX | LOCK_NB. If the lock is held by a dead
+    PID (stale), removes the stale lock and retries once. If the holder is
+    alive, raises RuntimeError to prevent concurrent TRUNCATE CASCADE.
+    """
+    import fcntl
+
+    lock_dir = os.path.dirname(lock_path)
+    os.makedirs(lock_dir, exist_ok=True)
+
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        # Lock is held — check if holder PID is still alive
+        holder_pid = None
+        try:
+            with os.fdopen(fd, "r") as f:
+                content = f.read()
+            holder_pid = int(content.strip()) if content.strip().isdigit() else None
+        except Exception:
+            pass
+
+        if holder_pid and not _pid_exists(holder_pid):
+            logger.warning(f"Stale Silver file lock from dead PID {holder_pid}, removing")
+            os.close(fd)
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
+            # Retry once
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError(
+                    "Another Silver ETL run is already in progress (file lock held). "
+                    "Aborting to prevent concurrent TRUNCATE CASCADE."
+                )
+        else:
+            raise RuntimeError(
+                "Another Silver ETL run is already in progress. "
+                "Aborting to prevent deadlock on TRUNCATE CASCADE."
+            )
+
+    # Record our PID in the lock file
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
+    os.write(fd, str(os.getpid()).encode())
+    os.fsync(fd)
+    return fd
+
+
+def _release_silver_file_lock(fd, lock_path: str):
+    """Release file lock and clean up lock file."""
+    if fd is not None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+        except Exception:
+            pass
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except OSError:
+        pass
 
 
 def _log_memory(conn, logger, stage_name):
@@ -158,7 +245,7 @@ class SilverTransformOperator(BaseOperator):
         os.makedirs(duckdb_temp, exist_ok=True)
         os.makedirs(csv_dir, exist_ok=True)
         conn = duckdb.connect(str(duckdb_file))
-        sys.path.insert(0, "/opt/airflow/data-engineering")
+        sys.path.insert(0, _root_path)
         from bronze.s3_config import configure_s3
         configure_s3(conn)
         conn.execute("SET threads = 2")
@@ -166,7 +253,7 @@ class SilverTransformOperator(BaseOperator):
         conn.execute(f"SET memory_limit = '{mem_limit}'")
         conn.execute("SET preserve_insertion_order = false")
         conn.execute(f"SET temp_directory = '{duckdb_temp}'")
-        conn.execute("SET max_temp_directory_size = '10GB'")
+        conn.execute("SET max_temp_directory_size = '1.25GB'")
 
         pg = psycopg2.connect(
             host="postgres", port=5432,
@@ -185,14 +272,28 @@ class SilverTransformOperator(BaseOperator):
             tune.execute("SET maintenance_work_mem = '256MB'")
         pg.commit()
 
+        # Acquire file-based exclusive lock to serialize Silver ETL runs
+        # (prevents concurrent TRUNCATE CASCADE). Lock auto-releases on crash.
+        _lock_fd = None
+        try:
+            silver_lock_path = os.path.join(temp_root, "silver.lock")
+            _lock_fd = _acquire_silver_file_lock(silver_lock_path, self.log)
+            self.log.info(f"Acquired Silver file lock: {silver_lock_path}")
+        except Exception as e:
+            self.log.error(f"Failed to acquire Silver file lock: {e}")
+            raise RuntimeError(
+                "Another Silver ETL run is already in progress. "
+                "Aborting to prevent deadlock on TRUNCATE CASCADE."
+            ) from e
+
         # Ensure schemas and tables exist (idempotent — survives container rebuilds)
-        schema_path = "/opt/airflow/data-engineering/silver/schema.sql"
+        schema_path = os.path.join(_root_path, "silver", "schema.sql")
         if os.path.exists(schema_path):
             with open(schema_path, "r") as f:
                 with pg.cursor() as pg_cursor:
                     pg_cursor.execute(f.read())
             pg.commit()
-            self.log.info("Schema applied from schema.sql")
+            self.log.info(f"Schema applied from {schema_path}")
         else:
             self.log.warning(f"schema.sql not found at {schema_path}")
 
@@ -344,6 +445,7 @@ class SilverTransformOperator(BaseOperator):
             "name.basics": "primaryName",
         }
 
+        _lock_fd = None
         try:
             total_rows = 0
             table_items = list(table_defs.items()) if not skip_parents else []
@@ -383,20 +485,14 @@ class SilverTransformOperator(BaseOperator):
                         f" AND \"{not_null_col}\" != '\\N'"
                     )
 
-                # M2: Materialize Parquet into DuckDB table to avoid double read_parquet()
-                duck_src = f"src_{src_table.replace('.', '_')}"
-                conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
-                conn.execute(f"CREATE TABLE {duck_src} AS SELECT * FROM read_parquet('{parquet_url}')")
-
-                # Count rows (after NOT NULL filter)
-                count_sql = f"SELECT COUNT(*) FROM {duck_src}"
+                # Count rows directly from Parquet (no temp table materialization)
+                count_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_url}')"
                 if not_null_col:
                     count_sql += where_clause
                 row_count = conn.execute(count_sql).fetchone()[0]
 
                 if row_count == 0:
                     self.log.info(f"  {src_table}: 0 rows, skipping")
-                    conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
                     continue
 
                 self.log.info(f"  {src_table}: {row_count} rows -> {dst_table}")
@@ -404,10 +500,9 @@ class SilverTransformOperator(BaseOperator):
                 # Copy to CSV for PostgreSQL COPY (M4: use volume-backed csv_dir)
                 csv_path = os.path.join(csv_dir, f"silver_{src_table.replace('.', '_')}.csv")
                 conn.execute(
-                    "COPY (SELECT " + select_sql + " FROM " + duck_src
+                    "COPY (SELECT " + select_sql + " FROM read_parquet('" + parquet_url + "')"
                     + where_clause + ") TO '" + csv_path + "' (FORMAT CSV, HEADER true, DELIMITER '|')"
                 )
-                conn.execute(f"DROP TABLE IF EXISTS {duck_src}")
 
                 # Build snake_case column list
                 snake_cols = [camel_to_snake_map.get(c, c) for c in camel_cols]
@@ -694,46 +789,42 @@ class SilverTransformOperator(BaseOperator):
 
                 self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
 
-                # M2: Materialize source Parquet into DuckDB table once to avoid re-parsing per chunk
-                src_tbl = f"src_{child['src_table'].replace('.', '_')}"
-                conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
-                conn.execute(f"CREATE TABLE {src_tbl} AS SELECT * FROM read_parquet('{child_parquet_url}')")
-                total_src = conn.execute(f"SELECT count(*) FROM {src_tbl}").fetchone()[0]
+                # Count directly from Parquet (avoid materializing temp table for small sources)
+                total_src = conn.execute(f"SELECT count(*) FROM read_parquet('{child_parquet_url}')").fetchone()[0]
 
                 use_chunked = total_src > CHUNKED_CHILD_THRESHOLD
 
                 if use_chunked:
+                    # Materialize source Parquet only for chunked processing (LIMIT/OFFSET needs table ref)
+                    src_tbl = f"src_{child['src_table'].replace('.', '_')}"
+                    conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
+                    conn.execute(f"CREATE TABLE {src_tbl} AS SELECT * FROM read_parquet('{child_parquet_url}')")
                     with pg.cursor() as pg_cursor:
                         pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
                         self.log.info(f"  {child['dst_table']}: large source ({total_src:,} rows), using chunked UNNEST")
                         chunk_loaded = _process_child_table_chunked(
                             conn, pg_cursor, child, None, self.log, src_table=src_tbl
                         )
+                    conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
                     child_rows += chunk_loaded
                     self.log.info(f"  {child['dst_table']}: {chunk_loaded} rows loaded (chunked)")
                     log.log_stage(stage="silver_transform", batch_id=batch_id,
                                   status="success", row_count=chunk_loaded,
                                   message=f"child {child['dst_table']} (chunked)")
                 else:
-                    source_expr = f"(SELECT * FROM {src_tbl})"
+                    source_expr = f"(SELECT * FROM read_parquet('{child_parquet_url}'))"
                     sql = child["sql"].format(source=source_expr)
-                    # M2: Materialize UNNEST result into DuckDB temp table to avoid double evaluation
-                    tmp_tbl = f"tmp_{child['dst_table'].replace('.', '_')}"
-                    conn.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
-                    conn.execute(f"CREATE TABLE {tmp_tbl} AS {sql}")
-                    row_count = conn.execute(f"SELECT COUNT(*) FROM {tmp_tbl}").fetchone()[0]
+                    # Stream UNNEST result directly to CSV without temp table
+                    row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
 
                     if row_count == 0:
                         self.log.info(f"  {child['dst_table']}: 0 rows, skipping")
-                        conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
-                        conn.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
                         continue
 
                     self.log.info(f"  {child['dst_table']}: {row_count} rows to load (full COPY)")
 
                     csv_path = os.path.join(csv_dir, f"silver_{child['dst_table'].replace('.', '_')}.csv")
-                    conn.execute(f"COPY (SELECT * FROM {tmp_tbl}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
-                    conn.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
+                    conn.execute(f"COPY ({sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
                     self.log.info(f"  {child['dst_table']}: CSV export done")
 
                     with pg.cursor() as pg_cursor:
@@ -746,7 +837,6 @@ class SilverTransformOperator(BaseOperator):
                                 f,
                             )
                     os.remove(csv_path)
-                    conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
                     child_rows += row_count
                     self.log.info(f"  {child['dst_table']}: {row_count} rows loaded")
                     log.log_stage(stage="silver_transform", batch_id=batch_id,
@@ -807,6 +897,11 @@ class SilverTransformOperator(BaseOperator):
                     shutil.rmtree(duckdb_temp, ignore_errors=True)
             except Exception as e:
                 self.log.warning(f"Failed to clean up DuckDB temp files: {e}")
+            # Release file lock before closing connection
+            try:
+                _release_silver_file_lock(_lock_fd, os.path.join(temp_root, "silver.lock"))
+            except Exception:
+                pass
             pg.close()
 
 

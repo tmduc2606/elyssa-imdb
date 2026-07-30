@@ -270,7 +270,7 @@ for t in tables:
 - `data-engineering/docs/architecture_overview.md` — Add S3 layer
 - `data-engineering/docs/export_guide.md` — Update paths to S3
 - `README.md` (root) — Update service URLs + Docker stacks table + repo structure
-- `data-engineering/docs/rustomfs_integration_plan.md` — This plan (consumed after approval)
+- `data-engineering/docs/rustfs_integration_plan.md` — This plan (consumed after approval)
 
 ---
 
