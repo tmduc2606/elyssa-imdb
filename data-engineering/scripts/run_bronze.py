@@ -132,8 +132,25 @@ def ingest_table(conn, table, batch_id, pg):
                 with open(marker_path, "r") as f:
                     marker = json.load(f)
                 existing_count = marker.get("rows", 0)
-                log(f"  CHECKPOINT {table}: {existing_count} rows already processed (marker + S3 verified)")
-                return {"table": table, "rows": existing_count, "checkpoint": True}
+                # Verify the S3 parquet row count matches the marker. A marker
+                # can be written with the correct source count while the actual
+                # Parquet artifact is incomplete (e.g. read_csv quote handling
+                # silently dropping rows) — head_object existence alone is not
+                # enough. Any mismatch forces a re-ingest.
+                try:
+                    s3_rows = conn.execute(
+                        f"SELECT COUNT(*) FROM read_parquet('{s3_output}')"
+                    ).fetchone()[0]
+                    local_rows = conn.execute(
+                        f"SELECT COUNT(*) FROM read_parquet('{local_output}')"
+                    ).fetchone()[0]
+                except Exception as e:
+                    log(f"  CHECKPOINT {table}: cannot verify row counts ({e}) — re-ingesting")
+                    s3_rows = local_rows = -1
+                if s3_rows == existing_count and local_rows == existing_count:
+                    log(f"  CHECKPOINT {table}: {existing_count} rows already processed (marker + S3 verified)")
+                    return {"table": table, "rows": existing_count, "checkpoint": True}
+                log(f"  CHECKPOINT {table}: row-count mismatch — S3={s3_rows:,} local={local_rows:,} vs marker={existing_count:,} — re-ingesting")
             except Exception:
                 pass  # Fall through to reprocess if marker is corrupt
         else:
@@ -153,9 +170,14 @@ def ingest_table(conn, table, batch_id, pg):
     schema_def = BRONZE_SCHEMAS.get(table, {})
     if schema_def:
         cols_str = ", ".join(f"'{k}': '{v}'" for k, v in schema_def.items())
-        read_csv_sql = f"read_csv('{source_url}', columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true)"
+        # quote='' escape='' is critical: IMDb TSV fields contain literal "
+        # (e.g. '"Rome brûle" (Portrait de Shirley Clarke)'). With the default
+        # quote handling, such rows mis-parse and ignore_errors=true silently
+        # DROPS them (82% loss observed on title.basics). Reading line-based
+        # preserves every row.
+        read_csv_sql = f"read_csv('{source_url}', columns={{{cols_str}}}, delim='\\t', header=true, null_padding=true, ignore_errors=true, quote='', escape='')"
     else:
-        read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true)"
+        read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
 
     base_sql = (
         f"SELECT *, '{source_url}' AS _source_file, '{table}' AS _source_table, "
