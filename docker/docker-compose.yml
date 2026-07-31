@@ -136,7 +136,10 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.airflow
     container_name: elyssa-airflow
-    mem_limit: 1.5g
+    # 3g: silver_export/gold_export stream 100M+ rows through DuckDB
+    # postgres_scanner inside this container; 1.5g OOM-killed the export
+    # and its retry loop blocked the only task slot for hours.
+    mem_limit: 3g
     oom_score_adj: -250
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
