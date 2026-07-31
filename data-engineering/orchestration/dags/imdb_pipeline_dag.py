@@ -42,6 +42,7 @@ from operators.imdb_sensor import IMDbDataSensor
 from operators.gold_export_operator import GoldExportOperator
 from operators.silver_export_operator import SilverExportOperator
 from operators.bronze_sensor import BronzeCompletionSensor
+from operators.silver_export_sensor import SilverExportDoneSensor
 
 # ─── Retry config (exponential backoff) ─────────────────────────────
 _RETRY_CONFIG_PATH = os.path.join(
@@ -350,9 +351,24 @@ with DAG(
     )
 
     # ─── Silver Export (Parquet snapshot for DS benchmarking, persists across Docker wipes) ─
+    # Detached subprocess pattern (same as run_bronze / silver ETL): the
+    # operator spawns silver_export_runner.py in a new session and returns
+    # immediately; wait_silver_export polls for the .export.completed marker.
+    # In-process COPY work is SIGKILLed by the scheduler's 300s orphan-pass.
     silver_export = SilverExportOperator(
         task_id="silver_export",
         output_dir="/opt/airflow/output/silver/",
+        retries=0,
+        execution_timeout=timedelta(seconds=30),
+    )
+
+    wait_silver_export = SilverExportDoneSensor(
+        task_id="wait_silver_export",
+        output_dir="/opt/airflow/output/silver/",
+        poke_interval=30,
+        timeout=28800,
+        mode="reschedule",
+        retries=0,
     )
 
     # ─── Gold (dbt run + test) ────────────────────────────────────────────
@@ -407,5 +423,5 @@ with DAG(
     imdb_sensor >> run_bronze >> wait_bronze >> bronze_done
 
     bronze_done >> silver_transform >> wait_silver
-    wait_silver >> silver_export >> gold_dbt_run >> gold_dbt_test
+    wait_silver >> silver_export >> wait_silver_export >> gold_dbt_run >> gold_dbt_test
     gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end
