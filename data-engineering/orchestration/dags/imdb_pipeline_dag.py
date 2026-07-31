@@ -6,13 +6,15 @@ Execution order:
    0. imdb_sensor           (detect new .tsv files)
    1. run_bronze            (spawn standalone run_bronze.py via Popen with start_new_session=True)
    2. wait_bronze           (sensor polling for .completed marker)
-   3. bronze_done            (checkpoint marker)
-   4. quarantine_check       (post-bronze validation)
-   5. silver_transform      (DuckDB→CSV→psycopg2 COPY)
-   6. gold_dbt_run          (dbt run)
-   7. gold_dbt_test         (dbt test)
-   8. dq_checks             (null-rate, referential integrity, row-count)
-   9. freshness_monitor     (check last_updated freshness SLA)
+   3. bronze_ingestion_done (checkpoint marker)
+   4. silver_transform      (spawn silver_operator.py in etl-runner)
+   5. wait_silver           (poll PG tables + fail fast on .silver.failed marker)
+   6. silver_export         (Silver → Parquet snapshot for DS benchmarking)
+   7. gold_dbt_run          (dbt run)
+   8. gold_dbt_test         (dbt test)
+   9. dq_checks             (null-rate, referential integrity, row-count, quarantine)
+  10. freshness_check       (check last_updated freshness SLA)
+  11. gold_export           (Gold → Parquet + _MANIFEST.json + tar archive)
 """
 
 import json
@@ -37,7 +39,6 @@ from operators.dbt_operator import DbtRunOperator
 from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
 from operators.imdb_sensor import IMDbDataSensor
-from operators.quarantine_operator import QuarantineCheckOperator
 from operators.gold_export_operator import GoldExportOperator
 from operators.silver_export_operator import SilverExportOperator
 from operators.bronze_sensor import BronzeCompletionSensor
@@ -159,7 +160,10 @@ BRONZE_SCRIPT = "/opt/airflow/data-engineering/scripts/run_bronze.py"
 def _spawn_bronze(**context):
     """Spawn run_bronze.py as detached subprocess in new session."""
     import subprocess
-    log_path = "/tmp/bronze_runner.log"
+    # Log lives on the etl_temp volume (/opt/airflow/output/tmp) so it
+    # survives container restarts and is tailable from the host via
+    # `docker exec elyssa-airflow tail -f /opt/airflow/output/tmp/bronze_runner.log`
+    log_path = "/opt/airflow/output/tmp/bronze_runner.log"
     with open(log_path, "w") as lf:
         lf.write(f"[{datetime.now(timezone.utc).isoformat()}] Spawning run_bronze.py\n")
     proc = subprocess.Popen(
@@ -180,7 +184,11 @@ def _spawn_silver(**context):
     SilverDoneSensor polls Postgres for completion.
     """
     import subprocess
-    log_path = "/tmp/silver_etl.log"
+    # Log lives on the etl_temp volume (/opt/airflow/output/tmp in airflow,
+    # /opt/etl/tmp in etl-runner) so it survives container restarts and is
+    # tailable from both containers: e.g.
+    #   docker exec elyssa-etl-runner tail -f /opt/etl/tmp/silver_etl.log
+    log_path = "/opt/airflow/output/tmp/silver_etl.log"
     with open(log_path, "w") as lf:
         lf.write(f"[{datetime.now(timezone.utc).isoformat()}] Spawning silver ETL\n")
     proc = subprocess.Popen(
@@ -218,7 +226,18 @@ class SilverDoneSensor(BaseSensorOperator):
         populated = 0
         max_attempts = 480
         attempt = 0
+        # Shared etl_temp volume — same path as silver_operator's temp_root
+        failed_marker = "/opt/airflow/output/tmp/.silver.failed"
         while attempt < max_attempts:
+            if os.path.exists(failed_marker):
+                msg = f"Silver ETL failed (marker {failed_marker} present). Check /opt/airflow/output/tmp/silver_etl.log"
+                self.log.error(msg)
+                try:
+                    with open(failed_marker) as _f:
+                        self.log.error(f"Silver failure reason: {_f.read().strip()}")
+                except OSError:
+                    pass
+                raise RuntimeError(msg)
             try:
                 pg = psycopg2.connect(
                     host="postgres", port=5432,
@@ -309,15 +328,6 @@ with DAG(
     # ─── Bronze Ingestion Complete ────────────────────────────────────────
     bronze_done = EmptyOperator(task_id="bronze_ingestion_done")
 
-    # ─── Quarantine Check (post-bronze validation) ────────────────────────
-    quarantine_check = QuarantineCheckOperator(
-        task_id="quarantine_check",
-        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
-        jdbc_user="elyssa",
-        jdbc_password="elyssa_pg_2026",
-        fail_threshold=1000,
-    )
-
     # ─── Silver (detached subprocess in etl-runner) ──────────────────
     # Spawns silver_operator.py inside etl-runner and returns immediately.
     # SilverDoneSensor polls Postgres until all parent tables have rows.
@@ -389,13 +399,13 @@ with DAG(
     end = EmptyOperator(task_id="pipeline_end")
 
     # ─── DAG Structure ────────────────────────────────────────────────────
-    # Sensor → spawn bronze → wait for bronze → quarantine → silver → gold → dq → freshness → gold_export → end
+    # Sensor → spawn bronze → wait for bronze → silver → gold → dq → freshness → gold_export → end
     # run_bronze exits immediately (spawns detached subprocess).
     # wait_bronze polls .completed marker (subprocess runs independently).
     start >> imdb_sensor
 
     imdb_sensor >> run_bronze >> wait_bronze >> bronze_done
 
-    bronze_done >> quarantine_check >> silver_transform >> wait_silver
+    bronze_done >> silver_transform >> wait_silver
     wait_silver >> silver_export >> gold_dbt_run >> gold_dbt_test
     gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end

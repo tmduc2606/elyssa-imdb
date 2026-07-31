@@ -236,8 +236,14 @@ class SilverTransformOperator(BaseOperator):
                       message="Processing parent tables + 8 child normalization tables")
 
         # M1: Use file-backed DuckDB for automatic spill-to-disk
-        temp_root = "/opt/airflow/output/tmp/"
-        if not os.path.exists(temp_root):
+        # Prefer the dedicated etl_temp volume (/opt/etl/tmp in etl-runner,
+        # /opt/airflow/output/tmp in airflow) so the Silver lock, checkpoint
+        # markers, and subprocess log are shared across containers and survive
+        # container restarts. Falls back to /tmp otherwise.
+        temp_root = "/opt/etl/tmp"
+        if not os.path.isdir(temp_root):
+            temp_root = "/opt/airflow/output/tmp"
+        if not os.path.isdir(temp_root):
             temp_root = "/tmp/"
         duckdb_temp = os.path.join(temp_root, "duckdb_spill")
         csv_dir = os.path.join(temp_root, "csv_intermediates")
@@ -326,6 +332,16 @@ class SilverTransformOperator(BaseOperator):
                     skip_children = True
                     self.log.info(f"[CHECKPOINT] Children already completed (batch={row[1]}, at={row[2]}), skipping all Silver ETL")
         pg.commit()
+
+        # Clear stale failure marker from previous interrupted runs
+        _marker_failed = os.path.join(temp_root, ".silver.failed")
+        _marker_completed = os.path.join(temp_root, ".silver.completed")
+        try:
+            for _m in (_marker_failed, _marker_completed):
+                if os.path.exists(_m):
+                    os.remove(_m)
+        except OSError:
+            pass
 
         if skip_children:
             self.log.info("Silver ETL fully complete from prior checkpoint — nothing to do")
@@ -866,10 +882,20 @@ class SilverTransformOperator(BaseOperator):
                           status="complete", row_count=total_rows + child_rows,
                           duration_ms=elapsed,
                           message=f"{total_rows} parent + {child_rows} child rows")
+            try:
+                with open(_marker_completed, "w") as _mf:
+                    _mf.write(datetime.now(timezone.utc).isoformat())
+            except OSError:
+                pass
         except Exception as e:
             self.log.error(f"Silver ETL failed: {e}")
             log.log_error(stage="silver_transform", batch_id=batch_id,
                           error=f"Silver ETL failed: {e}")
+            try:
+                with open(_marker_failed, "w") as _mf:
+                    _mf.write(f"{e}\n")
+            except OSError:
+                pass
             try:
                 pg.rollback()
             except Exception:

@@ -109,7 +109,10 @@ This triggers the DAG via Airflow CLI and prints the tail command for live monit
 
 **Live log command (in separate terminal):**
 ```powershell
-docker exec elyssa-airflow tail -f /tmp/bronze_runner.log
+# Bronze subprocess log — lives on the shared etl_temp volume
+# (survives container restarts, tailable from either container)
+docker exec elyssa-airflow tail -f /opt/airflow/output/tmp/bronze_runner.log
+docker exec elyssa-etl-runner tail -f /opt/etl/tmp/bronze_runner.log   # same file
 ```
 
 **Direct execution (bypasses Airflow):**
@@ -173,20 +176,43 @@ docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.batch_metadata
 
 ## Layer 2: Silver ETL → PostgreSQL
 
-> **Concurrency note:** Silver ETL uses a file-based exclusive lock (`silver.lock`) to prevent concurrent runs from stepping on each other during `TRUNCATE CASCADE`. The lock auto-releases if the process crashes. If two runs collide, the second fails fast with `RuntimeError`.
+> **Concurrency note:** Silver ETL uses a file-based exclusive lock (`silver.lock`) to prevent concurrent runs from stepping on each other during `TRUNCATE CASCADE`. The lock auto-releases if the process crashes. If two runs collide, the second fails fast with `RuntimeError`. No PostgreSQL advisory lock is used — a blocked run would hide live progress for hours; fail-fast is the intended UX.
+>
+> **Failure detection:** on any exception the subprocess writes `.silver.failed` (next to `silver.lock`). `wait_silver` detects it within one poll cycle (30s) and fails the DAG immediately instead of polling for hours.
 
-**Live log via Airflow task log (recommended):**
+**Live progress (recommended — this is where the real ETL output goes):**
 ```powershell
-# Find the current DAG run ID
-docker exec elyssa-airflow airflow dags list-runs imdb_pipeline | Select-Object -First 5
-
-# Tail the Silver task log for that run
-docker exec elyssa-airflow sh -c "find /opt/airflow/logs -path '<run_id>' -name '*silver_transform*' -type f | head -1 | xargs cat"
+# Silver runs as a detached subprocess inside etl-runner.
+# stdout/stderr are streamed live to the shared etl_temp volume:
+docker exec elyssa-etl-runner tail -f /opt/etl/tmp/silver_etl.log
+# (same file visible from airflow at /opt/airflow/output/tmp/silver_etl.log)
 ```
 
-**Direct execution (only when no Airflow run is active):**
+**DAG/task state via Airflow 3.X CLI:**
 ```powershell
-docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py 2>&1
+# List DAG runs (newest first) to get the run_id
+docker exec elyssa-airflow airflow dags list-runs -d imdb_pipeline -o table
+
+# Show per-task state for a run (e.g. manual__2026-07-30T09:09:49.088628+00:00)
+docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_id> -o table
+
+# Tail a task's Airflow log (spawn + sensor messages only;
+# ETL progress lives in /opt/etl/tmp/silver_etl.log above)
+docker exec elyssa-airflow airflow tasks logs imdb_pipeline wait_silver <run_id> -f
+```
+
+**Direct execution (only when no Airflow run is active — file lock fails fast otherwise):**
+```powershell
+docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py 2>&1 | Tee-Object -FilePath docs/silver_live.log
+```
+
+**Check lock / failure markers:**
+```powershell
+# Lock holder PID (file exists only while a run is active)
+docker exec elyssa-etl-runner sh -c "cat /opt/etl/tmp/silver.lock 2>/dev/null || echo 'no lock — no Silver run active'"
+
+# Failure marker (written on crash; cleared on next run start)
+docker exec elyssa-etl-runner sh -c "cat /opt/etl/tmp/.silver.failed 2>/dev/null || echo 'no failure marker'"
 ```
 
 **Expected log pattern** (`[1/6]` parent tables, then `[1/8]` child normalization tables):
@@ -352,8 +378,9 @@ docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/run_bron
 
 # 3. Silver
 # Uses a file-based lock (silver.lock) to prevent concurrent runs. Direct execution
-# will fail fast if another Silver ETL is already running.
-docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py
+# will fail fast if another Silver ETL is already running (no PG advisory lock).
+# Capture output to docs/silver_live.log for offline inspection:
+docker exec elyssa-etl-runner python /opt/etl/data-engineering/orchestration/operators/silver_operator.py 2>&1 | Tee-Object -FilePath docs/silver_live.log
 
 # 4. Gold dbt
 docker exec elyssa-airflow dbt run --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold --target prod --full-refresh
@@ -379,10 +406,15 @@ Or via `pipeline-mode.ps1`:
 | You Want | Command |
 |----------|---------|
 | DAG sensor status | `docker compose -f docker/docker-compose.yml logs --tail 20 elyssa-airflow \| grep -i "sensor\|imdb_data\|source"` |
+| DAG runs (get run_id) | `docker exec elyssa-airflow airflow dags list-runs -d imdb_pipeline -o table` |
+| Task states for a run | `docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_id> -o table` |
+| Task Airflow log | `docker exec elyssa-airflow airflow tasks logs imdb_pipeline <task_id> <run_id>` |
 | RustFS S3 files | `docker exec elyssa-rustfs rc object list local/<bucket>` |
-| Bronze live log | `docker exec elyssa-airflow tail -f /tmp/bronze_runner.log` |
+| Bronze live log | `docker exec elyssa-airflow tail -f /opt/airflow/output/tmp/bronze_runner.log` |
 | Bronze completion | `docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.completed"` |
-| Silver live log | Airflow task log: `find /opt/airflow/logs -path '<run_id>' -name '*silver_transform*' -type f | head -1 | xargs cat` |
+| Silver live log | `docker exec elyssa-etl-runner tail -f /opt/etl/tmp/silver_etl.log` |
+| Silver lock holder | `docker exec elyssa-etl-runner sh -c "cat /opt/etl/tmp/silver.lock 2>/dev/null \|\| echo 'no lock'"` |
+| Silver failure marker | `docker exec elyssa-etl-runner sh -c "cat /opt/etl/tmp/.silver.failed 2>/dev/null \|\| echo 'no failure'"` |
 | Silver table rows | `docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT tablename, n_live_tup FROM pg_stat_user_tables WHERE schemaname='silver' ORDER BY tablename;"` |
 | Gold dbt live | stdout from `dbt run` / `dbt test` commands |
 | Gold export manifest | `docker exec elyssa-airflow python -c "import json; m=json.load(open('/opt/airflow/output/gold/_MANIFEST.json')); print(json.dumps(m,indent=2))"` |

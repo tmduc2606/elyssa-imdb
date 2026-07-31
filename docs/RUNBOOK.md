@@ -59,7 +59,7 @@ imdb_sensor detects files → run_bronze spawns subprocess (PID=XXXX)
 
 Follow actual bronze ingestion:
 ```powershell
-docker exec elyssa-airflow tail -f /tmp/bronze_runner.log
+docker exec elyssa-airflow tail -f /opt/airflow/output/tmp/bronze_runner.log
 ```
 Expected: 7 files processed sequentially (akas, basics, crew, episode, name.basics, principals, ratings).
 
@@ -97,9 +97,10 @@ docker compose -f docker/docker-compose.yml logs -f airflow | Select-String -Pat
 
 Watch actual etl-runner ETL progress:
 ```powershell
-docker exec elyssa-airflow tail -f /tmp/silver_etl.log
+docker exec elyssa-etl-runner tail -f /opt/etl/tmp/silver_etl.log
+# (same file visible from airflow: /opt/airflow/output/tmp/silver_etl.log)
 ```
-Expected: 6 parents processed first (title_basics, name_basics, title_rating, title_episode, title_principal, title_crew), then 8 child tables (genre, director, writer, profession, known_for_title, principal_char, akas, episode_relation). The sensor polls all 14 tables every 30 s (logs every 4th attempt, max 480).
+Expected: 6 parents processed first (title_basics, title_akas, title_episode, title_rating, title_principal, name_basics), then 8 child tables (title_genre, title_director, title_writer, title_akas_type, title_akas_attribute, title_principal_char, name_profession, name_known_for_title). The sensor polls all 14 tables every 30 s (logs every 4th attempt, max 480) and fails fast if the `.silver.failed` marker appears.
 
 Checkpoint — verify all 14 tables have rows:
 ```powershell
@@ -107,9 +108,9 @@ docker exec elyssa-airflow python -c "
 import psycopg2
 con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password='elyssa_pg_2026', dbname='elyssa_warehouse')
 cur = con.cursor()
-for t in ['title_basics','name_basics','title_rating','title_episode','title_principal','title_crew',
-          'title_genre','title_director','title_writer','name_profession','name_known_for_title',
-          'title_principal_char','title_akas','title_episode_relation']:
+for t in ['title_basics','title_akas','title_episode','title_rating','title_principal','name_basics',
+          'title_genre','title_director','title_writer','title_akas_type','title_akas_attribute',
+          'title_principal_char','name_profession','name_known_for_title']:
     cur.execute(f'SELECT count(*) FROM silver.{t}')
     cnt = cur.fetchone()[0]
     status = 'OK' if cnt > 0 else 'EMPTY'
