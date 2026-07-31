@@ -102,7 +102,7 @@ switch ($Action) {
         Wait-Healthy "elyssa-postgres"
         Wait-Healthy "elyssa-airflow"
         docker compose -f $COMPOSE_FILE ps
-        Write-OK "Pipeline stack ready. Check: http://localhost:8081"
+        Write-OK "Pipeline stack ready. Check: http://localhost:18081"
     }
     "stop" {
         Write-Step "Stopping pipeline stack..."

@@ -143,7 +143,7 @@ elyssa-imdb/
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Airflow | http://localhost:8081 | `admin` / generated password |
+| Airflow | http://localhost:18081 | `admin` / generated password |
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
 | RustFS S3 Console | http://localhost:9101 | — |
 | API | http://localhost:8000 | — |

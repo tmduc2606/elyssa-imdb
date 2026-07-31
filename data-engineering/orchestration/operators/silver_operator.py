@@ -455,10 +455,12 @@ class SilverTransformOperator(BaseOperator):
 
         # Tables that require NOT NULL columns — filter out rows where those
         # columns are NULL (IMDb source data quality issues, e.g. 88 rows in
-        # name.basics have no primaryName). These rows are skipped (quarantined
-        # implicitly) rather than failing the entire COPY.
+        # name.basics have no primaryName, 2 rows in title.episode have no
+        # parentTconst). These rows are skipped (quarantined implicitly)
+        # rather than failing the entire COPY.
         not_null_filters = {
             "name.basics": "primaryName",
+            "title.episode": "parentTconst",
         }
 
         _lock_fd = None

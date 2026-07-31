@@ -38,7 +38,7 @@ docker compose -f docker/docker-compose.yml build --no-cache airflow
 ### Phase 1 — Unpause & Trigger DAG
 
 ```powershell
-# Verify Airflow UI at http://localhost:8081 (admin / admin)
+# Verify Airflow UI at http://localhost:18081 (admin / admin)
 
 docker exec elyssa-airflow airflow dags unpause imdb_pipeline
 docker exec elyssa-airflow airflow dags trigger -r e2e_opt_$(Get-Date -Format 'yyyyMMddHHmmss') imdb_pipeline

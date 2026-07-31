@@ -95,6 +95,26 @@ def quarantine_record(pg_cursor, table, file_path, error, batch_id):
         log(f"  [WARN] Failed to log quarantine to PostgreSQL: {e}")
 
 
+def _s3_object_exists(bucket: str, key: str) -> bool:
+    """Cheap metadata-only check whether an object exists in RustFS."""
+    try:
+        import boto3
+        from botocore.config import Config
+        endpoint = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=os.environ.get("S3_ACCESS_KEY", "elyssa"),
+            aws_secret_access_key=os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026"),
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
+        client.head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception:
+        return False
+
+
 def ingest_table(conn, table, batch_id, pg):
     filename = SOURCE_FILES.get(table, f"{table}.tsv.gz")
     source_url = f"{SOURCE_DIR}{filename}"
@@ -103,15 +123,21 @@ def ingest_table(conn, table, batch_id, pg):
     marker_path = os.path.join(BRONZE_PATH, f".{table}.completed")
 
     # Checkpoint resume from marker file (avoids loading full Parquet for count)
+    # S3 copy is validated too: RustFS stores data container-locally, so a
+    # Docker cleanup can wipe s3://bronze/ while the bind-mounted local copy
+    # and marker survive. If the S3 object is missing, re-ingest both copies.
     if os.path.exists(marker_path) and os.path.exists(local_output):
-        try:
-            with open(marker_path, "r") as f:
-                marker = json.load(f)
-            existing_count = marker.get("rows", 0)
-            log(f"  CHECKPOINT {table}: {existing_count} rows already processed (marker found)")
-            return {"table": table, "rows": existing_count, "checkpoint": True}
-        except Exception:
-            pass  # Fall through to reprocess if marker is corrupt
+        if _s3_object_exists("bronze", f"{table}.parquet"):
+            try:
+                with open(marker_path, "r") as f:
+                    marker = json.load(f)
+                existing_count = marker.get("rows", 0)
+                log(f"  CHECKPOINT {table}: {existing_count} rows already processed (marker + S3 verified)")
+                return {"table": table, "rows": existing_count, "checkpoint": True}
+            except Exception:
+                pass  # Fall through to reprocess if marker is corrupt
+        else:
+            log(f"  CHECKPOINT {table}: local copy found but s3://bronze/{table}.parquet is MISSING — re-ingesting")
 
     # Row count via DuckDB from S3 (fast range request — no full download)
     try:

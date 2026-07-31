@@ -8,7 +8,7 @@
 | neo4j | elyssa-neo4j | elyssa-neo4j:latest | 7475→7474 HTTP, 7688→7687 Bolt | 2G heap + 4G pagecache | Graph DB for title/person relationships |
 | rustfs | elyssa-rustfs | elyssa-rustfs:latest | 9100→9000 S3, 9101→9001 Console | default | S3-compatible Bronze storage |
 | duckdb | elyssa-duckdb | elyssa-duckdb:latest | — | 2GB limit | Ephemeral analytics engine (on-demand) |
-| airflow | elyssa-airflow | elyssa-airflow:latest | 8081→8080 | — | DAG orchestrator (standalone mode) |
+| airflow | elyssa-airflow | elyssa-airflow:latest | 18081→8080 | — | DAG orchestrator (standalone mode) |
 
 **Network:** `elyssa-net` (bridge)
 **Volumes:** pg_data, neo4j_data, neo4j_logs, rustfs_data, airflow_data

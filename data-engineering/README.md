@@ -161,7 +161,7 @@ The admin password is pre-seeded as **`admin`** (both username and password).
 
 ```powershell
 # Open Airflow UI
-start http://localhost:8081
+start http://localhost:18081
 # Sign in as admin / admin
 ```
 
@@ -338,7 +338,7 @@ DELETE FROM pg_stat_activity WHERE state = 'idle in transaction' AND state_chang
 ## Service URLs
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Airflow UI | http://localhost:8081 | `admin` / auto-generated |
+| Airflow UI | http://localhost:18081 | `admin` / auto-generated |
 | PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
 | RustFS S3 API | http://localhost:9100 | `elyssa` / `elyssa_s3_2026` |
 | RustFS Console | http://localhost:9101 | — |
