@@ -120,20 +120,24 @@ docker exec elyssa-etl-runner tail -f /opt/etl/tmp/bronze_runner.log   # same fi
 docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/run_bronze.py
 ```
 
-**Expected log pattern** (~5-10 min for 7 tables, ~20M rows):
+**Expected log pattern** (~18 min for 7 tables, 211.9M rows on the full 2026-07-31 dump):
 ```
 [2026-07-30T...] === Bronze Ingestion Starting (S3-Centric) ===
 [2026-07-30T...]   title.basics written -> s3://bronze/title.basics.parquet
 [2026-07-30T...]   title.basics written -> /opt/airflow/output/bronze/title.basics.parquet
-[2026-07-30T...]   title.basics: 10187504 rows (sha256=abc...)
-[2026-07-30T...]   title.akas: 45450261 rows (sha256=def...)
+[2026-07-30T...]   title.basics: 12678890 rows (sha256=abc...)
+[2026-07-30T...]   title.akas: 58686380 rows (sha256=def...)
 ...
-[2026-07-30T...] === Bronze complete: 20658345 rows across 7 tables in 285.3s ===
+[2026-07-30T...] === Bronze complete: 211949844 rows across 7 tables in 1092.3s ===
 ```
+> Note: `title.basics` has 12.7M rows and `title.akas` 58.7M — IMDb TSV fields contain
+> literal `"` characters (e.g. `"Rome brûle" (Portrait de Shirley Clarke)`), so bronze
+> reads with `quote='' escape=''`. Any other config silently drops those rows.
 
-Or if checkpoint resume triggers:
+Or if checkpoint resume triggers (row counts verified against the marker — mismatch forces re-ingest):
 ```
-[2026-07-30T...]   CHECKPOINT title.basics: 10187504 rows already at /opt/airflow/output/bronze/title.basics.parquet
+[2026-07-30T...]   CHECKPOINT title.basics: 12678890 rows already processed (marker + S3 verified)
+[2026-07-30T...]   CHECKPOINT title.basics: row-count mismatch — S3=2228464 local=2228464 vs marker=12678890 — re-ingesting
 ```
 
 **Verify S3 (pipeline hot path):**
@@ -198,7 +202,9 @@ docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_i
 
 # Tail a task's Airflow log (spawn + sensor messages only;
 # ETL progress lives in /opt/etl/tmp/silver_etl.log above)
-docker exec elyssa-airflow airflow tasks logs imdb_pipeline wait_silver <run_id> -f
+# Airflow 3.3 removed `airflow tasks logs` — use the UI log viewer or the
+# shared-volume subprocess logs (paths below)
+docker exec elyssa-airflow airflow tasks state imdb_pipeline wait_silver <run_id>
 ```
 
 **Direct execution (only when no Airflow run is active — file lock fails fast otherwise):**
@@ -215,30 +221,33 @@ docker exec elyssa-etl-runner sh -c "cat /opt/etl/tmp/silver.lock 2>/dev/null ||
 docker exec elyssa-etl-runner sh -c "cat /opt/etl/tmp/.silver.failed 2>/dev/null || echo 'no failure marker'"
 ```
 
-**Expected log pattern** (`[1/6]` parent tables, then `[1/8]` child normalization tables):
+**Expected log pattern** (`[1/6]` parent tables, then `[1/8]` child normalization tables).
+Counts reflect the full 2026-07-31 dump (title.basics 12.7M, akas 58.7M, principals
+100.9M — see Bronze layer; the 2 episode orphan rows and 84 name.basics rows with NULL
+primaryName are filtered):
 ```
 {"timestamp": "...", "level": "INFO", "stage": "silver_transform", "status": "started", "message": "Processing parent tables + 8 child normalization tables"}
 Schema applied from /opt/etl/data-engineering/silver/schema.sql
 Truncated Silver child tables to clear partial/corrupted state
   [1/6] Starting title.basics -> silver.title_basics...
-  title.basics: 2228464 rows -> silver.title_basics
-  silver.title_basics: -1 expired, 2228464 inserted (SCD2)
-  silver.title_basics: 2228464 rows loaded
+  title.basics: 12678890 rows -> silver.title_basics
+  silver.title_basics: 2228464 expired, 12678890 inserted (SCD2)
+  silver.title_basics: 12678890 rows loaded
   [2/6] Starting title.akas -> silver.title_akas...
-  title.akas: 18769691 rows -> silver.title_akas
+  title.akas: 58686380 rows -> silver.title_akas
   ...
-[CHECKPOINT] parents_done saved (batch=20260730_..., parent_rows=20658345)
+[CHECKPOINT] parents_done saved (batch=20260730_..., rows=199754772)
   [1/8] Starting silver.title_genre...
   ...
-[CHECKPOINT] children_done saved (batch=20260730_..., parent_rows=20658345, child_rows=...)
-"status": "complete", "message": "20658345 parent + ... child rows"
+[CHECKPOINT] children_done saved (batch=20260730_..., parent_rows=199754772, child_rows=...)
+"status": "complete", "message": "199754772 parent + ... child rows"
 ```
 
 **Key behavior changes from previous version:**
 - No DuckDB temp tables are materialized for parent tables — `COPY` reads directly from `read_parquet()`
 - For child tables, a source temp table is materialized **only** when chunked processing is required (>5M rows); otherwise streams directly
 - `max_temp_directory_size` is capped at `1.25GB` to respect the Airflow container memory limit
-- Checkpoint resume uses marker files, not full Parquet row-count scans
+- Checkpoint resume verifies marker + S3/local Parquet **row counts** (not just object existence) — any mismatch forces a re-ingest
 
 **Verify PostgreSQL tables:**
 ```powershell
@@ -408,7 +417,8 @@ Or via `pipeline-mode.ps1`:
 | DAG sensor status | `docker compose -f docker/docker-compose.yml logs --tail 20 elyssa-airflow \| grep -i "sensor\|imdb_data\|source"` |
 | DAG runs (get run_id) | `docker exec elyssa-airflow airflow dags list-runs -d imdb_pipeline -o table` |
 | Task states for a run | `docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_id> -o table` |
-| Task Airflow log | `docker exec elyssa-airflow airflow tasks logs imdb_pipeline <task_id> <run_id>` |
+| Task state | `docker exec elyssa-airflow airflow tasks state imdb_pipeline <task_id> <run_id>` |
+| Task log (Airflow 3.3 has no `airflow tasks logs` — use UI) | open http://localhost:18081 → Runs → log |
 | RustFS S3 files | `docker exec elyssa-rustfs rc object list local/<bucket>` |
 | Bronze live log | `docker exec elyssa-airflow tail -f /opt/airflow/output/tmp/bronze_runner.log` |
 | Bronze completion | `docker exec elyssa-airflow sh -c "cat /opt/airflow/output/bronze/.completed"` |

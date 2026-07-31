@@ -180,9 +180,9 @@ docker exec elyssa-airflow airflow dags trigger -r <run_id> imdb_pipeline
 docker exec elyssa-airflow airflow dags list-runs -d imdb_pipeline [--output json]
 docker exec elyssa-airflow airflow dags delete imdb_pipeline
 
-# Task monitoring
+# Task monitoring (Airflow 3.3 — no `airflow tasks logs` CLI; use the UI log viewer)
 docker exec elyssa-airflow airflow tasks states-for-dag-run imdb_pipeline <run_id>
-docker exec elyssa-airflow airflow tasks logs imdb_pipeline <task_id> <exec_date>
+docker exec elyssa-airflow airflow tasks state imdb_pipeline <task_id> <run_id>
 docker exec elyssa-airflow airflow tasks list -d imdb_pipeline --state failed|success
 docker exec elyssa-airflow airflow tasks clear imdb_pipeline -t <task_id>
 
