@@ -112,7 +112,7 @@ def main() -> int:
     except Exception as e:
         _log(f"FATAL: {e}")
         _log(traceback.format_exc())
-        failed_marker.tock()
+        failed_marker.touch()
         return 1
     finally:
         try:
@@ -149,7 +149,7 @@ def main() -> int:
     except Exception as e:
         _log(f"FATAL: failed to create tar archive: {e}")
         _log(traceback.format_exc())
-        failed_marker.tock()
+        failed_marker.touch()
         return 1
 
     if row_counts.get("dim_title") is not None:

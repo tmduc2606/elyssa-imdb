@@ -186,6 +186,8 @@ data-engineering/scripts/*.parquet
 data-engineering/gold/target/
 data-engineering/gold/dbt_packages/
 data-engineering/gold/logs/
+# dbt run/test completion markers (written by dbt_runner.py / sensors)
+data-engineering/gold/.dbt.*
 
 # ─── OS / IDE ──────────────────────────────────────────────────────
 .DS_Store

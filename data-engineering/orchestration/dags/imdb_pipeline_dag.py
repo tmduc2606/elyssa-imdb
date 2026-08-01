@@ -10,11 +10,16 @@ Execution order:
    4. silver_transform      (spawn silver_operator.py in etl-runner)
    5. wait_silver           (poll PG tables + fail fast on .silver.failed marker)
    6. silver_export         (Silver → Parquet snapshot for DS benchmarking)
-   7. gold_dbt_run          (dbt run)
-   8. gold_dbt_test         (dbt test)
-   9. dq_checks             (null-rate, referential integrity, row-count, quarantine)
-  10. freshness_check       (check last_updated freshness SLA)
-  11. gold_export           (Gold → Parquet + _MANIFEST.json + tar archive)
+   7. wait_silver_export    (sensor polling .export.completed marker)
+   8. gold_dbt_run          (spawn dbt run)
+   9. wait_dbt_run          (sensor polling .dbt.run.completed marker)
+  10. gold_dbt_test         (spawn dbt test)
+  11. wait_dbt_test         (sensor polling .dbt.test.completed marker)
+  12. dq_checks             (null-rate, referential integrity, row-count, quarantine)
+  13. freshness_check       (check last_updated freshness SLA)
+  14. gold_export           (Gold → Parquet + _MANIFEST.json + tar archive)
+  15. wait_gold_export      (sensor polling gold .export.completed marker)
+  16. pipeline_end
 """
 
 import json
@@ -36,10 +41,12 @@ from airflow.sensors.base import BaseSensorOperator
 from pipeline_logger import get_logger
 
 from operators.dbt_operator import DbtRunOperator
+from operators.dbt_done_sensor import DbtDoneSensor
 from operators.dq_operator import DataQualityOperator
 from operators.freshness_operator import FreshnessCheckOperator
 from operators.imdb_sensor import IMDbDataSensor
 from operators.gold_export_operator import GoldExportOperator
+from operators.gold_export_sensor import GoldExportDoneSensor
 from operators.silver_export_operator import SilverExportOperator
 from operators.bronze_sensor import BronzeCompletionSensor
 from operators.silver_export_sensor import SilverExportDoneSensor
@@ -385,6 +392,27 @@ with DAG(
         dbt_target="prod",
     )
 
+    # ─── Gold completion sensors (spawners return immediately) ───────────
+    wait_dbt_run = DbtDoneSensor(
+        task_id="wait_dbt_run",
+        project_dir="/opt/airflow/data-engineering/gold",
+        suffix="run",
+        poke_interval=30,
+        timeout=28800,
+        mode="reschedule",
+        retries=0,
+    )
+
+    wait_dbt_test = DbtDoneSensor(
+        task_id="wait_dbt_test",
+        project_dir="/opt/airflow/data-engineering/gold",
+        suffix="test",
+        poke_interval=30,
+        timeout=28800,
+        mode="reschedule",
+        retries=0,
+    )
+
     # ─── Data Quality (halts on threshold violations) ─────────────────────
     dq_checks = DataQualityOperator(
         task_id="dq_checks",
@@ -412,16 +440,33 @@ with DAG(
         tar_path="/tmp/gold_marts.tar.gz",
     )
 
+    wait_gold_export = GoldExportDoneSensor(
+        task_id="wait_gold_export",
+        output_dir="/opt/airflow/output/gold/",
+        poke_interval=30,
+        timeout=28800,
+        mode="reschedule",
+        retries=0,
+    )
+
     end = EmptyOperator(task_id="pipeline_end")
 
     # ─── DAG Structure ────────────────────────────────────────────────────
     # Sensor → spawn bronze → wait for bronze → silver → gold → dq → freshness → gold_export → end
     # run_bronze exits immediately (spawns detached subprocess).
     # wait_bronze polls .completed marker (subprocess runs independently).
+    # All spawner tasks (bronze, silver, silver_export, dbt, gold_export) are
+    # followed by completion sensors — the detached subprocesses run outside
+    # Airflow's supervisor, and downstream tasks must not start until the
+    # actual work is done.
     start >> imdb_sensor
 
     imdb_sensor >> run_bronze >> wait_bronze >> bronze_done
 
     bronze_done >> silver_transform >> wait_silver
-    wait_silver >> silver_export >> wait_silver_export >> gold_dbt_run >> gold_dbt_test
-    gold_dbt_test >> dq_checks >> freshness_check >> gold_export >> end
+    wait_silver >> silver_export >> wait_silver_export
+
+    wait_silver_export >> gold_dbt_run >> wait_dbt_run
+    wait_dbt_run >> gold_dbt_test >> wait_dbt_test
+
+    wait_dbt_test >> dq_checks >> freshness_check >> gold_export >> wait_gold_export >> end

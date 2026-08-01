@@ -85,9 +85,12 @@ class DbtRunOperator(BaseOperator):
 
         try:
             # 2. Kill any stray dbt processes from previous runs
+            # Pattern excludes this task's own process and the dbt_runner.py
+            # spawner (cmdline contains "dbt_runner.py", not "dbt run/test").
             try:
                 result = subprocess.run(
-                    ["pgrep", "-f", "dbt"], capture_output=True, text=True, timeout=5
+                    ["pgrep", "-f", "dbt (run|test|deps|compile)"],
+                    capture_output=True, text=True, timeout=5
                 )
                 if result.stdout.strip():
                     pids = result.stdout.strip().split()

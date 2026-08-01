@@ -47,7 +47,12 @@ services:
         -c effective_io_concurrency=200
         -c log_min_duration_statement=1000
         -c timezone=UTC
-    shm_size: '64m'
+    # shm_size 64m is Docker's default and ENOSPCs PostgreSQL DSM segments
+    # ("could not resize shared memory segment ... No space left on device")
+    # during parallel hash joins (e.g. agg_actor_cooccurrence self-join).
+    # 1g tmpfs is demand-paged (no real RAM cost until used); belt-and-braces
+    # with dynamic_shared_memory_type=sysv in postgres/custom.conf.
+    shm_size: '1g'
     mem_limit: '2.5g'
     oom_score_adj: 500
     ports:

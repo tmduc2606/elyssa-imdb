@@ -85,10 +85,11 @@ def main() -> int:
         return 1
 
     try:
-        # Kill any stale dbt processes
+        # Kill any stale dbt processes (pattern excludes this runner itself:
+        # its own cmdline contains "dbt_runner.py", which would match "dbt")
         try:
             result = subprocess.run(
-                ["pgrep", "-f", "dbt"],
+                ["pgrep", "-f", "dbt (run|test|deps|compile)"],
                 capture_output=True,
                 text=True,
                 timeout=5,

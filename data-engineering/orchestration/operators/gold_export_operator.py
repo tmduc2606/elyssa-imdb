@@ -40,6 +40,7 @@ class GoldExportOperator(BaseOperator):
         pg_user="elyssa",
         pg_password_env="GOLD_EXPORT_PG_PASSWORD",
         output_dir="/opt/airflow/output/gold/",
+        tar_path="/tmp/gold_marts.tar.gz",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -49,6 +50,7 @@ class GoldExportOperator(BaseOperator):
         self.pg_user = pg_user
         self.pg_password_env = pg_password_env
         self.output_dir = output_dir
+        self.tar_path = tar_path
 
     def execute(self, context):
         Path(LOG_PATH).parent.mkdir(parents=True, exist_ok=True)

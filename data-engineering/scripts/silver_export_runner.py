@@ -29,7 +29,7 @@ from pathlib import Path
 import duckdb
 
 TABLES = [
-    "title_basics", "title_akas", "title_crew", "title_episode",
+    "title_basics", "title_akas", "title_episode",
     "title_principal", "title_rating", "name_basics",
     "title_genre", "title_director", "title_writer",
     "title_akas_type", "title_akas_attribute", "title_principal_char",
@@ -124,9 +124,6 @@ def main() -> int:
             conn.close()
         except Exception:
             pass
-
-    if row_counts.get("title_crew") is None and all(v is not None for k, v in row_counts.items() if k != "title_crew"):
-        _log("Note: title_crew does not exist in silver schema (children title_director/title_writer replace it)")
 
     running_marker.unlink(missing_ok=True)
     completed_marker.touch()
