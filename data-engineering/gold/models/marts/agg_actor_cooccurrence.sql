@@ -1,7 +1,18 @@
 {{ config(
-    materialized='table',
-    schema='gold'
+    materialized='table'
 ) }}
+
+WITH perf AS (
+    -- fact_performance is at (tconst, ordering, character) grain: the same
+    -- person can hold multiple actor/actress rows in one title (different
+    -- orderings, multi-character principals). Dedup to (tconst, nconst) so
+    -- the self-join yields exactly one row per actor pair per title.
+    SELECT DISTINCT
+        tconst,
+        nconst
+    FROM {{ ref('fact_performance') }}
+    WHERE category IN ('actor', 'actress')
+)
 
 SELECT
     a.nconst AS actor_a_nconst,
@@ -18,12 +29,10 @@ SELECT
         ORDER BY t.num_votes DESC NULLS LAST
     ) AS collaboration_rank,
     COUNT(*) OVER (PARTITION BY a.nconst, b.nconst) AS total_collaborations
-FROM {{ ref('fact_performance') }} a
-JOIN {{ ref('fact_performance') }} b
+FROM perf a
+JOIN perf b
     ON a.tconst = b.tconst
     AND a.nconst < b.nconst
-    AND a.category IN ('actor', 'actress')
-    AND b.category IN ('actor', 'actress')
 LEFT JOIN {{ ref('dim_title') }} t
     ON a.tconst = t.tconst
 LEFT JOIN {{ ref('dim_person') }} pa

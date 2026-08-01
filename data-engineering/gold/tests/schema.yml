@@ -133,3 +133,25 @@ models:
       - name: character_name
         tests: []
         description: "Character name — nullable, multiplies rows when present"
+
+  - name: agg_actor_cooccurrence
+    description: "Actor collaboration graph — one row per (actor_a, actor_b, shared_title), deduped to (tconst, nconst) grain before the fact_performance self-join (multi-character / multi-principal rows must not multiply pairs)."
+    columns:
+      - name: actor_a_nconst
+        tests: [not_null]
+        description: "First collaborator (natural key)"
+      - name: actor_b_nconst
+        tests: [not_null]
+        description: "Second collaborator (natural key)"
+      - name: shared_title
+        tests: [not_null]
+        description: "Title both actors appeared in (natural key)"
+      - name: total_collaborations
+        tests: []
+        description: "Distinct shared titles between the pair (window count)"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - actor_a_nconst
+            - actor_b_nconst
+            - shared_title
