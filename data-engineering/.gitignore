@@ -59,17 +59,13 @@ orchestration/plugins/
 # ─── Docs (track only portfolio docs) ────────────────────────────
 docs/*
 !docs/architecture_overview.md
-!docs/etl_pipeline.md
 !docs/schema_dictionary.md
-!docs/data_quality_tests.md
 !docs/disaster_recovery.md
 !docs/phase1_summary.md
-!docs/blueprint_database_ingestion.md
-!docs/pipeline-optimization-blueprint.md
-!docs/specialized_assessment.md
-!docs/de_optimization_plan.md
-!docs/assessment_results.json
-!docs/assessment_results_table.md
+!docs/rustfs_integration_plan.md
+!docs/export_guide.md
+!docs/DOCKER_CONFIG_SUMMARY.md
+!docs/final_pipeline_summary.md
 
 # ─── IDE & OS ────────────────────────────────────────────────────
 .vscode/

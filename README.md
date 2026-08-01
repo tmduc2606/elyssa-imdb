@@ -49,7 +49,7 @@ docs\SMOKE_TEST.md    # 30-minute walkthrough (no Docker needed)
 ### Full Pipeline (3 days, sequential)
 | Day | Phase | Est. Time | Output |
 |-----|-------|-----------|--------|
-| 1 | Data Engineering | 5–6 h | `marts/full/*.parquet` (6 Gold tables) |
+| 1 | Data Engineering | ~9 h active (see [Pipeline Performance](#pipeline-performance)) | `marts/full/*.parquet` (6 Gold tables ≈ 5.5 GB) |
 | 2 | Data Science | 3–4 h | `marts/processed/*` (trained models + artifacts) |
 | 3 | Web Application | 15 min | API :8000 |
 
@@ -59,7 +59,7 @@ The project is split into independent compose stacks to fit 16 GB RAM:
 
 | Stack | Compose File | Services | Est. RAM |
 |-------|-------------|----------|----------|
-| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, airflow, etl-runner, rustfs | ~8 GB |
+| **DE Infra + Orchestration** | `docker/docker-compose.yml` | postgres, rustfs, etl-runner, airflow | ~8 GB |
 | **Web Application** | `docker-compose.yml` (root) | api, redis | ~1 GB |
 | **MLOps** | `mlops/docker-compose.yml` | mlflow, prometheus, grafana + exporters | ~2-3 GB |
 
@@ -130,7 +130,7 @@ elyssa-imdb/
 │   ├── qa_catalog_template.md  58-check QA checklist
 │   └── plug_and_play_improvement_plan.md  Master improvement plan
 ├── docker/               # DE Dockerfiles + DE compose stack
-│   └── docker-compose.yml  DE pipeline (postgres, airflow, etl-runner)
+│   └── docker-compose.yml  DE pipeline (postgres, rustfs, etl-runner, airflow)
 ├── docker-compose.yml    # Web Application stack (api, redis) — separate from DE infra
 ├── Makefile              # Build targets (DE: -f docker/docker-compose.yml, Web: default)
 ├── .env.example          # Environment variable reference
@@ -171,13 +171,20 @@ memory pressure during image compilation on constrained hosts.
 
 ## Pipeline Performance
 
-| Stage | Duration (Full IMDb) |
+Measured on the final Phase 1 run (`manual_20260731160437`). That run doubled as the recovery
+vehicle for hotfixes, so wall-clock (~23 h including retries, sensor waits, and an overnight gap)
+is **not** representative — the table below shows per-layer active time. See
+[`data-engineering/docs/final_pipeline_summary.md`](data-engineering/docs/final_pipeline_summary.md) for the full post-mortem.
+
+| Stage | Duration (Full IMDb, measured) |
 |-------|---------------------|
-| Bronze Ingestion | ~47 min |
-| Silver ETL | ~3h 39min |
-| Gold dbt Run + Test | ~70 min |
-| Gold Export | ~15 min |
-| **DE Total** | **~5h 36min** |
+| Bronze Ingestion | ~20 min (7 tables, 212 M rows) |
+| Silver ETL | ~5 h 04 min |
+| Silver Export | ~41 min (14 tables) |
+| Gold dbt Run | ~1 h 55 min (12 models) |
+| Gold dbt Test | ~18 min (39 tests; 43 with grain tests ≈ 70 min) |
+| Gold Export | ~31 min (6 tables ≈ 5.5 GB) |
+| **DE active total** | **~9 h** |
 | DS Pipeline | ~3–4 hours |
 | Web API startup | ~30 s |
 
@@ -191,7 +198,8 @@ memory pressure during image compilation on constrained hosts.
 | [SMOKE_TEST.md](docs/SMOKE_TEST.md) | 30-minute smoke test with sample data |
 | [QA Catalog](docs/qa_catalog_template.md) | 58-check reusable validation checklist |
 | [Improvement Plan](docs/plug_and_play_improvement_plan.md) | Master improvement plan (17 gaps) |
-| `data-engineering/docs/` | DE schema dictionary, architecture, DR, DQ tests |
+| [DE Final Summary](data-engineering/docs/final_pipeline_summary.md) | Phase 1 post-mortem — layer timings, 27-commit hotfix log, cleanup record |
+| `data-engineering/docs/` | DE schema dictionary, architecture, export guide, DR |
 | `data-science/docs/` | DS implementation plan, API docs, assessment reports |
 | `mlops/checklists/` | MLOPS.1–15 audit sheets |
 
