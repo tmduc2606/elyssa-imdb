@@ -24,3 +24,11 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_title_rating_title_snapshot
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_fact_performance_actor_category
     ON gold.fact_performance(tconst, nconst)
     WHERE category IN ('actor', 'actress');
+
+-- Enable index-only scans: freshly built dbt tables have an empty visibility
+-- map (relallvisible = 0), so the planner rejects index-only scans (heap
+-- check per row). VACUUM (ANALYZE) populates it — observed to flip the
+-- agg_actor_cooccurrence DISTINCT from Seq Scan + HashAggregate (cost ~3.9M)
+-- to Index Only Scan + streaming Unique (cost ~1.1M).
+-- One-time: fact_performance is incremental, so the VM persists across runs.
+VACUUM (ANALYZE) gold.fact_performance;
