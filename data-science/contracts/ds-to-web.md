@@ -46,7 +46,7 @@ them via MLflow model registry and local artifact files.
 | Field | Value |
 |-------|-------|
 | Purpose | Stacking ensemble for genre classification |
-| Base learners | BiLSTM, GMU, Dummy |
+| Base learners | Dummy, Logistic Regression, GMU |
 | Meta-learner | Ridge classifier |
 | Primary metric | `macro_f1` |
 | Model file | `ensemble_models/stacking_meta_genre.pkl` |
@@ -167,7 +167,7 @@ with open("feature_columns.json") as f:
     schema = json.load(f)
 
 # schema = {
-#   "tabular_features": ["start_year", "runtime_minutes", ...],  # 26 columns (avg_genre_year_* removed)
+#   "tabular_features": ["start_year", "runtime_minutes", ...],  # incl. genre-year features (avg_rating_genre_year, avg_votes_genre_year, genre_year_title_count)
 #   "text_features": ["text_emb_0", ..., "text_emb_767"],         # 768 columns
 #   "total_features": 794
 # }
