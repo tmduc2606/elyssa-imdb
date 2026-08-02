@@ -266,7 +266,7 @@ docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
 2. **Airflow 3.3 deprecation warnings** — `EmptyOperator`/`PythonOperator` →
    `airflow.providers.standard.*`, `BaseSensorOperator` → `airflow.sdk.bases.sensor`. Cosmetic.
 3. **Redundant `gold_marts.tar.gz` (4.0 GB in container `/tmp`)** — the gold parquet dir is already
-   bind-mounted to the host (`data-science/marts/full/`); the tar adds ~13.6 min with no host
+   bind-mounted to the host (`data-science/marts/gold/`); the tar adds ~13.6 min with no host
    benefit. Candidate for removal in Phase 2.
 4. **dbt test runtime** — the 4 cooccurrence tests bring the suite to 43 tests; the uniqueness test
    alone ≈ 53 min, so a scheduled `gold_dbt_test` runs ~70 m. Consider `severity: warn` if runtime matters.
@@ -291,10 +291,10 @@ docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
 ## Outputs
 - `../data-science/marts/bronze/` — 7 raw Parquet + `.bronze.completed` marker
 - `../data-science/marts/silver/` — 14 Parquet + manifest
-- `../data-science/marts/full/` — 6 Gold marts (≈5.5 GB Snappy: dim_person 594 MB, dim_title 719 MB,
+- `../data-science/marts/gold/` — 6 Gold marts (≈5.5 GB Snappy: dim_person 594 MB, dim_title 719 MB,
   fact_episode 133 MB, fact_performance 2.18 GB, fact_title_principal 1.89 GB, fact_title_rating 16 MB)
-- `../data-science/marts/full/_MANIFEST.json` — Export audit trail with SHA256 checksums (batch `20260801_080318`)
-- `../data-science/marts/full/.export.completed` — gold_export completion marker
+- `../data-science/marts/gold/_MANIFEST.json` — Export audit trail with SHA256 checksums (batch `20260801_080318`)
+- `../data-science/marts/gold/.export.completed` — gold_export completion marker
 
 ## Service URLs
 | Service | URL | Credentials |

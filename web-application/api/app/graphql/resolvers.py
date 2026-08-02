@@ -75,7 +75,7 @@ def _get_con() -> duckdb.DuckDBPyConnection:
     gold_root = Path(settings.gold_marts_path)
     processed_dir = gold_root.parent / "processed"
 
-    # Load Gold marts from data-science/marts/full/
+    # Load Gold marts from data-science/marts/gold/
     for mart in GOLD_MARTS:
         parquet = gold_root / f"{mart}.parquet"
         if parquet.exists():

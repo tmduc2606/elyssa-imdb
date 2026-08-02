@@ -54,8 +54,8 @@
 | 20 | dim_title.primary_title not null | dbt test `not_null` | PASS | |
 | 21 | average_rating 0.0-10.0 | dbt test `accepted_range` | PASS | |
 | 22 | dbt run + test: 0 ERROR | `dbt test` exit code | 0 | |
-| 23 | Parquet export complete | `Get-ChildItem marts/full/*.parquet` | 6 files, > 0 MB each | |
-| 24 | Export manifest present | `Test-Path marts/full/_MANIFEST.json` | True | |
+| 23 | Parquet export complete | `Get-ChildItem marts/gold/*.parquet` | 6 files, > 0 MB each | |
+| 24 | Export manifest present | `Test-Path marts/gold/_MANIFEST.json` | True | |
 
 ---
 
@@ -131,7 +131,7 @@
 
 | # | Check | Criteria | Pass/Fail |
 |---|-------|----------|-----------|
-| 55 | DE→DS: Gold Parquet readable by DS notebooks | `python -c "import duckdb; con=duckdb.connect(); con.execute(\"SELECT COUNT(*) FROM 'marts/full/dim_title.parquet'\").fetchone()"` | |
+| 55 | DE→DS: Gold Parquet readable by DS notebooks | `python -c "import duckdb; con=duckdb.connect(); con.execute(\"SELECT COUNT(*) FROM 'marts/gold/dim_title.parquet'\").fetchone()"` | |
 | 56 | DE→Web: Gold marts queryable by API | curl graphql homepage query | |
 | 57 | DS→Web: Models loadable by ModelService | `python web-application/api/tests/test_contract.py` | |
 | 58 | Web→Frontend: API response matches contract | `pytest web-application/api/tests/test_contract.py -v` | |

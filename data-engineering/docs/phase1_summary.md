@@ -95,7 +95,7 @@ IMDb .tsv.gz (7 files)
 
 ## 4. Gold Export — Phase 2 Data Science
 
-Exported to `data-science/marts/full/` as Snappy-compressed Parquet:
+Exported to `data-science/marts/gold/` as Snappy-compressed Parquet:
 
 | File | Rows | Size |
 |------|------|------|
@@ -234,7 +234,7 @@ Exported to `data-science/marts/full/` as Snappy-compressed Parquet:
 - `data-engineering/scripts/neo4j_sync.py` — Cypher sync with retry logic
 
 ### Phase 2 Export
-- `data-science/marts/full/` — 6 Parquet files, 5.1 GB total
+- `data-science/marts/gold/` — 6 Parquet files, 5.1 GB total
 - `data-science/docs/PHASE2_DUKE_GUIDE.md` — Gold export strategy
 
 ---

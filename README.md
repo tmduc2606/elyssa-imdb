@@ -16,7 +16,7 @@ IMDb .tsv.gz
 │  Bronze (DuckDB) → Silver (PostgreSQL) → Gold (dbt) → Parquet    │
 │  └─ Airflow DAG: sensor → ingest → transform → dbt → export       │
 └────────────────────────┬────────────────────────────────────────────┘
-                         ↓  Gold Parquet marts (marts/full/)
+                         ↓  Gold Parquet marts (marts/gold/)
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Data Science      (data-science/)                                   │
 │  Features → GMU (genre) → CatBoost (rating) → Inference pipeline  │
@@ -49,7 +49,7 @@ docs\SMOKE_TEST.md    # 30-minute walkthrough (no Docker needed)
 ### Full Pipeline (3 days, sequential)
 | Day | Phase | Est. Time | Output |
 |-----|-------|-----------|--------|
-| 1 | Data Engineering | ~9 h active (see [Pipeline Performance](#pipeline-performance)) | `marts/full/*.parquet` (6 Gold tables ≈ 5.5 GB) |
+| 1 | Data Engineering | ~9 h active (see [Pipeline Performance](#pipeline-performance)) | `marts/gold/*.parquet` (6 Gold tables ≈ 5.5 GB) |
 | 2 | Data Science | 3–4 h | `marts/processed/*` (trained models + artifacts) |
 | 3 | Web Application | 15 min | API :8000 |
 
@@ -116,7 +116,7 @@ elyssa-imdb/
 │   ├── src/              Importable Python modules (loader, features, models, eval, inference)
 │   ├── scripts/          Pipeline runner, contract validation, sample data generator
 │   ├── notebooks/        Exploratory notebooks (EDA, FE, Modeling, Analytics)
-│   └── marts/            Gold Parquet (full/) + ML artifacts (processed/)
+│   └── marts/            Gold Parquet (gold/) + ML artifacts (processed/)
 ├── web-application/      # Web layer — API gateway + React SPA
 │   ├── api/              FastAPI + GraphQL backend
 │   └── client/           React 19 SPA (Vite, TypeScript, Tailwind)

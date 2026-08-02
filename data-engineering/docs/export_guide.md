@@ -2,7 +2,7 @@
 
 ## Overview
 
-Exports 6 Gold Parquet files from PostgreSQL to `data-science/marts/full/` for Data Science consumption.
+Exports 6 Gold Parquet files from PostgreSQL to `data-science/marts/gold/` for Data Science consumption.
 
 ## Tables Exported
 
@@ -42,7 +42,7 @@ docker exec elyssa-airflow sh -c "cd /opt/airflow/output/gold && tar -cf /tmp/go
 docker cp elyssa-airflow:/tmp/gold_marts.tar "$PWD/tmp_gold_marts.tar"
 
 # 4. Extract to marts directory
-tar -xf "$PWD/tmp_gold_marts.tar" -C "$PWD/data-science/marts/full/"
+tar -xf "$PWD/tmp_gold_marts.tar" -C "$PWD/data-science/marts/gold/"
 
 # 5. Clean up
 rm -f "$PWD/tmp_gold_marts.tar"
@@ -53,13 +53,13 @@ docker exec elyssa-airflow rm /tmp/gold_marts.tar
 
 ```bash
 # Check row counts
-python -c "import json; d=json.load(open('data-science/marts/full/_MANIFEST.json')); print(json.dumps(d['row_counts'], indent=2))"
+python -c "import json; d=json.load(open('data-science/marts/gold/_MANIFEST.json')); print(json.dumps(d['row_counts'], indent=2))"
 
 # Verify Parquet files
 python -c "
 import pyarrow.parquet as pq
 for t in ['dim_person','dim_title','fact_episode','fact_performance','fact_title_principal','fact_title_rating']:
-    r = pq.read_metadata(f'data-science/marts/full/{t}.parquet')
+    r = pq.read_metadata(f'data-science/marts/gold/{t}.parquet')
     print(f'{t}: {r.num_rows:,} rows, {r.num_columns} cols')
 "
 ```

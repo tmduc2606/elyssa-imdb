@@ -175,7 +175,7 @@ services:
       - ../data-engineering/orchestration/dags:/opt/airflow/dags:ro
       - ../data-engineering/orchestration/operators:/opt/airflow/operators:rw
       - etl_temp:/opt/airflow/output/tmp:rw
-      - ../data-science/marts/full:/opt/airflow/output/gold:rw
+      - ../data-science/marts/gold:/opt/airflow/output/gold:rw
       - ../data-science/marts/bronze:/opt/airflow/output/bronze:rw
       - ../data-science/marts/silver:/opt/airflow/output/silver:rw
       - /var/run/docker.sock:/var/run/docker.sock

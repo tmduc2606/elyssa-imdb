@@ -69,7 +69,7 @@ marts/silver/*.parquet  (bind mount, DS benchmarking)
 Gold PostgreSQL (star-schema, 6 marts)
        │
        ▼  gold_export → DuckDB postgres_scanner
-marts/full/*.parquet  (bind mount, DS consumption)
+marts/gold/*.parquet  (bind mount, DS consumption)
 ```
 
 ## SCD2 Logic

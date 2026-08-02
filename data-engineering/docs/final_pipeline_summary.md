@@ -42,7 +42,7 @@ cleanup record, and final module state.
 | **Freshness** (SLA 24 h) | freshness task log | 07:44:53 | 07:45:44 | ~51 s | 5/5 PASS (last updated 07-31 09:25:20, within SLA); 1 cosmetic ERROR (title_director — see §6.1) |
 | **Gold export** (6 tables → parquet + manifest + tar) | `gold_export.log` | 07:45:47 | 08:16:53 | **~31 m** | dim_person 15,534,075 (82 s); dim_title 12,402,664 (149 s); fact_episode 9,801,226 (42 s); fact_performance 100,923,234 (368 s); fact_title_principal 100,923,228 (404 s); fact_title_rating 1,700,838 (4 s); `_MANIFEST.json` (batch `20260801_080318`); tar.gz 4,029.4 MB (13.6 m); `.export.completed` written |
 
-**Gold parquet deliverables — verified on host** (`data-science/marts/full/`, bind mount `docker/docker-compose.yml:178`):
+**Gold parquet deliverables — verified on host** (`data-science/marts/gold/`, bind mount `docker/docker-compose.yml:178`):
 
 | File | Size (host) |
 |---|---|
@@ -142,7 +142,7 @@ cleanup record, and final module state.
    `airflow.providers.standard.*`, `BaseSensorOperator` → `airflow.sdk.bases.sensor` (DAG lines
    32–39, sensors). Cosmetic.
 3. **Redundant `gold_marts.tar.gz` (4.0 GB in container `/tmp`)** — the gold parquet dir is
-   bind-mounted to the host (`data-science/marts/full/`), so the tar adds ~13.6 min with no host
+   bind-mounted to the host (`data-science/marts/gold/`), so the tar adds ~13.6 min with no host
    benefit. Candidate for removal in Phase 2.
 4. **RAM during run: not captured** — no Docker stats/monitoring was active during the run
    (containers were down at analysis time). Not reported.
@@ -167,7 +167,7 @@ cleanup record, and final module state.
 | Module | Status |
 |---|---|
 | `data-engineering/` | bronze (7 tables, quote-safe COPY), silver (14 tables + 3 governance, file-lock, SCD2), gold (dbt: 12 models, 43 tests, 7 composite indexes, VACUUM-optimized index-only scans), dq (7 checks + GX), orchestration (DAG + detached-subprocess spawners/sensors), scripts, docs (incl. this report) |
-| `data-science/` | Gold parquets delivered at `marts/full/` (≈5.5 GB, 6 tables + manifest) + `marts/bronze/` (7 parquet + markers), `marts/silver/` (14 parquet + manifest); `notebooks/models/` and `figures/` dirs present |
+| `data-science/` | Gold parquets delivered at `marts/gold/` (≈5.5 GB, 6 tables + manifest) + `marts/bronze/` (7 parquet + markers), `marts/silver/` (14 parquet + manifest); `notebooks/models/` and `figures/` dirs present |
 | `docker/` | compose + 4 images intact; `elyssa-postgres` (healthy, 54321), `elyssa-etl-runner`, `elyssa-rustfs` up; `elyssa-airflow` in "Created" (not started) |
 | `docs/` (repo root) | plan, runbook, smoke test, QA catalog preserved |
 | `src/`, `gate0/` | Not part of this repo layout (module map per root `AGENTS.md`) |

@@ -349,7 +349,7 @@ docker exec elyssa-airflow ls -lh /opt/airflow/output/gold/*.parquet
 docker exec elyssa-airflow python -c "import json; m=json.load(open('/opt/airflow/output/gold/_MANIFEST.json')); print(json.dumps(m, indent=2))"
 
 # Check bind mount (DS consumption path)
-ls -lh data-science/marts/full/*.parquet
+ls -lh data-science/marts/gold/*.parquet
 
 # Count rows in exported parquets via DuckDB
 docker exec elyssa-airflow python -c "
@@ -372,7 +372,7 @@ for t in ['dim_person','dim_title','fact_episode','fact_performance','fact_title
 | **Bronze** | `s3://imdb-source/` | `s3://bronze/` + local bind mount | Silver, DS notebooks | Yes (checkpoint resume) |
 | **Silver** | `s3://bronze/` | PostgreSQL `silver.*` | Gold (dbt) | Yes (checkpoint resume + file lock serializes runs) |
 | **Gold dbt** | `silver.*` | `gold.*` (PostgreSQL) | Gold Export | Yes (full-refresh) |
-| **Gold Export** | `gold.*` (PostgreSQL) | `data-science/marts/full/*.parquet` | DS Feature Eng, Web API | Yes (overwrites) |
+| **Gold Export** | `gold.*` (PostgreSQL) | `data-science/marts/gold/*.parquet` | DS Feature Eng, Web API | Yes (overwrites) |
 
 ---
 

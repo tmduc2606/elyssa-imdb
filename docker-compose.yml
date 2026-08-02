@@ -27,7 +27,7 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     environment:
-      ELYSSA_GOLD_MARTS_PATH: /data/marts/full
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/gold
       ELYSSA_MODEL_ARTIFACTS_PATH: /data/marts/processed
       ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
       ELYSSA_DEBUG: "false"
@@ -37,7 +37,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data-science/marts/full:/data/marts/full:ro
+      - ./data-science/marts/gold:/data/marts/gold:ro
       - ./data-science/marts/processed:/data/marts/processed:ro
       - api_data:/data
     depends_on:

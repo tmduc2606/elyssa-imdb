@@ -32,7 +32,7 @@
 
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| 6 Gold Parquet exports delivered | ✅ | `data-science/marts/full/` has all 6 files |
+| 6 Gold Parquet exports delivered | ✅ | `data-science/marts/gold/` has all 6 files |
 | Snappy compression | ✅ | Defined in contract §Format |
 | Consistent column names | ✅ | Schemas match between gold_schema.md and gold-to-ds.md |
 | `genre_list` as comma-separated, trimmed | ✅ | `dim_title.genre_list` is `STRING_AGG` in dbt |
@@ -67,9 +67,9 @@ con.execute("""
 | 6 Gold marts available for API | ✅ | Loaded via DuckDB in `web-application/api/app/graphql/` |
 | Schema stability | ✅ | Contracts frozen, column mapping defined |
 | `genre_list` as `genres` array | ⚠️ **Inconsistency** | Gold stores as comma-separated TEXT; API expects array |
-| Parquet location | ⚠️ **Gap** | API reads from `data-science/marts/processed/` — but DE exports to `data-science/marts/full/` |
+| Parquet location | ⚠️ **Gap** | API reads from `data-science/marts/processed/` — but DE exports to `data-science/marts/gold/` |
 
-**Gap G2:** Path mismatch. DE writes to `marts/full/` and `marts/dev/` (sampled). Web application reads from `marts/processed/`. These are **not the same directory**. A user who runs only DE + Web will hit missing file errors.
+**Gap G2:** Path mismatch. DE writes to `marts/gold/` and `marts/dev/` (sampled). Web application reads from `marts/processed/`. These are **not the same directory**. A user who runs only DE + Web will hit missing file errors.
 
 **Severity:** HIGH  
 **Fix:** Standardise export paths. Add an explicit symlink or config-based path resolution:
@@ -77,7 +77,7 @@ con.execute("""
 ```yaml
 # data-science/config/settings.yaml
 marts:
-  full: "marts/full/"
+  full: "marts/gold/"
   dev: "marts/dev/"
   processed: "marts/processed/"   # DS writes processed artifacts here
 ```
@@ -264,7 +264,7 @@ from sklearn.metrics import mean_squared_error
 |-------------|--------|----------|
 | Automated export of 6 Gold marts to Parquet | ❌ **Missing** | DAG ends at `freshness_check >> end` — no export task exists (see `imdb_pipeline_dag.py:203`) |
 | Export script exists | ✅ | `data-engineering/scripts/export_marts.py` |
-| Script writes to correct target path | ❌ **Wrong path** | Hardcoded to `/opt/airflow/data-engineering/scripts/` (inside container) instead of `data-science/marts/full/` |
+| Script writes to correct target path | ❌ **Wrong path** | Hardcoded to `/opt/airflow/data-engineering/scripts/` (inside container) instead of `data-science/marts/gold/` |
 | Script handles credentials securely | ❌ **Hardcoded password** | `elyssa_pg_2026` in plain text in `export_marts.py` |
 | Export exposed via Makefile | ❌ **Missing** | No `make export` target |
 | DS-side export script | ✅ | `data-science/scripts/export_marts.py` (reads from local DuckDB, not PostgreSQL) |
@@ -340,20 +340,20 @@ Or, simpler: write exports directly to `data-engineering/` so they appear on the
 # In gold_export_operator.py
 output_dir = "/opt/airflow/data-engineering/scripts/exports/"
 ```
-Then add a Makefile target that copies them to `data-science/marts/full/`:
+Then add a Makefile target that copies them to `data-science/marts/gold/`:
 ```makefile
 .PHONY: export
 export:
 	docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_marts.py
-	robocopy data-engineering/scripts/exports/ data-science/marts/full/ *.parquet /MOVE
+	robocopy data-engineering/scripts/exports/ data-science/marts/gold/ *.parquet /MOVE
 ```
 
-**Best approach:** Write directly to `/opt/airflow/output/gold/` (dedicated volume mount target) and mount `./data-science/marts/full/` to that path in docker-compose. This way exports appear immediately in the DS-expected location:
+**Best approach:** Write directly to `/opt/airflow/output/gold/` (dedicated volume mount target) and mount `./data-science/marts/gold/` to that path in docker-compose. This way exports appear immediately in the DS-expected location:
 
 ```yaml
 # docker-compose.yml — airflow service
 volumes:
-  - ./data-science/marts/full:/opt/airflow/output/gold:rw
+  - ./data-science/marts/gold:/opt/airflow/output/gold:rw
 ```
 
 **(c) Remove hardcoded credentials** — read from environment variable `POSTGRES_PASSWORD` or Airflow connection:
@@ -382,14 +382,14 @@ def test_error_format_on_404():
 | ID | Gap | Modules | Severity | Suggested Hotfix |
 |----|-----|---------|----------|-----------------|
 | **G1** | `runtime_minutes > 0` not enforced on movie export | DE → DS | MEDIUM | Add WHERE filter to gold_export.py |
-| **G2** | Path mismatch: `marts/full/` vs `marts/processed/` | DE → Web | **HIGH** | Standardise paths; update compose volume mount |
+| **G2** | Path mismatch: `marts/gold/` vs `marts/processed/` | DE → Web | **HIGH** | Standardise paths; update compose volume mount |
 | **G3** | MLflow server absent from root docker-compose | DS → Web | **HIGH** | Add MLflow to root compose OR implement disk-based fallback |
 | **G4** | Rate limiting / error format not verified across all endpoints | Web internal | MEDIUM | Add contract conformance tests |
 | **G5** | No pre-packaged sample dataset | All | **HIGH** | See §2.4 Pre-packaged Artifacts |
 | **G6** | No single-command "full pipeline" script | All | MEDIUM | See §2.2 Execute Script |
 | **G7** | DE `README.md` missing entirely | DE | LOW | Create `data-engineering/README.md` |
 | **G8** | DS `README.md` references wrong contract name (`ds-to-swe.md` not `ds-to-web.md`) | DS | LOW | Update reference in DS README |
-| **G9** | Gold→Parquet export not automated; wrong output path; hardcoded credentials | DE → DS/Web | **HIGH** | Add `gold_export` DAG task; fix path to `marts/full/`; credentials via env var; add `Makefile` target |
+| **G9** | Gold→Parquet export not automated; wrong output path; hardcoded credentials | DE → DS/Web | **HIGH** | Add `gold_export` DAG task; fix path to `marts/gold/`; credentials via env var; add `Makefile` target |
 | **G10** | DS `run_pipeline.py` — all 4 stage functions are stubs (only `logger.info()`), pipeline does nothing | DS internal | **HIGH** | Implement actual stage logic or wire notebook execution; stub causes false-positive "success" |
 | **G11** | DS inference pipeline uses `torch.zeros()` as text embedding instead of real DistilBERT; ignores fitted preprocessor | DS → Web | **HIGH** | Replace zero-tensor with actual text embedding call; apply `ColumnTransformer` from `preprocessor.joblib` |
 | **G12** | `src/evaluation/temporal.py:41` uses `mean_squared_error` without importing it — `NameError` at runtime | DS internal | **HIGH** | Add `from sklearn.metrics import mean_squared_error` to `temporal.py` |
@@ -413,9 +413,9 @@ def test_error_format_on_404():
    - **Severity:** LOW (acceptable for sequential execution plan — see §2)
    - **Fix:** Add a `Makefile` target that chains the three phases.
 
-4. **Export script not wired into any automation path**: `data-engineering/scripts/export_marts.py` exists but is orphaned — not called by Airflow, not exposed by Makefile, not scheduled. The hardcoded output path `/opt/airflow/data-engineering/scripts/` conflicts with where DS and Web expect the Parquet files (`data-science/marts/full/`).
+4. **Export script not wired into any automation path**: `data-engineering/scripts/export_marts.py` exists but is orphaned — not called by Airflow, not exposed by Makefile, not scheduled. The hardcoded output path `/opt/airflow/data-engineering/scripts/` conflicts with where DS and Web expect the Parquet files (`data-science/marts/gold/`).
    - **Severity:** HIGH (blocks DE→DS handoff after pipeline completion)
-   - **Fix:** Add `gold_export` DAG task (see G9 fix above); add `make export` target; fix output path to `data-science/marts/full/`.
+   - **Fix:** Add `gold_export` DAG task (see G9 fix above); add `make export` target; fix output path to `data-science/marts/gold/`.
 
 5. **DS `run_pipeline.py` is a no-op**: The DS pipeline entry point (`python scripts/run_pipeline.py --stage all`) does nothing. New users who follow the DS README will believe the pipeline ran successfully but get zero outputs.
    - **Severity:** HIGH (complete failure of the advertised user workflow)
@@ -482,9 +482,9 @@ def test_error_format_on_404():
 │   ├── Gold dbt run + test (70 min)                                           │
 │   ├── Gold export (15 min) ← NEW automated DAG task                          │
 │   │   └── DuckDB postgres_scanner → 6 Snappy Parquet files                   │
-│   │   └── Writes to /opt/airflow/output/gold/ (mounted to marts/full/)       │
+│   │   └── Writes to /opt/airflow/output/gold/ (mounted to marts/gold/)       │
 │   │   └── Writes _MANIFEST.json with batch_id + row counts                   │
-│   CHECKPOINT: data-science/marts/full/*.parquet (+ _MANIFEST.json)           │
+│   CHECKPOINT: data-science/marts/gold/*.parquet (+ _MANIFEST.json)           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ PHASE 2: Data Science — ML Pipeline (~3-4 hours)                             │
 │   ├── EDA notebook (30 min)                                                  │
@@ -555,7 +555,7 @@ docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse -c "SELECT table_
 
 # 4b: Verify Parquet exports landed in the correct directory
 Write-Host "=== Step 4b: Verify Parquet exports ===" -ForegroundColor Cyan
-Get-ChildItem data-science/marts/full/*.parquet | Select-Object Name, Length
+Get-ChildItem data-science/marts/gold/*.parquet | Select-Object Name, Length
 # Expect: 6 .parquet files + _MANIFEST.json
 # dim_title.parquet (~642 MB), dim_person.parquet (~688 MB),
 # fact_title_principal.parquet (~1.88 GB), fact_performance.parquet (~1.88 GB),
@@ -563,7 +563,7 @@ Get-ChildItem data-science/marts/full/*.parquet | Select-Object Name, Length
 
 # 4c: Check manifest
 Write-Host "=== Step 4c: Export manifest ===" -ForegroundColor Cyan
-Get-Content data-science/marts/full/_MANIFEST.json | python -c "import sys,json; m=json.load(sys.stdin); print(f'Batch: {m[\"batch_id\"]}'); [print(f'  {t}: {r:,} rows') for t,r in m['row_counts'].items()]"
+Get-Content data-science/marts/gold/_MANIFEST.json | python -c "import sys,json; m=json.load(sys.stdin); print(f'Batch: {m[\"batch_id\"]}'); [print(f'  {t}: {r:,} rows') for t,r in m['row_counts'].items()]"
 
 # 4d: If the gold_export task did not run (e.g. older pipeline), export manually:
 Write-Host "  Alternative: manual export via Makefile target" -ForegroundColor Yellow
@@ -575,7 +575,7 @@ Write-Host "  make export"
 
 ```powershell
 # === PHASE 2: DS Pipeline ===
-# Prerequisite: Phase 1 completed, Parquet files in data-science/marts/full/
+# Prerequisite: Phase 1 completed, Parquet files in data-science/marts/gold/
 
 Write-Host "=== Phase 2: Data Science Pipeline ===" -ForegroundColor Cyan
 cd data-science
@@ -665,7 +665,7 @@ data-science/
 │   │   ├── scaler.joblib
 │   │   ├── genre_list_mlb.joblib
 │   │   └── model_inventory.json
-│   ├── full/                           (generated by DE pipeline)
+│   ├── gold/                           (generated by DE pipeline)
 │   └── processed/                      (generated by DS pipeline)
 ```
 
@@ -713,8 +713,8 @@ Verify the entire Elyssa stack works end-to-end without downloading IMDb.
 ## Steps
 
 ```powershell
-# 1. Symlink sample data as full data
-New-Item -ItemType Junction -Path data-science\marts\full -Target data-science\marts\sample
+# 1. Symlink sample data as gold data
+New-Item -ItemType Junction -Path data-science\marts\gold -Target data-science\marts\sample
 New-Item -ItemType Junction -Path data-science\marts\processed -Target data-science\marts\sample_processed
 
 # 2. Start API + Frontend (see Phase 3 above)
@@ -733,7 +733,7 @@ New-Item -ItemType Junction -Path data-science\marts\processed -Target data-scie
 
 | Phase | Checkpoint | Format | Size | Resume |
 |-------|-----------|--------|------|--------|
-| After DE | `marts/full/*.parquet` | Snappy Parquet | ~5.1 GB | Skip Docker DE; go straight to DS |
+| After DE | `marts/gold/*.parquet` | Snappy Parquet | ~5.1 GB | Skip Docker DE; go straight to DS |
 | After DS | `marts/processed/*` | Mixed (`.pt`, `.cbm`, `.joblib`, `.json`, `.npy`) | ~200 MB | Skip DS; start Web |
 | After Web | Server running on :8000 + :5173 | — | — | Smoke test only |
 
@@ -744,12 +744,12 @@ from pathlib import Path
 
 def get_pipeline_state():
     state = {"de_complete": False, "ds_complete": False}
-    full_dir = Path("data-science/marts/full")
+    gold_dir = Path("data-science/marts/gold")
     processed_dir = Path("data-science/marts/processed")
-    required_full = ["dim_title.parquet", "dim_person.parquet", "fact_title_principal.parquet"]
+    required_gold = ["dim_title.parquet", "dim_person.parquet", "fact_title_principal.parquet"]
     required_processed = ["gmu_genre_best.pt", "catboost_rating_model.cbm", "feature_columns.json"]
 
-    if all((full_dir / f).exists() for f in required_full):
+    if all((gold_dir / f).exists() for f in required_gold):
         state["de_complete"] = True
     if all((processed_dir / f).exists() for f in required_processed):
         state["ds_complete"] = True
@@ -901,7 +901,7 @@ docker builder prune -f && docker compose up -d --build
 | `docs/` | Schema dictionary, architecture, tests |
 
 ## Output
-- `data-science/marts/full/*.parquet` (6 Gold marts)
+- `data-science/marts/gold/*.parquet` (6 Gold marts)
 
 ## Data Quality
 See [docs/data_quality_tests.md](docs/data_quality_tests.md).
@@ -944,7 +944,7 @@ python scripts/validate_contracts.py
 
 ```powershell
 # Use pre-packaged sample data
-New-Item -ItemType Junction -Path marts\full -Target marts\sample
+New-Item -ItemType Junction -Path marts\gold -Target marts\sample
 python scripts/run_pipeline.py --stage all --sample
 ```
 
@@ -959,7 +959,7 @@ python scripts/run_pipeline.py --stage all --sample
 
 ## Upstream Dependency
 
-Gold Parquet marts from `data-engineering/` at `marts/full/`.
+Gold Parquet marts from `data-engineering/` at `marts/gold/`.
 
 ## Downstream Consumer
 
@@ -980,7 +980,7 @@ if (-not (Test-Path "../data-science/marts/processed/feature_columns.json")) {
     Write-Error "DS artifacts missing — run data-science pipeline first"
     exit 1
 }
-if (-not (Test-Path "../data-science/marts/full/dim_title.parquet")) {
+if (-not (Test-Path "../data-science/marts/gold/dim_title.parquet")) {
     Write-Error "Gold marts missing — run data-engineering pipeline first"
     exit 1
 }
@@ -1085,7 +1085,7 @@ The template below is designed to be reused across all pipeline runs. It can be 
 | 20 | dim_title.primary_title not null | dbt test `not_null` | PASS | |
 | 21 | average_rating 0.0-10.0 | dbt test `accepted_range` | PASS | |
 | 22 | dbt run + test: 0 ERROR | `dbt test` exit code | 0 | |
-| 23 | Parquet export complete | `Get-ChildItem marts/full/*.parquet` | 6 files, > 0 MB each | |
+| 23 | Parquet export complete | `Get-ChildItem marts/gold/*.parquet` | 6 files, > 0 MB each | |
 
 ---
 
@@ -1162,7 +1162,7 @@ The template below is designed to be reused across all pipeline runs. It can be 
 
 | # | Check | Criteria | Pass/Fail |
 |---|-------|----------|-----------|
-| 55 | DE→DS: Gold Parquet readable by DS notebooks | `python -c "import duckdb; con=duckdb.connect(); con.execute(\"SELECT COUNT(*) FROM 'marts/full/dim_title.parquet'\").fetchone()"` | |
+| 55 | DE→DS: Gold Parquet readable by DS notebooks | `python -c "import duckdb; con=duckdb.connect(); con.execute(\"SELECT COUNT(*) FROM 'marts/gold/dim_title.parquet'\").fetchone()"` | |
 | 56 | DE→Web: Gold marts queryable by API | curl graphql homepage query | |
 | 57 | DS→Web: Models loadable by ModelService | `python -c "from app.models.inference import ModelService; m=ModelService('/data/marts/processed'); print('OK')"` | |
 | 58 | Web→Frontend: API response matches contract | `pytest tests/test_contract.py -v` | |
@@ -1278,10 +1278,10 @@ docs/
 | `docs/scripts/run_qa_catalog.py` | **CREATE** | Automated QA script |
 | `data-engineering/README.md` | **CREATE** | DE module README (missing) |
 | `data-engineering/scripts/gold_export.py` | **CREATE/MODIFY** | Enforce runtime_minutes > 0 filter |
-| `data-engineering/orchestration/operators/gold_export_operator.py` | **CREATE** | Airflow task: DuckDB postgres_scanner → Snappy Parquet to `marts/full/` |
+| `data-engineering/orchestration/operators/gold_export_operator.py` | **CREATE** | Airflow task: DuckDB postgres_scanner → Snappy Parquet to `marts/gold/` |
 | `data-engineering/orchestration/dags/imdb_pipeline_dag.py` | **MODIFY** | Add `gold_export >> end` after `freshness_check` |
 | `data-engineering/scripts/export_marts.py` | **MODIFY** | Fix output path to `/opt/airflow/output/gold/`; remove hardcoded password; add `_MANIFEST.json` |
-| `data-science/marts/full/_MANIFEST.json` | **CREATE** | Export manifest with batch_id, row counts, timestamps (written by export operator) |
+| `data-science/marts/gold/_MANIFEST.json` | **CREATE** | Export manifest with batch_id, row counts, timestamps (written by export operator) |
 | `data-science/marts/sample/*.parquet` | **CREATE** | Sample data for smoke tests |
 | `data-science/marts/sample_processed/*` | **CREATE** | Pre-trained sample models |
 | `data-science/scripts/generate_sample_data.py` | **CREATE** | Sample data generator |
@@ -1290,7 +1290,7 @@ docs/
 | `web-application/api/app/models/inference.py` | **MODIFY** | Add disk-based fallback (no MLflow); replace zero-tensor with real text embedding; apply `preprocessor.joblib` |
 | `web-application/api/tests/test_contract.py` | **CREATE** | Contract conformance tests |
 | `mlops/README.md` | **MODIFY** | Add module wiring table |
-| `docker-compose.yml` | **MODIFY** | Add MLflow service OR document absence; add `./data-science/marts/full:/opt/airflow/output/gold:rw` volume mount for airflow service; migrate hardcoded credentials to `.env` |
+| `docker-compose.yml` | **MODIFY** | Add MLflow service OR document absence; add `./data-science/marts/gold:/opt/airflow/output/gold:rw` volume mount for airflow service; migrate hardcoded credentials to `.env` |
 | `./.env` | **CREATE** | Central environment file with all secrets (gitignored) |
 | `./.env.example` | **CREATE** | Document all required env vars (tracked) |
 | `AGENTS.md` (root) | **CREATE** | Root-level agent orchestration entry point |
@@ -1311,7 +1311,7 @@ docs/
 
 | Priority | Item | Effort | Impact | Depends On |
 |----------|------|--------|--------|------------|
-| P0 | G2: Fix path mismatch `full/` vs `processed/` | 1h | **HIGH** — blocks DE→Web integration | — |
+| P0 | G2: Fix path mismatch `gold/` vs `processed/` | 1h | **HIGH** — blocks DE→Web integration | — |
 | P0 | G3: Add MLflow or disk fallback for ModelService | 2h | **HIGH** — blocks DS→Web integration | — |
 | P0 | **G9: Automate Gold→Parquet export** (DAG task, fix path, secure creds) | 3h | **HIGH** — blocks DE→DS handoff; export currently manual + wrong directory | — |
 | P0 | **G10: Fix DS `run_pipeline.py` stubs** — implement actual stage execution | 4h | **HIGH** — DS pipeline entry point is completely non-functional | G2 |

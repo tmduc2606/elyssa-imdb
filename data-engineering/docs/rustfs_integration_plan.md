@@ -10,7 +10,7 @@
 | **Bronze I/O** | ✅ Updated | `run_bronze.py` reads from `s3://imdb-source/`, writes to bind mount `data-science/marts/bronze/` |
 | **Silver I/O** | ✅ Updated | `silver_operator.py` reads from bind mount `marts/bronze/` via DuckDB temp tables, writes to PostgreSQL |
 | **Silver Export** | ✅ Done | `silver_export_operator.py` exports 15 tables to `data-science/marts/silver/` (bind mount) |
-| **Gold Export** | ✅ Updated | `gold_export_operator.py` writes to bind mount `data-science/marts/full/` |
+| **Gold Export** | ✅ Updated | `gold_export_operator.py` writes to bind mount `data-science/marts/gold/` |
 | **DAG wiring** | ✅ Updated | `silver_export` task inserted after `wait_silver`, before `gold_dbt_run` |
 | **RustFS status** | ⏳ Pending | Infrastructure exists (`Dockerfile.rustfs` + `entrypoint.sh`). Not yet in compose. |
 | **DuckDB httpfs** | ⏳ Pending | No `httpfs` extension, no `SET s3_*` settings. Required for S3 reads. |
@@ -86,7 +86,7 @@ These tasks are **already implemented** and should NOT be re-executed:
 | SilverExportOperator | `operators/silver_export_operator.py` | ✅ Done | Reads 15 PostgreSQL tables via DuckDB `postgres_scanner`, writes Snappy Parquet to `/opt/airflow/output/silver/` |
 | Silver bind mount | `docker/docker-compose.yml` | ✅ Done | `../data-science/marts/silver:/opt/airflow/output/silver:rw` added to airflow |
 | Bronze bind mount | `docker/docker-compose.yml` | ✅ Done | `../data-science/marts/bronze:/opt/airflow/output/bronze:rw` added to airflow |
-| Gold bind mount | `docker/docker-compose.yml` | ✅ Done | `../data-science/marts/full:/opt/airflow/output/gold:rw` added to airflow |
+| Gold bind mount | `docker/docker-compose.yml` | ✅ Done | `../data-science/marts/gold:/opt/airflow/output/gold:rw` added to airflow |
 | DAG wiring | `dags/imdb_pipeline_dag.py` | ✅ Done | `silver_export` inserted: `wait_silver >> silver_export >> gold_dbt_run` |
 | Duke removal | `data-engineering/duke/` | ✅ Done | All 14 files deleted, 19+ code references migrated to S3 paths |
 | EDA notebook Part D | `phase_2_duke_manual_eda.ipynb` | ✅ Done | 10 cells merged into Part B: Bronze/Silver/Gold counts, reconciliation, DQ anomalies, freshness |
@@ -230,7 +230,7 @@ conn.execute(f"CREATE TABLE {duck_src} AS SELECT * FROM read_parquet('{parquet_p
 
 **File:** `orchestration/operators/gold_export_operator.py`
 
-**Current state:** Already writes to `/opt/airflow/output/gold/` → bind-mounted to `data-science/marts/full/`. This works and survives Docker wipes.
+**Current state:** Already writes to `/opt/airflow/output/gold/` → bind-mounted to `data-science/marts/gold/`. This works and survives Docker wipes.
 
 **Optional S3 enhancement:** If S3 gold-exports bucket is desired for external access:
 
@@ -243,7 +243,7 @@ for t in tables:
 
 **Recommendation:** Keep the bind mount as primary. S3 gold-exports is optional for external tools (e.g., BI dashboards, remote DS notebooks). The tar archive creation can be removed since S3 provides object storage natively.
 
-**Acceptance:** Gold Parquet files land at `data-science/marts/full/` (bind mount) and optionally at `s3://gold-exports/`.
+**Acceptance:** Gold Parquet files land at `data-science/marts/gold/` (bind mount) and optionally at `s3://gold-exports/`.
 
 ---
 
@@ -322,7 +322,7 @@ imdb_sensor → run_bronze → wait_bronze → bronze_done → quarantine_check
                                                            dq_checks → freshness_check
                                                                      │
                                                                      ▼
-                                                           gold_export ──────────► (bind mount: marts/full/)
+                                                           gold_export ──────────► (bind mount: marts/gold/)
                                                                      │
                                                                      ▼
                                                                     end
@@ -334,7 +334,7 @@ imdb_sensor → run_bronze → wait_bronze → bronze_done → quarantine_check
 |------|--------------------|-----------------------|
 | Bronze ingestion | `/opt/airflow/output/bronze/` | `data-science/marts/bronze/` |
 | Silver export | `/opt/airflow/output/silver/` | `data-science/marts/silver/` |
-| Gold export | `/opt/airflow/output/gold/` | `data-science/marts/full/` |
+| Gold export | `/opt/airflow/output/gold/` | `data-science/marts/gold/` |
 
 ---
 
@@ -383,7 +383,7 @@ imdb_sensor → run_bronze → wait_bronze → bronze_done → quarantine_check
 | **Download method** | Pure Python `requests` → HTTP PUT | No `boto3` dependency. RustFS supports S3 REST API over plain HTTP. | ⏳ Pending |
 | **Bronze → S3 write** | DuckDB `COPY TO 's3://...'` via httpfs | Native DuckDB S3 support. No extra libraries. | ⏳ Pending |
 | **Silver → S3 read** | Single materialize per source file | One S3 range-read per file → DuckDB temp table → all processing local | ⏳ Pending |
-| **Gold export** | Bind mount to `data-science/marts/full/` | Survives Docker wipes. DS notebook reads directly. | ✅ Done |
+| **Gold export** | Bind mount to `data-science/marts/gold/` | Survives Docker wipes. DS notebook reads directly. | ✅ Done |
 | **Silver export** | Bind mount to `data-science/marts/silver/` | Pre-Gold baseline for cross-layer benchmarking. Survives Docker wipes. | ✅ Done |
 | **Bronze cache** | Bind mount to `data-science/marts/bronze/` | Survives Docker wipes. DS notebook reads directly. | ✅ Done |
 | **Persistence strategy** | Host bind mounts (not S3) for DS consumption | S3 for pipeline hot path, bind mounts for DS deliverables. Best of both. | ✅ Done |
@@ -435,10 +435,10 @@ The S3-centric architecture balances four pillars:
 
 3. **Unpause DAG → triggers pipeline** — Airflow sensor detects source files in S3. Bronze reads from S3 → writes Parquet to S3. Silver materializes S3→DuckDB temp → writes PostgreSQL. Gold exports to S3.
 
-4. **`docker cp` or host mount** — Gold Parquet arrives at `data-science/marts/full/` for DS consumption. The DS module reads local Parquet (unchanged).
+4. **`docker cp` or host mount** — Gold Parquet arrives at `data-science/marts/gold/` for DS consumption. The DS module reads local Parquet (unchanged).
 
 **Deliverables for further modules:**
-- **Data Science**: 6 Gold Parquet tables at `marts/full/` + `_MANIFEST.json` with batch metadata
+- **Data Science**: 6 Gold Parquet tables at `marts/gold/` + `_MANIFEST.json` with batch metadata
 - **Web Application**: Gold-to-API contract (`web-application/contracts/gold-to-api.md`) with schema guarantees
 - **MLOps**: MLflow registry can consume from S3 or local Parquet
 
@@ -496,7 +496,7 @@ All pipeline storage is inside Docker volumes. `docker compose down -v` destroys
 - Bronze Parquet in RustFS `s3://bronze/`
 - **Gold Parquet marts** in the `airflow_data` named volume at `/opt/airflow/output/gold/`
 
-The DS EDA notebook reads Gold marts from `data-science/marts/full/` on the host. When Docker is wiped, this directory becomes stale or empty.
+The DS EDA notebook reads Gold marts from `data-science/marts/gold/` on the host. When Docker is wiped, this directory becomes stale or empty.
 
 ### Solution: Bind Mount Both Bronze Parquet and Gold Marts to Host Paths
 
@@ -504,7 +504,7 @@ The DS EDA notebook reads Gold marts from `data-science/marts/full/` on the host
 
 ```yaml
 volumes:
-  - ../data-science/marts/full:/opt/airflow/output/gold:rw     # Gold
+  - ../data-science/marts/gold:/opt/airflow/output/gold:rw     # Gold
   - ../data-science/marts/bronze:/opt/airflow/output/bronze:rw # Bronze
 ```
 
@@ -514,7 +514,7 @@ Three bind mounts, one pattern:
 |-------|-------------|-----------|--------------------|
 | Bronze Parquet | `/opt/airflow/output/bronze/` | `data-science/marts/bronze/` | Yes |
 | Silver Parquet | `/opt/airflow/output/silver/` | `data-science/marts/silver/` | Yes |
-| Gold Marts | `/opt/airflow/output/gold/` | `data-science/marts/full/` | Yes |
+| Gold Marts | `/opt/airflow/output/gold/` | `data-science/marts/gold/` | Yes |
 
 **No code changes needed.** `BronzeIngestOperator` writes to `/opt/airflow/output/bronze/` (default), `GoldExportOperator` writes to `/opt/airflow/output/gold/` (default). Both paths transparently redirect to the host.
 
@@ -549,7 +549,7 @@ data-science/marts/
 │   ├── name_profession.parquet
 │   ├── name_known_for_title.parquet
 │   └── _MANIFEST.json
-└── full/                            ← survives Docker wipe
+└── gold/                            ← survives Docker wipe
     ├── dim_person.parquet
     ├── dim_title.parquet
     ├── fact_episode.parquet
@@ -559,7 +559,7 @@ data-science/marts/
     └── _MANIFEST.json
 ```
 
-`docker compose down -v` → empty RustFS, empty PostgreSQL. **All three `marts/bronze/`, `marts/silver/`, `marts/full/` are untouched.**
+`docker compose down -v` → empty RustFS, empty PostgreSQL. **All three `marts/bronze/`, `marts/silver/`, `marts/gold/` are untouched.**
 
 ### Silver Export Operator
 
@@ -594,7 +594,7 @@ Each layer reads from **two strategies**, tried in order:
 |-------|--------------------|-----------------------|----------|
 | Bronze | `marts/bronze/{table}.parquet` | `s3://imdb-source/` via httpfs | Skip |
 | Silver | `marts/silver/{table}.parquet` | PostgreSQL via psycopg2 | Skip |
-| Gold | `marts/full/{table}.parquet` | — (host bind mount only) | Skip |
+| Gold | `marts/gold/{table}.parquet` | — (host bind mount only) | Skip |
 
 | Scenario | Bronze | Silver | Gold | Result |
 |----------|--------|--------|------|--------|
@@ -656,9 +656,9 @@ Before approving S3 implementation, verify:
 - [x] Bronze reads from S3, writes Parquet to S3
 - [x] Silver reads Bronze Parquet from S3 via httpfs
 - [x] SilverExportOperator writes 15 tables to `data-science/marts/silver/`
-- [x] Gold export writes to `data-science/marts/full/` (with optional S3 gold-exports)
+- [x] Gold export writes to `data-science/marts/gold/` (with optional S3 gold-exports)
 - [x] EDA notebook Part D runs with all 3 layers (Bronze/Silver/Gold) — **ALREADY COMPLETE, DO NOT RE-EXECUTE**
-- [x] `docker compose down -v` does NOT delete `marts/bronze/`, `marts/silver/`, `marts/full/` (bind mounts, unchanged)
+- [x] `docker compose down -v` does NOT delete `marts/bronze/`, `marts/silver/`, `marts/gold/` (bind mounts, unchanged)
 - [x] RAM usage stays ≤91% during full pipeline run (rustfs 256m added, ~8 GB total)
 - [x] All 9 pending tasks completed and verified
 

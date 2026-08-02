@@ -167,7 +167,7 @@ for e in m: print(f'  {e[\"table\"]:25s} {e[\"file_size_mb\"]:>8.1f} MB')
 "
 
 # Verify DS can consume
-ls -lh data-science/marts/full/
+ls -lh data-science/marts/gold/
 ```
 
 ### Airflow 3.X CLI Quick Reference

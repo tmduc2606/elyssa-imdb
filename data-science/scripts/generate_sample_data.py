@@ -6,7 +6,7 @@ from pathlib import Path
 
 SAMPLE_DIR = Path("marts/sample")
 SAMPLE_PROCESSED_DIR = Path("marts/sample_processed")
-FULL_DIR = Path("marts/full")
+FULL_DIR = Path("marts/gold")
 PROCESSED_DIR = Path("marts/processed")
 SAMPLE_SIZE = 50_000
 

@@ -14,8 +14,8 @@ Verify the entire Elyssa stack works end-to-end without downloading the full IMD
 cd data-science
 python scripts/generate_sample_data.py
 
-# 2. Symlink sample data as full data for the quick test
-New-Item -ItemType Junction -Path marts\full -Target marts\sample -Force
+# 2. Symlink sample data as gold data for the quick test
+New-Item -ItemType Junction -Path marts\gold -Target marts\sample -Force
 New-Item -ItemType Junction -Path marts\processed -Target marts\sample_processed -Force
 cd ..
 
