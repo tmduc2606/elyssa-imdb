@@ -41,3 +41,22 @@ def sample_efficiency_curve(
         pred = model.predict(X_test)
         scores.append(float(np.sqrt(mean_squared_error(y_test, pred))))
     return {"fracs": fracs, "scores": scores}
+
+
+def build_split_masks(
+    df: pd.DataFrame,
+    train_year_max: int,
+    val_year_min: int,
+    val_year_max: int,
+    test_year_min: int,
+) -> tuple:
+    """Build boolean train/val/test masks from ``start_year`` (DS.1).
+
+    The four constants must match the frozen temporal split contract
+    (TRAIN <= train_year_max, VAL [val_year_min, val_year_max], TEST >= test_year_min).
+    """
+    years = df["start_year"]
+    train_mask = years <= train_year_max
+    val_mask = (years >= val_year_min) & (years <= val_year_max)
+    test_mask = years >= test_year_min
+    return train_mask, val_mask, test_mask

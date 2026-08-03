@@ -1,9 +1,38 @@
 import duckdb
+import numpy as np
 from pathlib import Path
 from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def load_title_embeddings(models_dir: Path) -> np.ndarray:
+    """Load DistilBERT title embeddings (single .npy or sharded set).
+
+    Row order matches ``base_features.parquet`` (and therefore ``df_merged``).
+    """
+    single = models_dir / "shared" / "title_embeddings.npy"
+    if single.exists():
+        return np.load(single)
+    shards = sorted((models_dir / "shared").glob("title_embeddings_shard_*.npy"))
+    if shards:
+        return np.vstack([np.load(s) for s in shards])
+    raise FileNotFoundError(f'No embeddings found in {models_dir / "shared"}')
+
+
+def parquet_row_count(con: duckdb.DuckDBPyConnection, path: Path) -> int:
+    """Row count from Parquet row-group metadata — no full-table scan.
+
+    Cheap I/O hygiene helper for dev-mode logging (plan §4.13).
+    """
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Parquet file missing: {path}")
+    row = con.execute(
+        "SELECT COALESCE(SUM(row_count), 0) AS n FROM parquet_metadata(?)",
+        [str(path)],
+    ).fetchone()
+    return int(row[0]) if row else 0
 
 
 class GoldDataLoader:
