@@ -17,12 +17,13 @@ class GoldExportDoneSensor(BaseSensorOperator):
 
     def __init__(
         self,
-        output_dir: str = "/tmp/gold_marts.tar.gz",
+        output_dir: str = "/opt/airflow/output/gold/",
         *args,
         **kwargs,
     ):
         # Note: the output_dir here is the directory containing the markers and parquet files.
-        # The tar_path is separate; we only need to monitor the output dir for markers.
+        # The gold export writes parquet + _MANIFEST.json directly into the bind-mounted dir
+        # (no tar anymore); we only need to monitor the output dir for markers.
         super().__init__(*args, **kwargs)
         self.output_dir = output_dir
 

@@ -28,9 +28,10 @@ _root_path = "/opt/airflow/data-engineering"
 if not os.path.isdir(os.path.join(_root_path, "bronze")):
     _root_path = "/opt/etl/data-engineering"
 
-# Threshold for chunked processing: tables with >5M source rows
+# Threshold for sharded processing: tables with >5M source rows
 CHUNKED_CHILD_THRESHOLD = 5_000_000
-CHUNK_BATCH_SIZE = 1_000_000
+# Hash-shard count for large child tables (P0-1 optimization)
+CHILD_SHARD_COUNT = 16
 
 
 def _pid_exists(pid: int) -> bool:
@@ -131,15 +132,15 @@ def _log_memory(conn, logger, stage_name):
         pass
 
 
-def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, batch_size=CHUNK_BATCH_SIZE, src_table=None):
-    """Process a child table in chunks to bound peak memory during array explosion.
+def _process_child_table_sharded(conn, pg_cursor, child_def, src_table, log, shards=CHILD_SHARD_COUNT):
+    """Process a large child table via hash-sharded single-pass UNNEST (P0-1).
 
-    Uses LIMIT/OFFSET for O(1) pagination instead of ROW_NUMBER() OVER ()
-    which would require a full sort of the source parquet. The sql_template
-    receives {source} which resolves to a LIMIT/OFFSET subquery.
-    Each chunk COPYs into a per-chunk temp table, then INSERT ... ON CONFLICT
-    DO NOTHING into the destination, so a cross-chunk duplicate from
-    non-deterministic LIMIT/OFFSET is silently skipped.
+    The source was materialized once (single S3 read) with a _shard column
+    computed as hash(shard_key) % shards. Every row of a given key lands in
+    exactly one shard, so per-shard DISTINCT is globally correct and the
+    PG-side SELECT DISTINCT + ON CONFLICT DO NOTHING can be dropped (PK
+    violations are impossible). This replaces the O(n^2) LIMIT/OFFSET
+    chunking that re-read the whole source once per chunk.
     """
     import os as _os
 
@@ -147,34 +148,23 @@ def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, 
     snake_cols = child_def["snake_cols"]
     sql_template = child_def["sql"]
 
-    if src_table:
-        total_src = conn.execute(f"SELECT count(*) FROM {src_table}").fetchone()[0]
-    else:
-        total_src = conn.execute(
-            f"SELECT count(*) FROM read_parquet('{parquet_path}')"
-        ).fetchone()[0]
-
-    log.info(f"  {dst_table}: {total_src} source rows, processing in chunks of {batch_size}")
+    total_src = conn.execute(f"SELECT count(*) FROM {src_table}").fetchone()[0]
+    log.info(f"  {dst_table}: {total_src} source rows, processing in {shards} hash shards")
 
     if total_src == 0:
         log.info(f"  {dst_table}: 0 source rows, skipping")
         return 0
 
-    offset = 0
     chunk_total = 0
-    chunk_idx = 0
-    while offset < total_src:
-        chunk_idx += 1
-        if src_table:
-            source_expr = f"(SELECT * FROM {src_table} LIMIT {batch_size} OFFSET {offset})"
-        else:
-            source_expr = f"(SELECT * FROM read_parquet('{parquet_path}') LIMIT {batch_size} OFFSET {offset})"
-        chunk_sql = sql_template.format(source=source_expr)
-        csv_path = f"/tmp/silver_{dst_table.replace('.', '_')}_chunk_{chunk_idx}.csv"
-        conn.execute(f"COPY ({chunk_sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
+    for shard_idx in range(shards):
+        source_expr = f"(SELECT * FROM {src_table} WHERE _shard = {shard_idx})"
+        shard_sql = sql_template.format(source=source_expr)
+        csv_path = f"/tmp/silver_{dst_table.replace('.', '_')}_shard_{shard_idx}.csv"
+        conn.execute(f"COPY ({shard_sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
 
-        # Per-chunk temp table — COPY then INSERT ... ON CONFLICT DO NOTHING
-        stg_table = f"stg_chunk_{dst_table.replace('.', '_')}_{chunk_idx}"
+        # Per-shard temp table — COPY then plain INSERT (no DISTINCT/ON
+        # CONFLICT: the shard key guarantees a key never spans shards).
+        stg_table = f"stg_shard_{dst_table.replace('.', '_')}_{shard_idx}"
         cols = ", ".join(snake_cols)
         pg_cursor.execute(f"CREATE TEMP TABLE {stg_table} (LIKE {dst_table} INCLUDING DEFAULTS)")
         with open(csv_path, "r") as f:
@@ -182,20 +172,15 @@ def _process_child_table_chunked(conn, pg_cursor, child_def, parquet_path, log, 
                 f"COPY {stg_table} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
                 f,
             )
-        pg_cursor.execute(f"""
-            INSERT INTO {dst_table} ({cols})
-            SELECT DISTINCT {cols} FROM {stg_table}
-            ON CONFLICT DO NOTHING
-        """)
-        chunk_rows = pg_cursor.rowcount
+        pg_cursor.execute(f"INSERT INTO {dst_table} ({cols}) SELECT {cols} FROM {stg_table}")
+        shard_rows = pg_cursor.rowcount
         pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
 
         _os.remove(csv_path)
-        chunk_total += chunk_rows
-        offset += batch_size
-        log.info(f"  {dst_table}: chunk {chunk_idx} loaded ({chunk_rows} rows)")
+        chunk_total += shard_rows
+        log.info(f"  {dst_table}: shard {shard_idx} loaded ({shard_rows} rows)")
 
-    log.info(f"  {dst_table}: {chunk_total} total rows loaded (deduplicated)")
+    log.info(f"  {dst_table}: {chunk_total} total rows loaded")
     return chunk_total
 
 
@@ -276,6 +261,10 @@ class SilverTransformOperator(BaseOperator):
         # max_wal_size, wal_level, archive_mode are POSTMASTER params (set in docker-compose, not per-session)
         with pg.cursor() as tune:
             tune.execute("SET maintenance_work_mem = '256MB'")
+            # P3-11: skip synchronous WAL flush during bulk COPY (session-level;
+            # pipeline is checkpoint-driven and idempotent — worst case on a
+            # power loss is re-running the current stage, no corruption).
+            tune.execute("SET synchronous_commit = off")
         pg.commit()
 
         # Acquire file-based exclusive lock to serialize Silver ETL runs
@@ -480,6 +469,7 @@ class SilverTransformOperator(BaseOperator):
                 # Coalesce \N (IMDb null marker) to SQL NULL, and for NOT NULL
                 # columns like isAdult, replace NULL with the default value.
                 select_parts = []
+                select_exprs = {}
                 for col_name in camel_cols:
                     expr = f"\"{col_name}\""
                     expr = f"NULLIF({expr}, '\\N')"
@@ -489,6 +479,7 @@ class SilverTransformOperator(BaseOperator):
                     if col_name in bool_casts:
                         expr = f"CASE WHEN {expr} = '1' THEN 't' WHEN {expr} = '0' THEN 'f' ELSE 'f' END"
                     select_parts.append(f"{expr} AS \"{col_name}\"")
+                    select_exprs[col_name] = expr
                 select_sql = ", ".join(select_parts)
 
                 # Build WHERE clause to skip rows violating NOT NULL constraints.
@@ -515,14 +506,7 @@ class SilverTransformOperator(BaseOperator):
 
                 self.log.info(f"  {src_table}: {row_count} rows -> {dst_table}")
 
-                # Copy to CSV for PostgreSQL COPY (M4: use volume-backed csv_dir)
-                csv_path = os.path.join(csv_dir, f"silver_{src_table.replace('.', '_')}.csv")
-                conn.execute(
-                    "COPY (SELECT " + select_sql + " FROM read_parquet('" + parquet_url + "')"
-                    + where_clause + ") TO '" + csv_path + "' (FORMAT CSV, HEADER true, DELIMITER '|')"
-                )
-
-                # Build snake_case column list
+                # Build snake_case column list (needed before CSV export for SCD2 hashing)
                 snake_cols = [camel_to_snake_map.get(c, c) for c in camel_cols]
                 snake_cols_list = ", ".join(snake_cols)
                 pg_cols_part = f"({snake_cols_list})"
@@ -533,6 +517,30 @@ class SilverTransformOperator(BaseOperator):
                     "silver.name_basics": "nconst",
                 }
                 is_scd2 = dst_table in scd2_pk_map
+
+                # P0-3: SCD2 change detection — an md5 of the business
+                # attributes is computed in DuckDB during the CSV export and
+                # stored with every version. The expire/insert merge only
+                # touches keys whose attr_hash differs from the current
+                # version, so unchanged keys are no longer versioned on every
+                # reload.
+                audit_cols = {"is_current", "valid_from", "valid_to", "ingested_at", "batch_id"}
+                attr_hash_expr = None
+                if is_scd2:
+                    hash_cols = [c for c, s in zip(camel_cols, snake_cols) if s not in audit_cols]
+                    hash_values = ", ".join(f"COALESCE({select_exprs[c]}, '')" for c in hash_cols)
+                    attr_hash_expr = f"md5(concat_ws('|', {hash_values}))"
+
+                # Copy to CSV for PostgreSQL COPY (M4: use volume-backed csv_dir)
+                # SCD2 tables append the attr_hash column (P0-3 change detection)
+                csv_path = os.path.join(csv_dir, f"silver_{src_table.replace('.', '_')}.csv")
+                export_select = select_sql
+                if attr_hash_expr:
+                    export_select += f", {attr_hash_expr} AS attr_hash"
+                conn.execute(
+                    "COPY (SELECT " + export_select + " FROM read_parquet('" + parquet_url + "')"
+                    + where_clause + ") TO '" + csv_path + "' (FORMAT CSV, HEADER true, DELIMITER '|')"
+                )
 
                 with pg.cursor() as pg_cursor:
                     if is_scd2:
@@ -553,11 +561,11 @@ class SilverTransformOperator(BaseOperator):
                         # Temp tables must be unqualified (no schema prefix)
                         stg_table = f"stg_{dst_table.replace('.', '_')}"
 
-                        # Drop and recreate staging table (same structure minus SCD2/audit cols)
-                        stg_cols = [c for c in snake_cols
-                                    if c not in ("is_current", "valid_from", "valid_to", "ingested_at", "batch_id")]
+                        # Drop and recreate staging table (same structure minus SCD2/audit cols, plus attr_hash)
+                        stg_cols = [c for c in snake_cols if c not in audit_cols]
                         stg_cols_list = ", ".join(stg_cols)
                         stg_create_cols = ", ".join(f"{c} VARCHAR" for c in stg_cols)
+                        stg_create_cols += ", attr_hash VARCHAR(32)"
 
                         pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
                         pg_cursor.execute(f"CREATE TEMP TABLE {stg_table} ({stg_create_cols})")
@@ -565,21 +573,22 @@ class SilverTransformOperator(BaseOperator):
                         # Add index on PK for fast UPDATE ... WHERE pk IN (SELECT ...)
                         pg_cursor.execute(f"CREATE INDEX idx_{stg_table}_pk ON {stg_table} ({pk_col})")
 
-                        # COPY into staging
-                        stg_cols_part = f"({stg_cols_list})"
+                        # COPY into staging (attr_hash is the last CSV column)
+                        stg_cols_part = f"({stg_cols_list}, attr_hash)"
                         with open(csv_path, "r") as f:
                             pg_cursor.copy_expert(
                                 f"COPY {stg_table} {stg_cols_part} FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
                                 f,
                             )
 
-                        # Expire existing rows that still appear in new data
+                        # Expire current versions whose business attributes changed
                         pg_cursor.execute(f"""
                             UPDATE {dst_table}
                             SET valid_to = NOW(), is_current = FALSE
                             FROM {stg_table} s
                             WHERE {dst_table}.{pk_col} = s.{pk_col}
                               AND {dst_table}.is_current = TRUE
+                              AND {dst_table}.attr_hash <> s.attr_hash
                         """)
                         # Recreate indexes after load
                         if dst_table == "silver.title_basics":
@@ -610,9 +619,15 @@ class SilverTransformOperator(BaseOperator):
                             f"{c}{casts.get(c, '')}" for c in stg_cols
                         )
                         pg_cursor.execute(f"""
-                            INSERT INTO {dst_table} ({stg_insert_cols}, valid_from, is_current, batch_id, ingested_at)
-                            SELECT {stg_select_cols}, NOW(), TRUE, '{batch_id}', NOW()
-                            FROM {stg_table}
+                            INSERT INTO {dst_table} ({stg_insert_cols}, valid_from, is_current, batch_id, ingested_at, attr_hash)
+                            SELECT {stg_select_cols}, NOW(), TRUE, '{batch_id}', NOW(), s.attr_hash
+                            FROM {stg_table} s
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM {dst_table} tb
+                                WHERE tb.{pk_col} = s.{pk_col}
+                                  AND tb.is_current
+                                  AND tb.attr_hash = s.attr_hash
+                            )
                         """)
                         inserted = pg_cursor.rowcount
 
@@ -656,12 +671,16 @@ class SilverTransformOperator(BaseOperator):
 
             # ─── Normalize Child Tables ───────────────────────────────────────
             # SQL templates use {source} placeholder — replaced with
-            # read_parquet('file.parquet') for full COPY or a view name for chunks.
+            # read_parquet('file.parquet') for full COPY or a shard subquery
+            # for large sources. shard_key is the PK-leading column used to
+            # hash-shard large sources (P0-1): all rows of a key stay in one
+            # shard, keeping per-shard DISTINCT globally correct.
             child_table_defs = [
                 {
                     "dst_table": "silver.title_genre",
                     "snake_cols": ["tconst", "genre"],
                     "src_table": "title.basics",
+                    "shard_key": "tconst",
                     "sql": """
                         SELECT DISTINCT tconst, genre
                         FROM {source},
@@ -675,6 +694,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.title_director",
                     "snake_cols": ["tconst", "ordering", "nconst"],
                     "src_table": "title.crew",
+                    "shard_key": "tconst",
                     "sql": """
                         SELECT tconst,
                                CAST(ordinality AS SMALLINT) AS ordering,
@@ -694,6 +714,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.title_writer",
                     "snake_cols": ["tconst", "ordering", "nconst"],
                     "src_table": "title.crew",
+                    "shard_key": "tconst",
                     "sql": """
                         SELECT tconst,
                                CAST(ordinality AS SMALLINT) AS ordering,
@@ -713,6 +734,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.title_akas_type",
                     "snake_cols": ["title_id", "ordering", "type"],
                     "src_table": "title.akas",
+                    "shard_key": "titleId",
                     "sql": """
                         SELECT DISTINCT titleId AS title_id,
                                ordering,
@@ -728,6 +750,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.title_akas_attribute",
                     "snake_cols": ["title_id", "ordering", "attr"],
                     "src_table": "title.akas",
+                    "shard_key": "titleId",
                     "sql": """
                         SELECT DISTINCT titleId AS title_id,
                                ordering,
@@ -743,6 +766,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.title_principal_char",
                     "snake_cols": ["tconst", "ordering", "character_name"],
                     "src_table": "title.principals",
+                    "shard_key": "tconst",
                     "sql": """
                         SELECT DISTINCT tconst,
                                ordering,
@@ -760,6 +784,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.name_profession",
                     "snake_cols": ["nconst", "profession_order", "profession"],
                     "src_table": "name.basics",
+                    "shard_key": "nconst",
                     "sql": """
                         SELECT nconst,
                                CAST(ordinality AS SMALLINT) AS profession_order,
@@ -779,6 +804,7 @@ class SilverTransformOperator(BaseOperator):
                     "dst_table": "silver.name_known_for_title",
                     "snake_cols": ["nconst", "known_for_order", "tconst"],
                     "src_table": "name.basics",
+                    "shard_key": "nconst",
                     "sql": """
                         SELECT nconst,
                                CAST(ordinality AS SMALLINT) AS known_for_order,
@@ -810,25 +836,33 @@ class SilverTransformOperator(BaseOperator):
                 # Count directly from Parquet (avoid materializing temp table for small sources)
                 total_src = conn.execute(f"SELECT count(*) FROM read_parquet('{child_parquet_url}')").fetchone()[0]
 
-                use_chunked = total_src > CHUNKED_CHILD_THRESHOLD
+                use_sharded = total_src > CHUNKED_CHILD_THRESHOLD
 
-                if use_chunked:
-                    # Materialize source Parquet only for chunked processing (LIMIT/OFFSET needs table ref)
+                if use_sharded:
+                    # Materialize source Parquet once with a _shard column
+                    # (P0-1: replaces LIMIT/OFFSET chunking, which re-read the
+                    # full source once per chunk — O(n^2)).
                     src_tbl = f"src_{child['src_table'].replace('.', '_')}"
+                    shard_key = child.get("shard_key", child["snake_cols"][0])
                     conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
-                    conn.execute(f"CREATE TABLE {src_tbl} AS SELECT * FROM read_parquet('{child_parquet_url}')")
+                    conn.execute(f"""
+                        CREATE TABLE {src_tbl} AS
+                        SELECT *,
+                               CAST(((hash("{shard_key}") % {CHILD_SHARD_COUNT}) + {CHILD_SHARD_COUNT}) % {CHILD_SHARD_COUNT} AS SMALLINT) AS _shard
+                        FROM read_parquet('{child_parquet_url}')
+                    """)
                     with pg.cursor() as pg_cursor:
                         pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
-                        self.log.info(f"  {child['dst_table']}: large source ({total_src:,} rows), using chunked UNNEST")
-                        chunk_loaded = _process_child_table_chunked(
-                            conn, pg_cursor, child, None, self.log, src_table=src_tbl
+                        self.log.info(f"  {child['dst_table']}: large source ({total_src:,} rows), using hash-sharded UNNEST ({CHILD_SHARD_COUNT} shards)")
+                        chunk_loaded = _process_child_table_sharded(
+                            conn, pg_cursor, child, src_tbl, self.log
                         )
                     conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
                     child_rows += chunk_loaded
-                    self.log.info(f"  {child['dst_table']}: {chunk_loaded} rows loaded (chunked)")
+                    self.log.info(f"  {child['dst_table']}: {chunk_loaded} rows loaded (sharded)")
                     log.log_stage(stage="silver_transform", batch_id=batch_id,
                                   status="success", row_count=chunk_loaded,
-                                  message=f"child {child['dst_table']} (chunked)")
+                                  message=f"child {child['dst_table']} (sharded)")
                 else:
                     source_expr = f"(SELECT * FROM read_parquet('{child_parquet_url}'))"
                     sql = child["sql"].format(source=source_expr)
@@ -867,6 +901,11 @@ class SilverTransformOperator(BaseOperator):
                 # Flush DuckDB temp between child-table UNNESTs to bound peak RSS
                 conn.execute("CHECKPOINT")
 
+            pg.commit()
+            # P3-12: refresh planner statistics so wait_silver's n_live_tup
+            # polling (and dbt's incremental filtering) sees accurate counts
+            with pg.cursor() as an:
+                an.execute("ANALYZE silver.title_basics, silver.title_akas, silver.title_episode, silver.title_rating, silver.title_principal, silver.name_basics, silver.title_genre, silver.title_director, silver.title_writer, silver.title_akas_type, silver.title_akas_attribute, silver.title_principal_char, silver.name_profession, silver.name_known_for_title")
             pg.commit()
             # Save checkpoint: children done
             with pg.cursor() as ck:

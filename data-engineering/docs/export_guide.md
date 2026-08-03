@@ -25,9 +25,10 @@ docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_g
 
 This runs:
 1. DuckDB `postgres_scanner` → Snappy Parquet (6 files)
-2. Writes `_MANIFEST.json`
-3. Creates `/tmp/gold_marts.tar.gz`
-4. Attempts host mount copy (if `/mnt/host/` is mapped)
+2. Writes `_MANIFEST.json` with row counts read from the parquet footers (no post-export `COUNT(*)` re-reads)
+3. Writes `.export.completed` / `.export.failed` marker for the Airflow sensor
+
+No tar archive is created: the gold parquet dir is the host bind-mount `data-science/marts/gold/` itself.
 
 ## Manual Export + Tar + docker cp
 

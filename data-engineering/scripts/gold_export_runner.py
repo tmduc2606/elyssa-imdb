@@ -2,7 +2,8 @@
 Elyssa-IMDb | Gold Export Runner (detached subprocess)
 
 Exports all Gold-layer tables (6 tables) from PostgreSQL to Snappy Parquet
-in a bind-mounted host directory, creates a tar archive and manifest.
+in a bind-mounted host directory, plus a manifest. Row counts are read from
+the parquet footers (pyarrow metadata) — no COUNT(*) re-scan (P0-2).
 
 Runs OUTSIDE Airflow's supervisor (spawned with start_new_session=True)
 so the long DuckDB postgres_scanner COPY operations survive the scheduler's
@@ -10,7 +11,7 @@ so the long DuckDB postgres_scanner COPY operations survive the scheduler's
 
 Markers written to the output dir:
   .export.running   - started
-  .export.completed - all tables exported + tar + manifest (success)
+  .export.completed - all tables exported + manifest (success)
   .export.failed    - fatal error (check the log)
 
 Usage:
@@ -20,13 +21,13 @@ Usage:
 import argparse
 import json
 import os
-import subprocess
 import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+from pyarrow.parquet import read_metadata
 
 TABLES = [
     "dim_person",
@@ -101,7 +102,8 @@ def main() -> int:
                 conn.execute(
                     f'COPY ({sql}) TO \'{path}\' (FORMAT PARQUET, COMPRESSION SNAPPY)'
                 )
-                r = conn.execute(f'SELECT count(*) FROM pg.gold.{t}{where_clause}').fetchone()[0]
+                # P0-2: footer-only row count (no post-export COUNT(*) re-scan)
+                r = read_metadata(path).num_rows
                 row_counts[t] = r
                 elapsed = (datetime.now(timezone.utc) - started).total_seconds()
                 _log(f"Exported gold.{t}: {r:,} rows -> {path.name} ({elapsed:.0f}s)")
@@ -133,24 +135,6 @@ def main() -> int:
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     _log(f"Manifest written: {manifest_path.name}")
-
-    # Create tar archive
-    tar_path = "/tmp/gold_marts.tar.gz"
-    files_to_tar = [f.name for f in output_dir.glob("*.parquet")] + ["_MANIFEST.json"]
-    try:
-        subprocess.run(
-            ["tar", "-czf", tar_path, "-C", str(output_dir)] + files_to_tar,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        tar_size = os.path.getsize(tar_path)
-        _log(f"Tar archive created: {tar_path} ({tar_size / (1024*1024):.1f} MB)")
-    except Exception as e:
-        _log(f"FATAL: failed to create tar archive: {e}")
-        _log(traceback.format_exc())
-        failed_marker.touch()
-        return 1
 
     if row_counts.get("dim_title") is not None:
         _log(f"dim_title rows after filter: {row_counts['dim_title']:,}")

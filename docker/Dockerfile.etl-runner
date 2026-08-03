@@ -19,6 +19,10 @@ ENV DUCKDB_THREADS=2 \
 
 RUN mkdir -p /tmp/duckdb_spill && chmod 777 /tmp/duckdb_spill
 
+# P2-8: bake DuckDB extensions at build time so the pipeline works offline
+# (runtime `INSTALL` needs network access; build-time install is cached).
+RUN python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL postgres_scanner'); c.execute('INSTALL httpfs'); c.close()"
+
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=10s \
     CMD python -c "import duckdb; conn = duckdb.connect(':memory:'); conn.execute('SELECT 1'); conn.close()"
 

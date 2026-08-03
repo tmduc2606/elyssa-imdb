@@ -66,6 +66,7 @@ docs/*
 !docs/export_guide.md
 !docs/DOCKER_CONFIG_SUMMARY.md
 !docs/final_pipeline_summary.md
+!docs/de_optimization_plan_final.md
 
 # ─── IDE & OS ────────────────────────────────────────────────────
 .vscode/

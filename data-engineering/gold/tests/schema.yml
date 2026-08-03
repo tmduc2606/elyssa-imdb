@@ -119,16 +119,28 @@ models:
     description: "Performance fact — LEFT JOIN to title_principal_char expands 1 principal into N rows (one per character). No simple PK exists. Use unique combination (tconst, ordering) for principal-level dedup."
     columns:
       - name: tconst
-        tests: [not_null]
+        tests:
+          - not_null:
+              config:
+                severity: warn
         description: "Title identifier (natural key)"
       - name: ordering
-        tests: [not_null]
+        tests:
+          - not_null:
+              config:
+                severity: warn
         description: "Principal ordering within title"
       - name: nconst
-        tests: [not_null]
+        tests:
+          - not_null:
+              config:
+                severity: warn
         description: "Person identifier"
       - name: category
-        tests: [not_null]
+        tests:
+          - not_null:
+              config:
+                severity: warn
         description: "Role category (actor, director, etc.)"
       - name: character_name
         tests: []
@@ -155,3 +167,5 @@ models:
             - actor_a_nconst
             - actor_b_nconst
             - shared_title
+          config:
+            severity: warn

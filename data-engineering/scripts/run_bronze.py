@@ -156,14 +156,11 @@ def ingest_table(conn, table, batch_id, pg):
         else:
             log(f"  CHECKPOINT {table}: local copy found but s3://bronze/{table}.parquet is MISSING — re-ingesting")
 
-    # Row count via DuckDB from S3 (fast range request — no full download)
-    try:
-        source_rows = conn.execute(
-            f"SELECT COUNT(*) FROM read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, ignore_errors=true, quote='', escape='')"
-        ).fetchone()[0]
-    except Exception as e:
-        log(f"  SKIP {table}: cannot read from {source_url}: {e}")
-        return {"table": table, "rows": 0, "skipped": True, "error": str(e)}
+    # P2-7: cheap existence check (HTTP HEAD on the source object) instead of
+    # the previous full read_csv count pass (which scanned the whole TSV).
+    if not _s3_object_exists("imdb-source", filename):
+        log(f"  SKIP {table}: source file missing from s3://imdb-source/{filename}")
+        return {"table": table, "rows": 0, "skipped": True, "error": f"missing source {filename}"}
 
     now_ts = datetime.now(timezone.utc).isoformat()
 
@@ -179,10 +176,13 @@ def ingest_table(conn, table, batch_id, pg):
     else:
         read_csv_sql = f"read_csv('{source_url}', delim='\\t', header=true, all_varchar=true, null_padding=true, ignore_errors=true, quote='', escape='')"
 
+    # P2-7: _row_count is a placeholder (0) in the written parquet — the
+    # authoritative row count comes from the parquet footer (pyarrow metadata)
+    # right after the local write and is stored in the marker + batch_metadata.
     base_sql = (
         f"SELECT *, '{source_url}' AS _source_file, '{table}' AS _source_table, "
         f"'{batch_id}' AS _batch_id, '{now_ts}' AS _ingested_at, "
-        f"{source_rows} AS _row_count, '' AS _file_checksum "
+        f"0 AS _row_count, '' AS _file_checksum "
         f"FROM {read_csv_sql}"
     )
 
@@ -216,12 +216,19 @@ def ingest_table(conn, table, batch_id, pg):
     except Exception:
         pass
 
-    log(f"  {table}: {source_rows} rows (sha256={file_checksum[:12]}...)")
+    # P2-7: authoritative row count from the local parquet footer (no re-scan)
+    try:
+        import pyarrow.parquet as pq
+        row_count = pq.read_metadata(local_output).num_rows
+    except Exception:
+        row_count = 0
+
+    log(f"  {table}: {row_count} rows (sha256={file_checksum[:12]}...)")
 
     # Write checkpoint marker after successful ingestion
     try:
         with open(marker_path, "w") as f:
-            json.dump({"rows": source_rows, "checksum": file_checksum, "batch_id": batch_id}, f)
+            json.dump({"rows": row_count, "checksum": file_checksum, "batch_id": batch_id}, f)
     except Exception as e:
         log(f"  [WARN] Failed to write checkpoint marker for {table}: {e}")
 
@@ -232,13 +239,13 @@ def ingest_table(conn, table, batch_id, pg):
                 """INSERT INTO silver.batch_metadata
                    (batch_id, table_name, source_file, file_checksum, row_count, ingested_at)
                    VALUES (%s, %s, %s, %s, %s, NOW())""",
-                (batch_id, table, source_url, file_checksum, source_rows),
+                (batch_id, table, source_url, file_checksum, row_count),
             )
         except Exception as e:
             log(f"  [WARN] Failed to persist batch metadata for {table}: {e}")
 
     conn.execute("CHECKPOINT")
-    return {"table": table, "rows": source_rows}
+    return {"table": table, "rows": row_count}
 
 
 def run():

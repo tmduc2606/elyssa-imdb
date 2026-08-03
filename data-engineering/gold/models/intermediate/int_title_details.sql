@@ -4,15 +4,18 @@ WITH title_base AS (
 genres AS (
     SELECT
         tconst,
-        STRING_AGG(TRIM(genre), ', ' ORDER BY TRIM(genre)) AS genre_list
+        -- P2-9: genre order is non-contractual (gold-to-ds.md requires only
+        -- comma-separated, trimmed) — dropping ORDER BY removes a 19.4M-row sort
+        STRING_AGG(TRIM(genre), ', ') AS genre_list
     FROM {{ source('silver', 'title_genre') }}
     GROUP BY tconst
 ),
 regions AS (
     SELECT
         title_id,
-        STRING_AGG(region, ', ' ORDER BY region) AS region_list,
-        STRING_AGG(language, ', ' ORDER BY language) AS language_list,
+        -- P2-9: region/language order is non-contractual — dropping ORDER BY
+        STRING_AGG(region, ', ') AS region_list,
+        STRING_AGG(language, ', ') AS language_list,
         COUNT(*) AS aka_count
     FROM (
         SELECT DISTINCT title_id, region, language

@@ -396,15 +396,15 @@ DELETE FROM pg_stat_activity WHERE state = 'idle in transaction' AND state_chang
 
 ### Redundant `gold_marts.tar.gz` (4.0 GB in container `/tmp`)
 
-**Symptom:** The gold parquet dir is already bind-mounted to the host (`data-science/marts/gold/`); the tar adds ~13.6 min with no host benefit.
+**Symptom:** The gold parquet dir is already bind-mounted to the host (`data-science/marts/gold/`); the tar added ~13.6 min with no host benefit.
 
-**Fix:** Candidate for removal in Phase 2.
+**Fix applied (Phase 2, P0-2):** tar creation removed; manifest counts now read from parquet footers via `pyarrow.parquet.read_metadata`.
 
 ### dbt Test Runtime
 
 **Symptom:** The 4 cooccurrence tests bring the suite to 43 tests; the uniqueness test alone ≈ 53 min, so a scheduled `gold_dbt_test` runs ~70 m.
 
-**Fix:** Consider `severity: warn` if runtime matters.
+**Fix applied (Phase 2, P1-5):** non-contractual `fact_performance`/`agg_actor_cooccurrence` tests set to `severity: warn`; `agg_actor_cooccurrence` build serialized (`SET max_parallel_workers_per_gather = 0`).
 
 ### Historical Fixes (Phase 1, for context)
 

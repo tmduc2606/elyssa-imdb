@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS silver.title_basics (
     ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- P0-3: change-detection hash of business attributes (SCD2 optimization)
+ALTER TABLE silver.title_basics ADD COLUMN IF NOT EXISTS attr_hash VARCHAR(32);
+
 CREATE INDEX IF NOT EXISTS idx_title_basics_tconst ON silver.title_basics(tconst);
 CREATE INDEX IF NOT EXISTS idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_title_basics_current_tconst ON silver.title_basics(tconst) WHERE is_current = TRUE;
@@ -217,6 +220,9 @@ CREATE TABLE IF NOT EXISTS silver.name_basics (
     batch_id     VARCHAR(20),
     ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- P0-3: change-detection hash of business attributes (SCD2 optimization)
+ALTER TABLE silver.name_basics ADD COLUMN IF NOT EXISTS attr_hash VARCHAR(32);
 
 CREATE INDEX IF NOT EXISTS idx_name_basics_nconst ON silver.name_basics(nconst);
 CREATE INDEX IF NOT EXISTS idx_name_basics_current ON silver.name_basics(is_current) WHERE is_current = TRUE;

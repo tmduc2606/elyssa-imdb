@@ -1,5 +1,9 @@
+-- P1-6: this model ENOSPC'd on DSM parallel gather once (a8779df fix).
+-- With 2 cores the parallel hash join gains nothing; disabling it per-model
+-- removes the shared-memory failure mode entirely.
 {{ config(
-    materialized='table'
+    materialized='table',
+    pre_hook="SET max_parallel_workers_per_gather = 0"
 ) }}
 
 WITH perf AS (

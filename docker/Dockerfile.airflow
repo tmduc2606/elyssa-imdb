@@ -1,15 +1,27 @@
 # Elyssa-IMDb | Data Engineering Stack — Docker Images
 # Apache Airflow — orchestration for Elyssa pipeline DAGs
 # NOTE: Airflow does not support native Windows; runs exclusively in Docker.
-# Single-stage build to avoid Python site-packages path mismatch between
-# builder and runtime (apache/airflow uses /usr/python/bin/python3.13).
+# P3-10: multi-stage build — compiler toolchain lives only in the builder;
+# the runtime image installs prebuilt wheels (no Python site-packages path
+# mismatch since wheels are installed into the runtime image itself).
 
-FROM apache/airflow:3.3.0
+# ─── Builder: resolve + build dependency wheels ─────────────────────
+FROM apache/airflow:3.3.0 AS builder
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY data-engineering/requirements.txt /tmp/requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /tmp/wheels -r /tmp/requirements.txt
+
+# ─── Runtime ────────────────────────────────────────────────────────
+FROM apache/airflow:3.3.0
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     procps \
     && rm -rf /var/lib/apt/lists/*
@@ -20,8 +32,9 @@ RUN mkdir -p /opt/airflow/output/bronze /opt/airflow/output/tmp /opt/airflow/out
 
 USER airflow
 
-COPY data-engineering/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# Install prebuilt wheels from the builder stage (offline, no build deps)
+COPY --from=builder /tmp/wheels /tmp/wheels
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 COPY data-engineering/gold /opt/gold-build
 USER root

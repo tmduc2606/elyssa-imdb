@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+from pyarrow.parquet import read_metadata
 
 TABLES = [
     "title_basics", "title_akas", "title_episode",
@@ -93,7 +94,8 @@ def main() -> int:
                     f'COPY (SELECT * FROM pg."{t}") TO \'{path}\' '
                     f"(FORMAT PARQUET, COMPRESSION SNAPPY)"
                 )
-                r = conn.execute(f'SELECT count(*) FROM pg."{t}"').fetchone()[0]
+                # P1-4: footer-only row count (no post-export COUNT(*) re-scan)
+                r = read_metadata(path).num_rows
                 elapsed = (datetime.now(timezone.utc) - started).total_seconds()
                 row_counts[t] = r
                 _log(f"Exported silver.{t}: {r:,} rows -> {path.name} ({elapsed:.0f}s)")

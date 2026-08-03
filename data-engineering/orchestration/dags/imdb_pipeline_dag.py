@@ -17,7 +17,7 @@ Execution order:
   11. wait_dbt_test         (sensor polling .dbt.test.completed marker)
   12. dq_checks             (null-rate, referential integrity, row-count, quarantine)
   13. freshness_check       (check last_updated freshness SLA)
-  14. gold_export           (Gold → Parquet + _MANIFEST.json + tar archive)
+  14. gold_export           (Gold → Parquet + _MANIFEST.json)
   15. wait_gold_export      (sensor polling gold .export.completed marker)
   16. pipeline_end
 """
@@ -433,11 +433,10 @@ with DAG(
         sla_hours=24,
     )
 
-    # ─── Gold Export (DuckDB postgres_scanner → Snappy Parquet → tar archive) ─
+    # ─── Gold Export (DuckDB postgres_scanner → Snappy Parquet + manifest) ─
     gold_export = GoldExportOperator(
         task_id="gold_export",
         output_dir="/opt/airflow/output/gold/",
-        tar_path="/tmp/gold_marts.tar.gz",
     )
 
     wait_gold_export = GoldExportDoneSensor(

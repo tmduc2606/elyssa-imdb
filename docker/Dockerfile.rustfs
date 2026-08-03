@@ -4,7 +4,9 @@
 # ─── RustFS ────────────────────────────────────────────────────────
 # Purpose: Bronze layer raw storage — append-only Parquet, Snappy-compressed
 # Port: 9000 (S3 API), 9001 (admin console)
-FROM rustfs/rustfs:latest
+# P2-8: pinned tag (1.0.0-beta.12, matches the `latest` digest at pin time)
+# to make builds reproducible; only bump deliberately.
+FROM rustfs/rustfs:1.0.0-beta.12
 
 # Download rc CLI (RustFS client) — base image runs as non-root, so elevate for install
 USER root
