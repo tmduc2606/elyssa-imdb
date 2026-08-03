@@ -53,6 +53,7 @@ ALTER TABLE silver.title_basics ADD COLUMN IF NOT EXISTS attr_hash VARCHAR(32);
 
 CREATE INDEX IF NOT EXISTS idx_title_basics_tconst ON silver.title_basics(tconst);
 CREATE INDEX IF NOT EXISTS idx_title_basics_current ON silver.title_basics(is_current) WHERE is_current = TRUE;
+CREATE INDEX IF NOT EXISTS idx_title_basics_tconst_is_current ON silver.title_basics(tconst, is_current);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_title_basics_current_tconst ON silver.title_basics(tconst) WHERE is_current = TRUE;
 
 COMMENT ON TABLE silver.title_basics IS 'Core table for every title (movie, series, episode, etc.) with SCD2 tracking';
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS silver.title_genre (
 );
 
 CREATE INDEX IF NOT EXISTS idx_title_genre_tconst ON silver.title_genre(tconst);
+CREATE INDEX IF NOT EXISTS idx_title_genre_tconst_genre ON silver.title_genre(tconst, genre);
 
 COMMENT ON TABLE silver.title_genre IS 'Genres associated with a title (up to 3 originally, but schema allows any number)';
 
@@ -84,6 +86,8 @@ CREATE TABLE IF NOT EXISTS silver.title_rating (
 );
 
 SELECT create_hypertable('silver.title_rating', 'snapshot_date', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS idx_title_rating_snapshot ON silver.title_rating(snapshot_date DESC);
 
 COMMENT ON TABLE silver.title_rating IS 'Weighted average rating and vote count per title (TimescaleDB hypertable)';
 
@@ -155,6 +159,7 @@ CREATE TABLE IF NOT EXISTS silver.title_director (
 );
 
 CREATE INDEX IF NOT EXISTS idx_title_director_nconst ON silver.title_director(nconst);
+CREATE INDEX IF NOT EXISTS idx_title_director_tconst ON silver.title_director(tconst);
 
 COMMENT ON TABLE silver.title_director IS 'Directors of a title, preserving original list order';
 
@@ -169,6 +174,7 @@ CREATE TABLE IF NOT EXISTS silver.title_writer (
 );
 
 CREATE INDEX IF NOT EXISTS idx_title_writer_nconst ON silver.title_writer(nconst);
+CREATE INDEX IF NOT EXISTS idx_title_writer_tconst ON silver.title_writer(tconst);
 
 COMMENT ON TABLE silver.title_writer IS 'Writers of a title, preserving original list order';
 
