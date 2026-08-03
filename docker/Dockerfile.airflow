@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Airflow image's pip guard refuses pip as root; wheel build must run as airflow
+USER airflow
+
 COPY data-engineering/requirements.txt /tmp/requirements.txt
 RUN pip wheel --no-cache-dir --wheel-dir /tmp/wheels -r /tmp/requirements.txt
 
@@ -34,7 +37,11 @@ USER airflow
 
 # Install prebuilt wheels from the builder stage (offline, no build deps)
 COPY --from=builder /tmp/wheels /tmp/wheels
-RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
+RUN pip install --no-cache-dir /tmp/wheels/*.whl
+# Wheels are root-owned after COPY --from; remove as root
+USER root
+RUN rm -rf /tmp/wheels
+USER airflow
 
 COPY data-engineering/gold /opt/gold-build
 USER root
