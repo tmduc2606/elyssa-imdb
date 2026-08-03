@@ -14,6 +14,7 @@ except ImportError:
 import json
 from typing import Optional
 import os
+import glob
 import sys
 from datetime import datetime, timezone
 
@@ -28,10 +29,62 @@ _root_path = "/opt/airflow/data-engineering"
 if not os.path.isdir(os.path.join(_root_path, "bronze")):
     _root_path = "/opt/etl/data-engineering"
 
-# Threshold for sharded processing: tables with >5M source rows
-CHUNKED_CHILD_THRESHOLD = 5_000_000
-# Hash-shard count for large child tables (P0-1 optimization)
+# Hash-shard count for child tables (P0-1/R1). All 8 children are sharded —
+# every IMDb child source exceeds the old 5M threshold, so the chunked
+# full-COPY branch was removed (R4).
 CHILD_SHARD_COUNT = 16
+
+# R2: secondary indexes on the 8 child tables. Dropped before bulk load and
+# recreated afterward; PK/UNIQUE constraints and FK constraints remain
+# enforced (test_fk_integrity covers them). DDL uses IF NOT EXISTS so it is
+# idempotent across the docker-init and silver/schema.sql variants.
+CHILD_SECONDARY_INDEXES = {
+    "silver.title_genre": [
+        ("idx_title_genre_tconst", "CREATE INDEX IF NOT EXISTS idx_title_genre_tconst ON silver.title_genre(tconst)"),
+        ("idx_title_genre_tconst_genre", "CREATE INDEX IF NOT EXISTS idx_title_genre_tconst_genre ON silver.title_genre(tconst, genre)"),
+    ],
+    "silver.title_director": [
+        ("idx_title_director_tconst", "CREATE INDEX IF NOT EXISTS idx_title_director_tconst ON silver.title_director(tconst)"),
+        ("idx_title_director_nconst", "CREATE INDEX IF NOT EXISTS idx_title_director_nconst ON silver.title_director(nconst)"),
+    ],
+    "silver.title_writer": [
+        ("idx_title_writer_tconst", "CREATE INDEX IF NOT EXISTS idx_title_writer_tconst ON silver.title_writer(tconst)"),
+        ("idx_title_writer_nconst", "CREATE INDEX IF NOT EXISTS idx_title_writer_nconst ON silver.title_writer(nconst)"),
+    ],
+    "silver.title_akas_type": [
+        ("idx_title_akas_type_ref", "CREATE INDEX IF NOT EXISTS idx_title_akas_type_ref ON silver.title_akas_type(title_id, ordering)"),
+    ],
+    "silver.title_akas_attribute": [
+        ("idx_title_akas_attribute_ref", "CREATE INDEX IF NOT EXISTS idx_title_akas_attribute_ref ON silver.title_akas_attribute(title_id, ordering)"),
+    ],
+    "silver.title_principal_char": [
+        ("idx_title_principal_char_ref", "CREATE INDEX IF NOT EXISTS idx_title_principal_char_ref ON silver.title_principal_char(tconst, ordering)"),
+    ],
+    "silver.name_profession": [
+        ("idx_name_profession_nconst", "CREATE INDEX IF NOT EXISTS idx_name_profession_nconst ON silver.name_profession(nconst)"),
+    ],
+    "silver.name_known_for_title": [
+        ("idx_name_known_for_nconst", "CREATE INDEX IF NOT EXISTS idx_name_known_for_nconst ON silver.name_known_for_title(nconst)"),
+        ("idx_name_known_for_tconst", "CREATE INDEX IF NOT EXISTS idx_name_known_for_tconst ON silver.name_known_for_title(tconst)"),
+    ],
+}
+
+# R2-ext: FK constraints on the FK-backed children. Dropped during bulk load
+# too — the per-row RI-trigger probe against the parent index dominates load
+# time (measured ~13-15 min/shard vs ~40 s for FK-free children). Re-added
+# NOT VALID + VALIDATED after all children load (single streaming anti-join
+# scan vs per-row probes); the test_fk_integrity DQ gate remains the backstop.
+CHILD_FK_CONSTRAINTS = {
+    "silver.title_akas_type": [
+        ("title_akas_type_title_id_ordering_fkey", "FOREIGN KEY (title_id, ordering) REFERENCES silver.title_akas(title_id, ordering) ON DELETE CASCADE"),
+    ],
+    "silver.title_akas_attribute": [
+        ("title_akas_attribute_title_id_ordering_fkey", "FOREIGN KEY (title_id, ordering) REFERENCES silver.title_akas(title_id, ordering) ON DELETE CASCADE"),
+    ],
+    "silver.title_principal_char": [
+        ("title_principal_char_tconst_ordering_fkey", "FOREIGN KEY (tconst, ordering) REFERENCES silver.title_principal(tconst, ordering) ON DELETE CASCADE"),
+    ],
+}
 
 
 def _pid_exists(pid: int) -> bool:
@@ -132,32 +185,69 @@ def _log_memory(conn, logger, stage_name):
         pass
 
 
-def _process_child_table_sharded(conn, pg_cursor, child_def, src_table, log, shards=CHILD_SHARD_COUNT):
-    """Process a large child table via hash-sharded single-pass UNNEST (P0-1).
+def _parquet_row_count(conn, url):
+    """Read the Parquet footer for a row count without scanning data (R3).
 
-    The source was materialized once (single S3 read) with a _shard column
-    computed as hash(shard_key) % shards. Every row of a given key lands in
-    exactly one shard, so per-shard DISTINCT is globally correct and the
-    PG-side SELECT DISTINCT + ON CONFLICT DO NOTHING can be dropped (PK
-    violations are impossible). This replaces the O(n^2) LIMIT/OFFSET
-    chunking that re-read the whole source once per chunk.
+    parquet_metadata emits one row per row group per column; the row count
+    is max(row_group_num_rows) per row_group_id, summed. Falls back to a
+    full COUNT(*) scan if the metadata read fails (e.g. exotic stores).
     """
-    import os as _os
+    try:
+        return conn.execute(
+            "SELECT sum(row_group_num_rows) FROM ("
+            "  SELECT row_group_id, max(row_group_num_rows) AS row_group_num_rows"
+            f"  FROM parquet_metadata('{url}') GROUP BY row_group_id)"
+        ).fetchone()[0]
+    except Exception:
+        return conn.execute(f"SELECT COUNT(*) FROM read_parquet('{url}')").fetchone()[0]
 
+
+def _partition_child_source(conn, src_url, part_dir, shard_key, log):
+    """Single-pass partitioned copy of a child source (R1).
+
+    COPY ... PARTITION_BY (_shard) writes _shard=N/ directories so a shard
+    scan reads only 1/16 of the source. The old approach materialized the
+    source once and re-scanned it with WHERE _shard = N per shard (~17x
+    total reads); this is ~2x. A stale partition dir from a crashed run is
+    removed first (stale-dir guard).
+    """
+    import shutil
+
+    if os.path.isdir(part_dir):
+        shutil.rmtree(part_dir, ignore_errors=True)
+    os.makedirs(part_dir, exist_ok=True)
+    conn.execute(f"""
+        COPY (
+            SELECT *,
+                   CAST(((hash("{shard_key}") % {CHILD_SHARD_COUNT}) + {CHILD_SHARD_COUNT}) % {CHILD_SHARD_COUNT} AS SMALLINT) AS _shard
+            FROM read_parquet('{src_url}')
+        ) TO '{part_dir}' (FORMAT PARQUET, PARTITION_BY (_shard))
+    """)
+    log.info(f"    partitioned into {CHILD_SHARD_COUNT} shards at {part_dir}")
+
+
+def _process_child_table_sharded(conn, pg_cursor, child_def, part_dir, log):
+    """Load a child table from a hash-partitioned source (R1).
+
+    The source was partitioned once (COPY ... PARTITION_BY _shard), so
+    _shard=N/ files contain only rows whose key hashes to shard N. Per-shard
+    scans therefore read only 1/16 of the source and per-shard DISTINCT is
+    globally correct; the PG-side SELECT DISTINCT + ON CONFLICT DO NOTHING
+    can be dropped (PK violations are impossible). This replaces the
+    materialized-table + WHERE _shard = N path that re-scanned the whole
+    source once per shard.
+    """
     dst_table = child_def["dst_table"]
     snake_cols = child_def["snake_cols"]
     sql_template = child_def["sql"]
 
-    total_src = conn.execute(f"SELECT count(*) FROM {src_table}").fetchone()[0]
-    log.info(f"  {dst_table}: {total_src} source rows, processing in {shards} hash shards")
-
-    if total_src == 0:
-        log.info(f"  {dst_table}: 0 source rows, skipping")
-        return 0
-
     chunk_total = 0
-    for shard_idx in range(shards):
-        source_expr = f"(SELECT * FROM {src_table} WHERE _shard = {shard_idx})"
+    for shard_idx in range(CHILD_SHARD_COUNT):
+        shard_dir = os.path.join(part_dir, f"_shard={shard_idx}")
+        if not glob.glob(os.path.join(shard_dir, "*.parquet")):
+            log.info(f"  {dst_table}: shard {shard_idx} empty, skipping")
+            continue
+        source_expr = f"(SELECT * FROM read_parquet('{os.path.join(shard_dir, '*.parquet')}'))"
         shard_sql = sql_template.format(source=source_expr)
         csv_path = f"/tmp/silver_{dst_table.replace('.', '_')}_shard_{shard_idx}.csv"
         conn.execute(f"COPY ({shard_sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
@@ -176,7 +266,7 @@ def _process_child_table_sharded(conn, pg_cursor, child_def, src_table, log, sha
         shard_rows = pg_cursor.rowcount
         pg_cursor.execute(f"DROP TABLE IF EXISTS {stg_table}")
 
-        _os.remove(csv_path)
+        os.remove(csv_path)
         chunk_total += shard_rows
         log.info(f"  {dst_table}: shard {shard_idx} loaded ({shard_rows} rows)")
 
@@ -494,11 +584,8 @@ class SilverTransformOperator(BaseOperator):
                         f" AND \"{not_null_col}\" != '\\N'"
                     )
 
-                # Count rows directly from Parquet (no temp table materialization)
-                count_sql = f"SELECT COUNT(*) FROM read_parquet('{parquet_url}')"
-                if not_null_col:
-                    count_sql += where_clause
-                row_count = conn.execute(count_sql).fetchone()[0]
+                # R3: footer row count — no full scan for the pre-count
+                row_count = _parquet_row_count(conn, parquet_url)
 
                 if row_count == 0:
                     self.log.info(f"  {src_table}: 0 rows, skipping")
@@ -823,6 +910,20 @@ class SilverTransformOperator(BaseOperator):
             ]
 
             child_rows = 0
+            # R2: drop secondary indexes on the child tables before bulk load.
+            # Recreated after the loop (and in the except path on failure).
+            with pg.cursor() as idxc:
+                for _tbl, _idxs in CHILD_SECONDARY_INDEXES.items():
+                    for _name, _ddl in _idxs:
+                        idxc.execute(f"DROP INDEX IF EXISTS silver.{_name}")
+                # R2-ext: FK constraints on FK-backed children are dropped for
+                # the load too (per-row RI probes dominate; re-added below).
+                for _tbl, _fks in CHILD_FK_CONSTRAINTS.items():
+                    for _name, _ddl in _fks:
+                        idxc.execute(f"ALTER TABLE {_tbl} DROP CONSTRAINT IF EXISTS {_name}")
+            pg.commit()
+            self.log.info("[R2] Dropped secondary indexes + FK constraints on child tables for bulk load")
+
             for child_idx, child in enumerate(child_table_defs):
                 child_parquet_url = f"{self.bronze_path}{child['src_table']}.parquet"
                 try:
@@ -833,67 +934,38 @@ class SilverTransformOperator(BaseOperator):
 
                 self.log.info(f"  [{child_idx+1}/{len(child_table_defs)}] Starting {child['dst_table']}...")
 
-                # Count directly from Parquet (avoid materializing temp table for small sources)
-                total_src = conn.execute(f"SELECT count(*) FROM read_parquet('{child_parquet_url}')").fetchone()[0]
+                # R3: footer row count — no full scan for the pre-count
+                total_src = _parquet_row_count(conn, child_parquet_url)
 
-                use_sharded = total_src > CHUNKED_CHILD_THRESHOLD
+                if total_src == 0:
+                    self.log.info(f"  {child['dst_table']}: 0 source rows, skipping")
+                    continue
 
-                if use_sharded:
-                    # Materialize source Parquet once with a _shard column
-                    # (P0-1: replaces LIMIT/OFFSET chunking, which re-read the
-                    # full source once per chunk — O(n^2)).
-                    src_tbl = f"src_{child['src_table'].replace('.', '_')}"
-                    shard_key = child.get("shard_key", child["snake_cols"][0])
-                    conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
-                    conn.execute(f"""
-                        CREATE TABLE {src_tbl} AS
-                        SELECT *,
-                               CAST(((hash("{shard_key}") % {CHILD_SHARD_COUNT}) + {CHILD_SHARD_COUNT}) % {CHILD_SHARD_COUNT} AS SMALLINT) AS _shard
-                        FROM read_parquet('{child_parquet_url}')
-                    """)
+                # R1: partition the source once (single S3 pass) into
+                # _shard=N/ directories, then load each shard from its own
+                # files (1/16 of the source per shard). Replaces the
+                # materialized-table + WHERE _shard=N re-scan of the whole
+                # source per shard (~17x total reads -> ~2x).
+                src_tbl_name = child["src_table"].replace('.', '_')
+                part_dir = os.path.join(duckdb_temp, "partitioned", src_tbl_name)
+                shard_key = child.get("shard_key", child["snake_cols"][0])
+                self.log.info(f"  {child['dst_table']}: {total_src:,} source rows, partitioning by {shard_key} ({CHILD_SHARD_COUNT} shards)")
+                _partition_child_source(conn, child_parquet_url, part_dir, shard_key, self.log)
+
+                try:
                     with pg.cursor() as pg_cursor:
                         pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
-                        self.log.info(f"  {child['dst_table']}: large source ({total_src:,} rows), using hash-sharded UNNEST ({CHILD_SHARD_COUNT} shards)")
-                        chunk_loaded = _process_child_table_sharded(
-                            conn, pg_cursor, child, src_tbl, self.log
-                        )
-                    conn.execute(f"DROP TABLE IF EXISTS {src_tbl}")
-                    child_rows += chunk_loaded
-                    self.log.info(f"  {child['dst_table']}: {chunk_loaded} rows loaded (sharded)")
-                    log.log_stage(stage="silver_transform", batch_id=batch_id,
-                                  status="success", row_count=chunk_loaded,
-                                  message=f"child {child['dst_table']} (sharded)")
-                else:
-                    source_expr = f"(SELECT * FROM read_parquet('{child_parquet_url}'))"
-                    sql = child["sql"].format(source=source_expr)
-                    # Stream UNNEST result directly to CSV without temp table
-                    row_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})").fetchone()[0]
+                        loaded = _process_child_table_sharded(conn, pg_cursor, child, part_dir, self.log)
+                finally:
+                    # R1 stale-dir guard: drop the partition dir even on failure
+                    import shutil
+                    shutil.rmtree(part_dir, ignore_errors=True)
 
-                    if row_count == 0:
-                        self.log.info(f"  {child['dst_table']}: 0 rows, skipping")
-                        continue
-
-                    self.log.info(f"  {child['dst_table']}: {row_count} rows to load (full COPY)")
-
-                    csv_path = os.path.join(csv_dir, f"silver_{child['dst_table'].replace('.', '_')}.csv")
-                    conn.execute(f"COPY ({sql}) TO '{csv_path}' (FORMAT CSV, HEADER true, DELIMITER '|')")
-                    self.log.info(f"  {child['dst_table']}: CSV export done")
-
-                    with pg.cursor() as pg_cursor:
-                        pg_cursor.execute(f"TRUNCATE {child['dst_table']}")
-
-                        with open(csv_path, "r") as f:
-                            cols = ", ".join(child["snake_cols"])
-                            pg_cursor.copy_expert(
-                                f"COPY {child['dst_table']} ({cols}) FROM STDIN WITH (FORMAT CSV, HEADER true, DELIMITER '|', NULL '')",
-                                f,
-                            )
-                    os.remove(csv_path)
-                    child_rows += row_count
-                    self.log.info(f"  {child['dst_table']}: {row_count} rows loaded")
-                    log.log_stage(stage="silver_transform", batch_id=batch_id,
-                                  status="success", row_count=row_count,
-                                  message=f"child {child['dst_table']}")
+                child_rows += loaded
+                self.log.info(f"  {child['dst_table']}: {loaded} rows loaded (sharded)")
+                log.log_stage(stage="silver_transform", batch_id=batch_id,
+                              status="success", row_count=loaded,
+                              message=f"child {child['dst_table']} (sharded)")
 
                 if self.profile_memory:
                     _log_memory(conn, self.log, f"child_{child['dst_table']}")
@@ -902,6 +974,21 @@ class SilverTransformOperator(BaseOperator):
                 conn.execute("CHECKPOINT")
 
             pg.commit()
+            # R2: recreate secondary indexes after all child tables load
+            with pg.cursor() as idxc:
+                for _tbl, _idxs in CHILD_SECONDARY_INDEXES.items():
+                    for _name, _ddl in _idxs:
+                        idxc.execute(_ddl)
+                # R2-ext: re-add FK constraints NOT VALID and validate them.
+                # VALIDATE is one streaming anti-join scan per child (vs the
+                # per-row RI probes that dominated load time).
+                for _tbl, _fks in CHILD_FK_CONSTRAINTS.items():
+                    for _name, _ddl in _fks:
+                        idxc.execute(f"ALTER TABLE {_tbl} ADD CONSTRAINT {_name} {_ddl} NOT VALID")
+                        self.log.info(f"  {_tbl}: validating FK {_name}")
+                        idxc.execute(f"ALTER TABLE {_tbl} VALIDATE CONSTRAINT {_name}")
+            pg.commit()
+            self.log.info("[R2] Recreated secondary indexes + validated FK constraints on child tables")
             # P3-12: refresh planner statistics so wait_silver's n_live_tup
             # polling (and dbt's incremental filtering) sees accurate counts
             with pg.cursor() as an:
@@ -939,6 +1026,21 @@ class SilverTransformOperator(BaseOperator):
                 pass
             try:
                 pg.rollback()
+            except Exception:
+                pass
+            # R2: a failed run must not leave the child secondary indexes
+            # dropped (they were committed before the child loop)
+            try:
+                with pg.cursor() as idxc:
+                    for _tbl, _idxs in CHILD_SECONDARY_INDEXES.items():
+                        for _name, _ddl in _idxs:
+                            idxc.execute(_ddl)
+                    # R2-ext: re-add FK constraints NOT VALID (schema intact;
+                    # the next successful run validates them)
+                    for _tbl, _fks in CHILD_FK_CONSTRAINTS.items():
+                        for _name, _ddl in _fks:
+                            idxc.execute(f"ALTER TABLE {_tbl} ADD CONSTRAINT {_name} {_ddl} NOT VALID")
+                pg.commit()
             except Exception:
                 pass
             raise

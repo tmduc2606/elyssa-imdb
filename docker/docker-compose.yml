@@ -11,13 +11,12 @@
 # Bronze/Silver/Gold are bind-mounted to ../data-science/marts/ so they
 # survive Docker wipes. The DS EDA notebook Part D reads from those paths.
 #
-# Memory Budget (~7.4 GB idle, ~11.5-12 GB peak out of 13.9 GB usable):
-#   postgres:   2.5g limit (shared_buffers=512MB, work_mem=64MB)
-#   airflow:    1.5g limit (single-task, parallelism=1)
+# Memory Budget (R5 — trimmed for the ~10 GB WSL2 VM; keeps ~3 GB headroom):
+#   postgres:   2.0g limit (shared_buffers=512MB, work_mem=64MB)
+#   airflow:    2.5g limit (single-task, parallelism=1)
 #   etl-runner: 2g limit (idle until silver/gold runs)
 #   rustfs:     256m limit
-#   OS/WSL2:    ~4 GB headroom
-#   Total idle: ~7.4 GB (53%), peak: ~11.5 GB (83%)
+#   Total caps: ~6.75 GB (68% of VM), ~3 GB VM headroom
 
 services:
   # ─── PostgreSQL + TimescaleDB ───────────────────────────────────
@@ -53,7 +52,7 @@ services:
     # 1g tmpfs is demand-paged (no real RAM cost until used); belt-and-braces
     # with dynamic_shared_memory_type=sysv in postgres/custom.conf.
     shm_size: '1g'
-    mem_limit: '2.5g'
+    mem_limit: '2.0g'
     oom_score_adj: 500
     ports:
       - "54321:5432"
@@ -141,10 +140,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.airflow
     container_name: elyssa-airflow
-    # 3g: silver_export/gold_export stream 100M+ rows through DuckDB
+    # 2.5g: silver_export/gold_export stream 100M+ rows through DuckDB
     # postgres_scanner inside this container; 1.5g OOM-killed the export
-    # and its retry loop blocked the only task slot for hours.
-    mem_limit: 3g
+    # and its retry loop blocked the only task slot for hours. R5: trimmed
+    # from 3g so the ~10 GB WSL2 VM keeps ~3 GB headroom (no swap-thrash).
+    mem_limit: 2.5g
     oom_score_adj: -250
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
