@@ -1,10 +1,35 @@
+<div align="center">
+
 # Codename: Elyssa — Web Application
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production-green.svg)](docs/SMOKE_TEST.md)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green.svg)](web-application/api)
+[![GraphQL](https://img.shields.io/badge/GraphQL-Strawberry-e10098.svg)](web-application/api)
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](web-application/client)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6.svg)](web-application/client)
+
+</div>
+
+## Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Mart Reference](#mart-reference)
+- [Quick Start](#quick-start)
+- [API Endpoints](#api-endpoints)
+- [Testing](#testing)
+- [Data Storage](#data-storage)
+- [ML Models](#ml-models)
+- [Project Structure](#project-structure)
+
+## Overview
+
+Full-stack web layer serving IMDb analytics: GraphQL + REST API backed by DuckDB views over 6 Gold Parquet marts, with JWT auth, watchlist, and ML-powered predictions in an authenticated React 19 SPA.
 
 **Location**: `web-application/`
 **Status**: Phase 4 Complete (Phases 0–4)
 **Stack**: FastAPI · GraphQL (Strawberry) · React 19 · Vite 6 · TypeScript 5 · Tailwind CSS 4
-
----
 
 ## Architecture
 
@@ -16,6 +41,8 @@ Browser (React SPA :5173)
   └── Static ────▶ Vite dev server / CDN
 ```
 
+## Mart Reference
+
 | Mart | Rows | Purpose |
 |------|------|---------|
 | `dim_title` | 12.6M | Title metadata |
@@ -24,8 +51,6 @@ Browser (React SPA :5173)
 | `fact_performance` | 100M | Performance credits |
 | `fact_episode` | 9.7M | Episode → series mapping |
 | `fact_title_rating` | 1.7M | Rating snapshots over time |
-
----
 
 ## Quick Start
 
@@ -55,7 +80,7 @@ if (-not (Test-Path "../data-science/marts/gold/dim_title.parquet")) {
 ### Contract Conformance
 
 ```bash
-pytest tests/test_contract.py -v    # verifies api-to-frontend.md compliance
+pytest tests/test_contract.py -v    # verifies frontend contract compliance
 ```
 
 ### Backend
@@ -88,8 +113,6 @@ Vite proxies `/graphql`, `/auth`, and `/api` to the backend.
 docker compose up -d        # starts api + redis (root docker-compose.yml, ~1 GB RAM)
 docker compose -f docker/docker-compose.yml up -d   # DE infra (separate terminal)
 ```
-
----
 
 ## API Endpoints
 
@@ -131,8 +154,6 @@ docker compose -f docker/docker-compose.yml up -d   # DE infra (separate termina
 | POST | `/watchlist` | Add title to watchlist |
 | DELETE | `/watchlist/{id}` | Remove from watchlist |
 
----
-
 ## Testing
 
 | Suite | Command | Count |
@@ -142,8 +163,6 @@ docker compose -f docker/docker-compose.yml up -d   # DE infra (separate termina
 | E2E (Playwright) | `cd client && npm run e2e` | 5 critical paths |
 | Backend lint | `ruff check api/` | — |
 | Frontend lint | `cd client && npm run lint` | — |
-
----
 
 ## Data Storage
 
@@ -166,8 +185,6 @@ Passwords are hashed with **bcrypt**. JWT access tokens expire in 15 minutes; re
 
 Multi-tier: `Redis → TTL` with in-memory `dict` fallback. Configured via `ELYSSA_REDIS_ENABLED` env var (defaults to `true`).
 
----
-
 ## ML Models
 
 | Model | Type | Task | Input Features |
@@ -176,8 +193,6 @@ Multi-tier: `Redis → TTL` with in-memory `dict` fallback. Configured via `ELYS
 | CatBoost | Gradient boosting | Rating regression | Same feature vector |
 
 Artifacts live in `data-science/marts/processed/`. Inference falls back gracefully if a model is absent.
-
----
 
 ## Project Structure
 

@@ -1,12 +1,37 @@
+<div align="center">
+
 # Codename: Elyssa — IMDb Intelligence Platform
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production-green.svg)](docs/SMOKE_TEST.md)
+[![Docker](https://img.shields.io/badge/Docker-24%2B-blue.svg)](docker/docker-compose.yml)
+[![Airflow](https://img.shields.io/badge/Airflow-Orchestration-orange.svg)](data-engineering/README.md)
 
-End-to-end IMDb analytics platform: **Bronze→Silver→Gold data pipeline** (DE) → **ML models** (DS) → **Web application** (API + frontend).
+**End-to-end IMDb analytics: Bronze→Silver→Gold (DE) → ML (DS) → Web (API + Frontend)**
 
----
+</div>
 
-## System Architecture
+## News
+
+- [2026-07] 🚀 Elyssa IMDb platform launched — Bronze→Silver→Gold → ML → Web
+- [2026-07] 📊 Tier-3 memory optimization (M1–M10) applied — OOM crash resolved
+- [2026-07] 🧪 Smoke test validated — 30-minute zero-Docker walkthrough available at [SMOKE_TEST.md](docs/SMOKE_TEST.md)
+
+## Contents
+
+- [Architecture](#architecture)
+- [Install](#install)
+- [Docker Stacks](#docker-stacks)
+- [Module READMEs](#module-readmes)
+- [Repository Structure](#repository-structure)
+- [Service URLs](#service-urls)
+- [Hardware Requirements](#hardware-requirements)
+- [Pipeline Performance](#pipeline-performance)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Architecture
 
 ```
 IMDb .tsv.gz
@@ -32,9 +57,7 @@ IMDb .tsv.gz
                     Browser (React SPA)
 ```
 
----
-
-## Quick Start
+## Install
 
 | Time | Path | What You Get |
 |------|------|-------------|
@@ -75,9 +98,7 @@ docker compose up -d
 docker compose -f docker/docker-compose.yml up -d && docker compose up -d
 ```
 
----
-
-## Module READMEs — Distinctive per Directory
+## Module READMEs
 
 Each module has its own complete README with module-specific quick starts, architecture, and references:
 
@@ -87,21 +108,6 @@ Each module has its own complete README with module-specific quick starts, archi
 | **Data Science** | `data-science/` | [README](data-science/README.md) | ML pipeline, feature engineering, model training, quality gates |
 | **Web Application** | `web-application/` | [README](web-application/README.md) | FastAPI + GraphQL API, React SPA, endpoints, testing |
 | **MLOps** | `mlops/` | [README](mlops/README.md) | Docker Compose, MLflow, monitoring, IaC |
-
----
-
-## Cross-Module Contracts
-
-```
-DE (Gold Parquet) ──gold-to-ds.md──▶ DS (feature engineering + modeling)
-DE (Gold Parquet) ─gold-to-api.md──▶ Web (API data sources)
-DS (MLflow) ────────ds-to-web.md──▶ Web (ML model serving)
-Web (API) ─────api-to-frontend.md──▶ Frontend (React SPA)
-```
-
-Each contract is version-controlled in the consumer module's `contracts/` directory.
-
----
 
 ## Repository Structure
 
@@ -137,8 +143,6 @@ elyssa-imdb/
 └── AGENTS.md             # Root agent orchestration entry point
 ```
 
----
-
 ## Service URLs
 
 | Service | URL | Credentials |
@@ -150,8 +154,6 @@ elyssa-imdb/
 | Frontend | http://localhost:5173 | — |
 | MLflow | http://localhost:5000 | — |
 | Grafana | http://localhost:3000 | `admin` / `admin` |
-
----
 
 ## Hardware Requirements
 
@@ -166,8 +168,6 @@ All containers have explicit `mem_limit` to prevent resource starvation.
 Run only the stack you need — see [Docker Stacks](#docker-stacks) above.
 Build sequentially (`docker compose build --no-cache <service>`) to avoid
 memory pressure during image compilation on constrained hosts.
-
----
 
 ## Pipeline Performance
 
@@ -188,8 +188,6 @@ is **not** representative — the table below shows per-layer active time. See
 | DS Pipeline | ~3–4 hours |
 | Web API startup | ~30 s |
 
----
-
 ## Documentation
 
 | Document | Description |
@@ -203,7 +201,12 @@ is **not** representative — the table below shows per-layer active time. See
 | `data-science/docs/` | DS implementation plan, API docs, assessment reports |
 | `mlops/checklists/` | MLOPS.1–15 audit sheets |
 
----
+## Contributing
+
+1. Fork and clone the repository
+2. Run the [smoke test](docs/SMOKE_TEST.md) to verify the environment
+3. Make changes in the relevant module (`data-engineering/`, `data-science/`, `web-application/`, or `mlops/`)
+4. Open a pull request with a description of the change and affected modules
 
 ## License
 

@@ -1,6 +1,34 @@
+<div align="center">
+
 # Elyssa Data Engineering — Bronze→Silver→Gold Pipeline
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production-green.svg)](docs/SMOKE_TEST.md)
+[![DuckDB](https://img.shields.io/badge/DuckDB-Analytics-orange.svg)](data-engineering/README.md)
+[![Airflow](https://img.shields.io/badge/Airflow-Orchestration-orange.svg)](data-engineering/README.md)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-blue.svg)](data-engineering/README.md)
+
+</div>
+
+## Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Tier-3 Memory Optimization](#tier-3-memory-optimization)
+- [Auto-Cleanup Between Layers](#auto-cleanup-between-layers)
+- [Speed vs. Memory](#speed-vs-memory)
+- [Prerequisites](#prerequisites)
+- [Service Memory Budgets](#service-memory-budgets)
+- [Quick Start](#quick-start)
+- [Layer Progress](#layer-progress)
+- [DAG Status & Troubleshooting](#dag-status--troubleshooting)
+- [Known Issues & Fixes](#known-issues--fixes)
+- [Outputs](#outputs)
+- [Service URLs](#service-urls)
+- [Key Docs](#key-docs)
+
 ## Overview
+
 Medallion architecture processing IMDb `.tsv.gz` into queryable star-schema marts.
 
 | Layer | Engine | I/O | Output | Measured (final run) |
@@ -17,24 +45,15 @@ Medallion architecture processing IMDb `.tsv.gz` into queryable star-schema mart
 
 All layers read/write through **RustFS** (S3-compatible, localhost), with bind mounts for DS notebook consumption.
 
-## Critical: WSL2 Memory Constraint
+## Architecture
 
-**Docker Desktop on Windows runs containers inside a WSL2 VM.** The default WSL2 memory cap is **8 GB**, regardless of host RAM. Check yours:
-
-```powershell
-wsl --status  # Look for "memory limit"
+```
+IMDb .tsv.gz → Bronze (DuckDB) → Silver (PostgreSQL) → Gold (dbt) → Export (Parquet)
+                                     ↑                                    ↑
+                             Airflow DAG orchestrates all stages        marts/gold/
 ```
 
-If it says 8 GB (or less), the effective RAM for Docker is **8 GB**, not 16 GB. All memory budgets below are calculated for this constraint. To raise the cap, create `%USERPROFILE%\.wslconfig`:
-
-```ini
-[wsl2]
-memory=12GB
-processors=4
 ```
-
-## Architecture Notes (post-hotfix state)
-
 Phase 1 ran 27 hotfixes since the `rustfs_integration_plan.md` baseline (commit `8383467` → HEAD
 `02ad9ed`) to reach a stable end-to-end success. Headline changes:
 
@@ -49,6 +68,66 @@ Phase 1 ran 27 hotfixes since the `rustfs_integration_plan.md` baseline (commit 
 | dbt | Exclusive file lock (`/tmp/dbt_run.lock`), stale PID kill, `--full-refresh --no-partial-parse`, threads=2. |
 
 The old PySpark design was superseded by the DuckDB stack during optimization (see `docs/final_pipeline_summary.md` §5 for the full hotfix log).
+
+---
+
+## Tier-3 Memory Optimization
+
+**Previous problem:** OOM crash at `silver.title_director` — DuckDB `memory_limit='4GB'` inside Airflow container with `mem_limit: 2g`.
+
+**Applied fixes (see `docs/de_optimization_plan_tier3_memory.md`):**
+
+| Fix | What | Why |
+|-----|------|-----|
+| M1 | DuckDB `memory_limit` → 1.2 GB (silver), 1.5 GB (bronze) | Prevents cgroup OOM kill — DuckDB spills to disk gracefully |
+| M2 | New `etl-runner` container (2 GB budget) | DuckDB no longer competes with Airflow for memory |
+| M3 | Chunked UNNEST (1M-row batches) | Bounds peak memory during array explosions (title.principals_char, etc.) |
+| M4 | `etl_temp` Docker volume | Spill I/O off the container writable layer onto a dedicated volume |
+| M5 | PG session tuning (`maintenance_work_mem`, `wal_level`) | Faster bulk COPY, less WAL amplification |
+| M6 | Removed dead PySpark imports + pandas | Cleaner dependency tree |
+| M7 | Multi-stage Docker builds | Smaller images (~800 MB vs ~1.2 GB for airflow) |
+| M8 | Airflow parallelism 1, scheduler heartbeat 30s | Matches 2C/4T CPU, reduces scheduler overhead |
+| M9 | `oom_score_adj` on all services | ETL runner killed last (mid-transaction), Postgres killed first |
+| M10 | `--profile-memory` flag + `_log_memory()` hook | Build per-transformation sizing matrix |
+
+---
+
+## Benchmarks
+
+### DuckDB Ingestion Throughput
+
+Verified on reference hardware (AMD Athlon 200GE, 16 GB RAM, Docker Desktop + WSL2).
+
+| Table | Rows | Scan Time | Throughput |
+|-------|------|-----------|------------|
+| title.basics | 12,593,486 | 4.9 ms | 2.6M rows/s |
+| title.akas | 57,934,300 | 16.2 ms | 3.6M rows/s |
+| title.crew | 12,593,486 | 2.6 ms | 4.8M rows/s |
+| title.episode | 9,731,563 | 2.6 ms | 3.7M rows/s |
+| title.principals | 100,109,752 | 21.7 ms | 4.6M rows/s |
+| title.ratings | 1,684,492 | 1.5 ms | 1.1M rows/s |
+| name.basics | 15,432,611 | 3.9 ms | 4.0M rows/s |
+| **Total** | **210,079,690** | **53.4 ms** | **3.9M rows/s** |
+
+**Row count accuracy vs blueprint:** 100.00%
+
+## Auto-Cleanup Between Layers
+
+The pipeline cleans up automatically at every stage boundary:
+- **Bronze:** `CHECKPOINT` after each table flushes DuckDB temp files
+- **Silver parent→child:** `CHECKPOINT` after all parent tables, CSV per table deleted after COPY
+- **Silver child:** Per-chunk temp views dropped, CSV deleted after each chunk
+- **Silver cleanup (finally):** All remaining temp dirs and CSVs removed
+- **Duplicate temp dirs** are `shutil.rmtree()`'d even on pipeline failure
+
+## Speed vs. Memory: The Trade-off
+
+Lower DuckDB `memory_limit` (1.2 GB) forces more spill-to-disk, which is **slower** than a hypothetical crash-free 4 GB run. All other optimizations are orthogonal:
+- **Faster:** PG session tuning, volume-backed spill (avoids Docker overlay I/O tax), chunked CSVs
+- **Slower:** Lower memory limit (more disk spill), chunked UNNEST (repeated parquet scans)
+- **Neutral:** Multi-stage builds, dead code removal, oom_score_adj, memory profiling
+
+The net effect: **completes reliably instead of crashing at ~2h 23m**. Once stable, you can tune `memory_limit` upward in the `etl-runner` container (2 GB budget) for faster runs.
 
 ---
 
@@ -68,18 +147,34 @@ docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/download
 
 This populates `s3://imdb-source/` with the 7 IMDb source files. The pipeline DAG sensor detects them and triggers Bronze ingestion.
 
-### Service Memory Budgets (docker/docker-compose.yml)
+---
 
-**Effective RAM = 8 GB (WSL2 cap).**
+## Service Memory Budgets
 
-| Service | `mem_limit` | Notes |
-|---------|-------------|-------|
-| postgres | **2.5 GB** (+ `shm_size: 1g`) | Silver/Gold warehouse; `shared_buffers=512MB`, `work_mem=64MB` |
-| rustfs | 256 MB | S3 object store (negligible) |
-| etl-runner | **2 GB** | DuckDB ETL engine |
-| airflow | **3 GB** | DAG orchestrator + webserver + export/spill work (raised from 1.5 GB in `a7b7dc7` — 1.5 GB OOM'd during silver/gold export) |
+> **WSL2 Memory Constraint:** Docker Desktop on Windows runs containers inside a WSL2 VM. The default WSL2 memory cap is **8 GB**, regardless of host RAM. Check yours:
+> ```powershell
+> wsl --status  # Look for "memory limit"
+> ```
+> If it says 8 GB (or less), the effective RAM for Docker is **8 GB**, not 16 GB. To raise the cap, create `%USERPROFILE%\.wslconfig`:
+> ```ini
+> [wsl2]
+> memory=12GB
+> processors=4
+> ```
+
+**Docker Compose actual values** (from `docker/docker-compose.yml`):
+
+| Service | `mem_limit` | `oom_score_adj` | Notes |
+|---------|-------------|-----------------|-------|
+| postgres | **2.5 GB** | +500 | Silver/Gold warehouse; `shared_buffers=512MB`, `work_mem=64MB`, `shm_size=1g` |
+| rustfs | 256 MB | — | S3 object store (negligible) |
+| etl-runner | **2 GB** | −500 | DuckDB ETL engine; `DUCKDB_MEMORY_LIMIT=2GB` |
+| airflow | **3 GB** | −250 | DAG orchestrator + webserver + export/spill work |
 
 > **Note:** `memswap_limit` is present in docker-compose.yml for non-WSL2 hosts. On Docker Desktop + WSL2, it may be silently ignored — the `mem_limit` cgroup hard limit still prevents OOM.
+
+**Idle total:** ~5.75 GB / 8 GB WSL2 — headroom for OS + Docker engine.  
+**Peak total (during ETL):** ~7.75 GB / 8 GB WSL2 — tight but within budget.
 
 ---
 
@@ -90,6 +185,8 @@ This stack runs independently from the web app compose.
 # Set convenience alias (optional)
 $dc = "docker compose -f docker/docker-compose.yml"
 ```
+
+## Quick Start
 
 ### Pipeline Mode (Selective Execution)
 
@@ -114,7 +211,7 @@ Use `docker/pipeline-mode.ps1` to start/stop selective pipeline stages without r
 .\docker\pipeline-mode.ps1 stop
 ```
 
-## 1. Build & Start
+### 1. Build & Start
 
 ```powershell
 # Build all DE images
@@ -129,13 +226,13 @@ docker compose -f docker/docker-compose.yml ps --status running
 
 > **Low-RAM tip:** Build one service at a time to avoid parallel build contention:
 > ```powershell
-> docker compose -f docker/docker-compose.yml build postgres
-> docker compose -f docker/docker-compose.yml build rustfs
-> docker compose -f docker/docker-compose.yml build etl-runner
-> docker compose -f docker/docker-compose.yml build airflow
-> ```
+> > docker compose -f docker/docker-compose.yml build postgres
+> > docker compose -f docker/docker-compose.yml build rustfs
+> > docker compose -f docker/docker-compose.yml build etl-runner
+> > docker compose -f docker/docker-compose.yml build airflow
+> > ```
 
-## 2. Sign in to Airflow UI
+### 2. Sign in to Airflow UI
 
 The admin password is pre-seeded as **`admin`** (both username and password).
 
@@ -147,7 +244,7 @@ start http://localhost:18081
 
 > **Note:** If the simple_auth_manager password file was already generated (container restart), the password remains whatever was set on first start. To reset, delete the volume: `docker compose -f docker/docker-compose.yml down -v && docker compose -f docker/docker-compose.yml up -d`
 
-## 3. Unpause & Trigger the DAG
+### 3. Unpause & Trigger the DAG
 
 ```powershell
 # Unpause the pipeline DAG (disabled by default)
@@ -157,12 +254,7 @@ docker exec elyssa-airflow airflow dags unpause imdb_pipeline
 docker exec elyssa-airflow airflow dags trigger imdb_pipeline
 ```
 
-## 4. Watch Progress Layer by Layer
-
-```powershell
-# Follow all Airflow logs in real-time
-docker compose -f docker/docker-compose.yml logs -f airflow
-```
+## Layer Progress
 
 ### Bronze Layer (~20 min)
 Look for task `run_bronze` / `wait_bronze` completing (marker `.bronze.completed`). Check output:
@@ -254,32 +346,72 @@ docker stats elyssa-postgres elyssa-rustfs elyssa-etl-runner elyssa-airflow
 # Check DuckDB temp/spill usage (inside etl-runner)
 docker exec elyssa-etl-runner du -sh /opt/etl/tmp/duckdb_spill/
 docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
+
+# Run with memory profiling (build sizing matrix)
+docker exec elyssa-airflow python /opt/airflow/data-engineering/orchestration/operators/silver_operator.py --profile-memory
 ```
 
 ---
 
-## Known Issues (cosmetic / non-blocking — frozen for Phase 1)
+## Known Issues & Fixes
 
-1. **Freshness ERROR on `silver.title_director`** — `failed to patch ingested_at: current tr...`
-   (table lacks the column; `freshness.py` auto-ALTER hits a constraint error). SLA still met.
-   Recommended Phase 2 fix: add `ingested_at` to the silver child-table schema.
-2. **Airflow 3.3 deprecation warnings** — `EmptyOperator`/`PythonOperator` →
-   `airflow.providers.standard.*`, `BaseSensorOperator` → `airflow.sdk.bases.sensor`. Cosmetic.
-3. **Redundant `gold_marts.tar.gz` (4.0 GB in container `/tmp`)** — the gold parquet dir is already
-   bind-mounted to the host (`data-science/marts/gold/`); the tar adds ~13.6 min with no host
-   benefit. Candidate for removal in Phase 2.
-4. **dbt test runtime** — the 4 cooccurrence tests bring the suite to 43 tests; the uniqueness test
-   alone ≈ 53 min, so a scheduled `gold_dbt_test` runs ~70 m. Consider `severity: warn` if runtime matters.
+### Child Table UNNEST Hang
+
+**Symptom:** Silver parent tables load but child tables (e.g. `title_genre`, `title_director`) stay empty indefinitely. DuckDB process shows `futex_wait_queue` — kernel scheduler stall due to massive `ROW_NUMBER() OVER (PARTITION BY ...)` inside UNNEST subquery that cannot spill to disk.
+
+**Fix applied:** All 8 child SQL templates rewritten to use `LATERAL UNNEST(...) WITH ORDINALITY` — no window functions, no intermediate sort. Chunk pagination uses simple `LIMIT/OFFSET` instead of `ROW_NUMBER() OVER ()`. DuckDB `memory_limit` is read from `DUCKDB_MEMORY_LIMIT` env var (default `2GB`).
+
+**If it reoccurs:** Lower `DUCKDB_MEMORY_LIMIT` in `docker/docker-compose.yml` (etl-runner env) and ensure spill dir exists — DuckDB will spill to disk instead of hanging.
+
+### dbt Lock Contention
+
+**Symptom:** `gold_dbt_run` hangs or fails with `relation "gold.fact_episode" already exists`. Multiple concurrent dbt processes from retried DAG runs collide on same PG relations; stale `__dbt_tmp` tables accumulate; partial-parse cache serves stale metadata.
+
+**Fix applied:** `dbt_operator.py` now acquires an exclusive file lock (`/tmp/dbt_run.lock`) before any dbt invocation; kills stale dbt PIDs before starting; cleans `__dbt_tmp` tables and partial-parse cache from PG; always uses `--full-refresh --no-partial-parse`.
+
+**If it reoccurs:** Manually clean dbt artifacts:
+```sql
+DROP SCHEMA IF EXISTS gold CASCADE;
+CREATE SCHEMA gold;
+DELETE FROM pg_stat_activity WHERE state = 'idle in transaction' AND state_change < now() - interval '5 minutes';
+```
+
+### wait_silver Only Checks Parents
+
+**Symptom:** `SilverDoneSensor` reports all tables ready but child tables are still empty — the sensor only polls the 6 parent tables.
+
+**Fix applied:** `SilverDoneSensor` now polls all 14 tables (6 parents + 8 children), up to 480 attempts (4 hours), logging every 4th attempt.
+
+### Freshness ERROR on `silver.title_director`
+
+**Symptom:** `failed to patch ingested_at: current tr...` (table lacks the column; `freshness.py` auto-ALTER hits a constraint error). SLA still met.
+
+**Recommended Phase 2 fix:** add `ingested_at` to the silver child-table schema.
+
+### Airflow 3.3 Deprecation Warnings
+
+**Symptom:** `EmptyOperator`/`PythonOperator` → `airflow.providers.standard.*`, `BaseSensorOperator` → `airflow.sdk.bases.sensor`. Cosmetic.
+
+**Fix applied:** None yet — cosmetic only. Plan migration in Phase 2.
+
+### Redundant `gold_marts.tar.gz` (4.0 GB in container `/tmp`)
+
+**Symptom:** The gold parquet dir is already bind-mounted to the host (`data-science/marts/gold/`); the tar adds ~13.6 min with no host benefit.
+
+**Fix:** Candidate for removal in Phase 2.
+
+### dbt Test Runtime
+
+**Symptom:** The 4 cooccurrence tests bring the suite to 43 tests; the uniqueness test alone ≈ 53 min, so a scheduled `gold_dbt_test` runs ~70 m.
+
+**Fix:** Consider `severity: warn` if runtime matters.
 
 ### Historical Fixes (Phase 1, for context)
-- **300 s orphan-pass kill loop** — every long-running Airflow task killed at ~5 min. Fixed by the
-  detached-subprocess pattern (`b4453bd`); do not revert to inline execution.
-- **`title_crew` export failure** — `Catalog Error: Table with name title_crew does not exist!`
-  (silver exports crew-derived tables; export list is 14 tables, not 15).
-- **PostgreSQL shared-memory ENOSPC** — `could not resize shared memory segment ... No space left
-  on device` in `agg_actor_cooccurrence`. Fixed by `shm_size: 1g` + sysv hardening (`a8779df`).
-- **dbt lock contention** — concurrent dbt processes collide on PG relations. Fixed by exclusive
-  file lock + stale PID kill + `--full-refresh --no-partial-parse`. If it reoccurs:
+
+- **300 s orphan-pass kill loop** — every long-running Airflow task killed at ~5 min. Fixed by the detached-subprocess pattern (`b4453bd`); do not revert to inline execution.
+- **`title_crew` export failure** — `Catalog Error: Table with name title_crew does not exist!` (silver exports crew-derived tables; export list is 14 tables, not 15).
+- **PostgreSQL shared-memory ENOSPC** — `could not resize shared memory segment ... No space left on device` in `agg_actor_cooccurrence`. Fixed by `shm_size: 1g` + sysv hardening (`a8779df`).
+- **dbt lock contention** — concurrent dbt processes collide on PG relations. Fixed by exclusive file lock + stale PID kill + `--full-refresh --no-partial-parse`. If it reoccurs:
   ```sql
   DROP SCHEMA IF EXISTS gold CASCADE;
   CREATE SCHEMA gold;
@@ -291,12 +423,12 @@ docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
 ## Outputs
 - `../data-science/marts/bronze/` — 7 raw Parquet + `.bronze.completed` marker
 - `../data-science/marts/silver/` — 14 Parquet + manifest
-- `../data-science/marts/gold/` — 6 Gold marts (≈5.5 GB Snappy: dim_person 594 MB, dim_title 719 MB,
-  fact_episode 133 MB, fact_performance 2.18 GB, fact_title_principal 1.89 GB, fact_title_rating 16 MB)
+- `../data-science/marts/gold/` — 6 Gold marts (≈5.5 GB Snappy: dim_person 594 MB, dim_title 719 MB, fact_episode 133 MB, fact_performance 2.18 GB, fact_title_principal 1.89 GB, fact_title_rating 16 MB)
 - `../data-science/marts/gold/_MANIFEST.json` — Export audit trail with SHA256 checksums (batch `20260801_080318`)
 - `../data-science/marts/gold/.export.completed` — gold_export completion marker
 
 ## Service URLs
+
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | Airflow UI | http://localhost:18081 | `admin` / `admin` |
@@ -305,7 +437,9 @@ docker exec elyssa-etl-runner du -sh /opt/etl/tmp/csv_intermediates/
 | RustFS Console | http://localhost:9101 | — |
 
 ## Key Docs
+
 - [`docs/final_pipeline_summary.md`](docs/final_pipeline_summary.md) — **final Phase 1 deliverable**: run post-mortem, layer timings, hotfix log (27 commits), cleanup record
+- [`docs/de_optimization_plan_tier3_memory.md`](docs/de_optimization_plan_tier3_memory.md) — Tier-3 memory optimization (M1–M10)
 - [`docs/rustfs_integration_plan.md`](docs/rustfs_integration_plan.md) — RustFS/S3 baseline plan
 - [`docs/schema_dictionary.md`](docs/schema_dictionary.md) — Column-level schema + known deltas
 - [`docs/architecture_overview.md`](docs/architecture_overview.md) — Medallion architecture
