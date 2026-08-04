@@ -38,6 +38,7 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
         table = check["table"]
         metric = check["metric"]
         threshold = check["threshold"]
+        fatal = check.get("fatal", True)
         conn = None
         cursor = None
         try:
@@ -82,6 +83,17 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 else:
                     value = 0.0
                 passed = value <= threshold
+            elif metric == "freshness":
+                sla_hours = check.get("sla_hours", threshold)
+                cursor.execute(f"SELECT MAX(ingested_at) FROM {table}")
+                max_ts = cursor.fetchone()[0]
+                if max_ts is None:
+                    value = 999999.0
+                else:
+                    if max_ts.tzinfo is None:
+                        max_ts = max_ts.replace(tzinfo=timezone.utc)
+                    value = (datetime.now(timezone.utc) - max_ts).total_seconds() / 3600.0
+                passed = value <= sla_hours
             if value is None:
                 passed = False
             if passed and alert_threshold_pct > 0 and value > (alert_threshold_pct / 100.0):
@@ -100,7 +112,8 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
             """, (name, table, metric, value, threshold, passed, batch_id))
             status = "PASS" if passed else "FAIL"
             conn.commit()
-            return {"name": name, "passed": passed, "value": value, "threshold": threshold, "error": None}
+            return {"name": name, "passed": passed, "fatal": fatal,
+                    "value": value, "threshold": threshold, "error": None}
         except Exception as e:
             try:
                 if conn:
@@ -114,7 +127,8 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                     conn.commit()
             except Exception:
                 pass
-            return {"name": name, "passed": False, "value": 0.0, "threshold": threshold, "error": str(e)}
+            return {"name": name, "passed": False, "fatal": fatal,
+                    "value": 0.0, "threshold": threshold, "error": str(e)}
         finally:
             try:
                 if cursor:
@@ -134,9 +148,14 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
         future_to_check = {executor.submit(run_single_check, check): check for check in checks}
         for future in as_completed(future_to_check):
             result = future.result()
-            if not result["passed"]:
+            if not result["passed"] and result.get("fatal", True):
                 all_passed = False
-            status = "PASS" if result["passed"] else "FAIL"
+            if result["passed"]:
+                status = "PASS"
+            elif result.get("fatal", True):
+                status = "FAIL"
+            else:
+                status = "WARN"
             print(f"[DQ] {status}: {result['name']} = {result['value']:.4f} (threshold: {result['threshold']})")
             if result["error"]:
                 print(f"[DQ] ERROR: {result['name']} — {result['error']}")

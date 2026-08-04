@@ -76,8 +76,13 @@ def main() -> int:
             _log(f"Warning: could not remove stale {stale.name}: {e}")
 
     row_counts = {}
-    conn = duckdb.connect(":memory:")
+    # Disk-backed DuckDB (not :memory:) so postgres_scanner COPY spills to disk
+    # instead of blowing the airflow container's memory cap mid-export.
+    db_path = Path("/opt/airflow/output/tmp") / f"silver_export_{os.getpid()}.duckdb"
+    conn = duckdb.connect(str(db_path))
     try:
+        conn.execute("SET memory_limit='1.5GB'")
+        conn.execute("SET threads=2")
         conn.execute("INSTALL postgres_scanner; LOAD postgres_scanner;")
         dsn = (
             f"host={args.pg_host} port={args.pg_port} dbname={args.pg_db} "
@@ -125,6 +130,10 @@ def main() -> int:
         try:
             conn.close()
         except Exception:
+            pass
+        try:
+            db_path.unlink(missing_ok=True)
+        except OSError:
             pass
 
     running_marker.unlink(missing_ok=True)

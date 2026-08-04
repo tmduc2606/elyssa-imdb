@@ -16,6 +16,38 @@ class FreshnessCheckOperator(BaseOperator):
 
     template_fields = ("jdbc_url",)
 
+    @staticmethod
+    def _resolve_reference_time(context):
+        """Resolve the run's reference (logical) time from the most reliable source.
+
+        Airflow 3.3.0 stores logical_date/data_interval_start as NULL for
+        CLI-triggered manual runs (observed on 5/5 runs), so context dates
+        cannot be trusted on their own. Resolution order:
+          1. dag_run.data_interval_start  (scheduled runs, canonical)
+          2. dag_run.logical_date         (if populated)
+          3. run_id suffix for manual__ runs (trigger timestamp; most
+             reliable for CLI-triggered runs)
+          4. dag_run.run_after            (queue time; always populated)
+          5. dag_run.start_date           (when the scheduler adopted it)
+          6. wall-clock now               (last resort, never silent)
+        Returns (datetime, source_label) so the caller can log provenance.
+        """
+        run = context.get("dag_run")
+        if run is not None:
+            for attr in ("data_interval_start", "logical_date", "run_after", "start_date"):
+                value = getattr(run, attr, None)
+                if value is not None:
+                    return value, attr
+        run_id = context.get("run_id")
+        if run_id is None and run is not None:
+            run_id = getattr(run, "run_id", None)
+        if run_id and run_id.startswith("manual__"):
+            try:
+                return datetime.fromisoformat(run_id.split("manual__", 1)[1]), "run_id"
+            except ValueError:
+                pass
+        return datetime.now(timezone.utc), "wall-clock"
+
     def __init__(
         self,
         jdbc_url: str = "",
@@ -48,12 +80,16 @@ class FreshnessCheckOperator(BaseOperator):
             if os.path.isfile(alt):
                 freshness_script = alt
 
+        ref_ts, ref_source = self._resolve_reference_time(context)
+        self.log.info(f"Reference time resolved from {ref_source}: {ref_ts.isoformat()}")
+
         cmd = [
             "python", freshness_script,
             "--jdbc-url", self.jdbc_url,
             "--jdbc-user", self.jdbc_user,
             "--jdbc-password", self.jdbc_password,
             "--sla-hours", str(self.sla_hours),
+            "--reference-time", ref_ts.isoformat(),
         ]
         self.log.info(f"Running freshness check: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)

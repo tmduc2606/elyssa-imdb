@@ -23,14 +23,21 @@ S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
 S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "elyssa")
 S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026")
 
-s3_client = boto3.client(
-    "s3",
-    endpoint_url=S3_ENDPOINT,
-    aws_access_key_id=S3_ACCESS_KEY,
-    aws_secret_access_key=S3_SECRET_KEY,
-    config=Config(signature_version="s3v4"),
-    region_name="us-east-1",
-)
+_s3_client = None
+
+
+def _get_s3_client():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=S3_ENDPOINT,
+            aws_access_key_id=S3_ACCESS_KEY,
+            aws_secret_access_key=S3_SECRET_KEY,
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
+    return _s3_client
 
 
 class IMDbDataSensor(BaseSensorOperator):
@@ -70,7 +77,7 @@ class IMDbDataSensor(BaseSensorOperator):
         batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         try:
-            resp = s3_client.list_objects_v2(Bucket=self._bucket)
+            resp = _get_s3_client().list_objects_v2(Bucket=self._bucket)
         except Exception as e:
             self.log.warning(f"S3 list failed: {e}")
             return False
