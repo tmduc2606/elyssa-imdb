@@ -20,7 +20,7 @@ Excluded: `agg_actor_cooccurrence` (19 GB — not in DS contract).
 ## One-Step Export (inside Airflow container)
 
 ```bash
-docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_gold.py
+docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/gold_export_runner.py
 ```
 
 This runs:
@@ -34,7 +34,7 @@ No tar archive is created: the gold parquet dir is the host bind-mount `data-sci
 
 ```bash
 # 1. Run export inside container
-docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_gold.py
+docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/gold_export_runner.py
 
 # 2. Create tar archive
 docker exec elyssa-airflow sh -c "cd /opt/airflow/output/gold && tar -cf /tmp/gold_marts.tar *.parquet _MANIFEST.json && ls -lh /tmp/gold_marts.tar"

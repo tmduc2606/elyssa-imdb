@@ -162,7 +162,7 @@ for fname in FILES:
 ### ✅ Task 3 — DuckDB: Configure `httpfs` for All ETL Containers
 
 **Files:** `data-engineering/requirements.txt` (no change — httpfs is bundled with DuckDB)
-**Files:** `scripts/run_bronze.py`, `orchestration/operators/silver_operator.py`, `scripts/export_gold.py`
+**Files:** `scripts/run_bronze.py`, `orchestration/operators/silver_operator.py`, `scripts/gold_export_runner.py`
 
 Add S3 bootstrap block to every DuckDB connection:
 

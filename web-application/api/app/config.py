@@ -16,8 +16,8 @@ def _default_gold_marts_path() -> str:
     p = Path(__file__).resolve()
     for parent in p.parents:
         if (parent / ".git").exists():
-            return str(parent / "data-science" / "marts" / "full")
-    return str(p.parent.parent / "data" / "marts" / "full")
+            return str(parent / "data-science" / "marts" / "gold")
+    return str(p.parent.parent / "data" / "marts" / "gold")
 
 
 class Settings(BaseSettings):

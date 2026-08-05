@@ -53,12 +53,18 @@ data-science/skills/
 
 # Agent contracts — excluded from all branches
 data-science/contracts/*
+# EXCEPT: Frozen cross-module contracts are version-controlled
+!data-science/contracts/gold-to-ds.md
+!data-science/contracts/ds-to-web.md
 
 # Web Application agent files
 web-application/AGENTS.md
 web-application/skills/
 web-application/references/
-web-application/docs/
+web-application/docs/*
+# EXCEPT: Canonical Phase-4 blueprints are tracked
+!web-application/docs/full-stack-documentation-plan.md
+!web-application/docs/front-end-blueprint.md
 
 # Track API-to-frontend and gold-to-api contracts
 !web-application/contracts/
@@ -92,7 +98,8 @@ ENV/
 
 # Jupyter
 .ipynb_checkpoints/
-data-science/figures/
+# Ignore direct children of figures/ only — PNG exceptions live in data-science/.gitignore
+data-science/figures/*
 
 # Data Science docs — only track portfolio docs
 data-science/docs/*
@@ -102,6 +109,8 @@ data-science/docs/*
 !data-science/docs/notebook_overhaul_plan.md
 !data-science/docs/PHASE2_DUKE_GUIDE.md
 !data-science/docs/sample_scaling_plan.md
+!data-science/docs/phase2_complete_results_report.md
+!data-science/docs/phase2_results_summary.md
 
 # Track Python scripts (not parquet exports) in data-science/scripts/
 data-science/scripts/*.parquet
@@ -160,8 +169,11 @@ wandb/
 *.npy
 
 # Gold-layer manifest is tracked for audit trail
-!data-science/marts/gold/_MANIFEST.json
+# (exception lives in data-science/.gitignore — a parent-dir ignore cannot be negated here)
 catboost_info/
+
+# dbt local user preference (never project content)
+data-engineering/gold/.user.yml
 
 # ─── Docker ────────────────────────────────────────────────────────
 docker-compose.override.yml

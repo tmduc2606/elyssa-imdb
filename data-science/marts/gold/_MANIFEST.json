@@ -1,0 +1,22 @@
+{
+  "batch_id": "20260804_125633",
+  "exported_at": "2026-08-04T12:56:33.324054+00:00",
+  "tables": [
+    "dim_person",
+    "dim_title",
+    "fact_episode",
+    "fact_performance",
+    "fact_title_principal",
+    "fact_title_rating"
+  ],
+  "row_counts": {
+    "dim_person": 15542622,
+    "dim_title": 12407870,
+    "fact_episode": 9808096,
+    "fact_performance": 100989562,
+    "fact_title_principal": 100989556,
+    "fact_title_rating": 1701910
+  },
+  "layer": "gold",
+  "description": "Gold-layer PostgreSQL tables exported as Parquet for DS benchmarking"
+}

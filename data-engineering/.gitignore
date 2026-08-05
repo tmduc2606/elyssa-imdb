@@ -67,6 +67,8 @@ docs/*
 !docs/DOCKER_CONFIG_SUMMARY.md
 !docs/final_pipeline_summary.md
 !docs/de_optimization_plan_final.md
+!docs/pipeline_performance_metrics.md
+!docs/figures/
 
 # ─── IDE & OS ────────────────────────────────────────────────────
 .vscode/
