@@ -106,13 +106,13 @@ elyssa-imdb/
 | Disk | **≥ 150 GB free** | 512 GB SSD |
 | Docker | 24+ with Compose plugin | 24+ |
 
-**RAM reality check:** the WSL2 VM is hard-capped at 9 GB (`.wslconfig`); DE container caps sum to
+**Reality hiccups:**
+- **Memory consumption:** the WSL2 VM is hard-capped at 9 GB (`.wslconfig`); DE container caps sum to
 6.76 GB. On a 16 GB laptop the host runs at **85–95% RAM for most of a full pipeline run**
 (Bronze/download ~88%, Silver ETL peak 93–98%, Gold declines to ~91%) because Docker Desktop, the
 IDE, and coding agents share the rest. Close heavy apps during full runs; tuning history is
 documented in `%USERPROFILE%\.wslconfig` comments (R5/R6).
-
-**Disk reality check:** a full run's post-trigger footprint is **> 140 GB**, dominated by the
+- **Disk usage:** a full run's post-trigger footprint is **> 140 GB**, dominated by the
 **97 GB PostgreSQL volume** (Silver 51 GB + Gold 38 GB) inside Docker, not the repo (~13 GB of
 Parquet marts). Disk analyzers can make Docker appear to use **2–3× more** than reality — see
 [FAQ: "My disk is near OOM..."](#faq).
@@ -136,9 +136,9 @@ see [Hardware Requirements](#hardware-requirements) and `data-engineering/README
 
 ## FAQ
 
-Notable questions collected across modules.
+_Very important before debugging/running on your own repository._
 
-### My disk is near OOM — a disk analyzer shows Docker using 100–130 GB (2–3× the real data)
+### My disk is near OOM, which later a disk analyzer shows Docker using 100–130 GB (2–3× the real data)
 
 **That's expected, and the analyzer is "right" about the files — not about your real usage.** Docker
 Desktop on Windows stores the entire WSL2 backend (PostgreSQL data, RustFS S3 objects, images,
