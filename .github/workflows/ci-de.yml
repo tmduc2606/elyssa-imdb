@@ -23,6 +23,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r data-engineering/requirements.txt
-      - run: pip install pytest
+      - run: pip install --no-cache-dir -r data-engineering/requirements.txt
+      - run: pip install --no-cache-dir pytest
       - run: pytest data-engineering/tests/ -q --tb=short

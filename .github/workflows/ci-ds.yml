@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install joblib scikit-learn==1.9.0
+      - run: pip install --no-cache-dir joblib scikit-learn==1.9.0
       - run: |
           python -c "
           from joblib import load
@@ -43,6 +43,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install pyarrow pandas joblib catboost scikit-learn==1.9.0
+      - run: pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install --no-cache-dir pyarrow pandas joblib catboost scikit-learn==1.9.0
       - run: python data-science/scripts/validate_contracts.py --processed-dir data-science/tests/fixtures/processed

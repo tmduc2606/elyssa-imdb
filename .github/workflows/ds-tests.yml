@@ -32,8 +32,8 @@ jobs:
       - name: Install dependencies
         run: |
           cd data-science
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir pytest pytest-cov
 
       - name: Run tests
         run: |

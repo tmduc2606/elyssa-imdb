@@ -27,8 +27,8 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install ruff==0.15.15 pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install --no-cache-dir ruff==0.15.15 pytest
+          if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
 
       - name: Lint with ruff
         run: ruff check . --output-format=github
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest pyyaml
+      - run: pip install --no-cache-dir pytest pyyaml
       - name: Validate Gold-to-DS contract
         run: |
           python -c "
