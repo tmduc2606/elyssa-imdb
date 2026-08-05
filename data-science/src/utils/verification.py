@@ -1,5 +1,4 @@
 from pathlib import Path
-import json
 import logging
 
 logger = logging.getLogger(__name__)

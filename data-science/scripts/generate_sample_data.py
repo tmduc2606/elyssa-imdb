@@ -1,7 +1,5 @@
 """Generate sample Parquet + pre-trained models for smoke testing."""
 import duckdb
-import numpy as np
-import json
 from pathlib import Path
 
 SAMPLE_DIR = Path("marts/sample")

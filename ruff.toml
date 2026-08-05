@@ -1,0 +1,33 @@
+# Root ruff configuration shared by all modules (CI runs `ruff check .` from each
+# module working-directory and discovers this file from the parent chain).
+#
+# Intent: keep lint-on-source enforced while tolerating deliberate legacy patterns:
+#   - *.ipynb cells are excluded (reproducible notebook output, not authored Python)
+#   - E402 allowed where module-level `sys.path` bootstrap precedes imports (Airflow DAGs,
+#     container-path shims, FastAPI sys.path shims)
+#   - F821 allowed for platform-guarded `fcntl` in silver_operator (POSIX-only lock)
+#   - F841 allowed for deliberate unused assignments (validation/audit capture)
+# Mechanical cruft (unused imports, f-strings without placeholders) is FIXED, not ignored.
+
+line-length = 120
+target-version = "py312"
+
+extend-exclude = [
+    "*.ipynb",
+    "data-science/marts",
+    "data-engineering/gold",
+    "web-application/client/dist",
+]
+
+[lint.per-file-ignores]
+# Airflow DAG: sys.path bootstrap before imports
+"data-engineering/orchestration/dags/*.py" = ["E402"]
+# Silver ETL operator: container path shim (E402) + POSIX-only fcntl lock (F821)
+"data-engineering/orchestration/operators/silver_operator.py" = ["E402", "F821"]
+# FastAPI sys.path shims
+"web-application/api/app/api/router.py" = ["E402"]
+"web-application/api/app/models/gmu.py" = ["E402"]
+# Deliberate unused assignments (audit/validation capture)
+"data-engineering/dq/run_checks.py" = ["F841"]
+"data-engineering/silver/tests/*.py" = ["F841"]
+"data-science/scripts/run_pipeline.py" = ["F841"]

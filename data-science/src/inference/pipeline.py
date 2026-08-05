@@ -4,7 +4,7 @@ import torch
 import joblib
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 import logging
 
 from src.models.genre.gmu import GatedMultimodalUnit

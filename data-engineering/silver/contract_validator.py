@@ -7,7 +7,6 @@ Validates incoming/outgoing schemas at layer boundaries:
 """
 
 import yaml
-from typing import Optional
 
 
 class ContractViolation(Exception):

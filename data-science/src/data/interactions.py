@@ -6,7 +6,6 @@ both fact tables are sampled with the same ``REPEATABLE(seed)`` so the
 recommender pillar matches the FE sampling contract instead of joining a
 5% ``fact_performance`` sample against a 100% ``dim_title`` view.
 """
-import json
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple

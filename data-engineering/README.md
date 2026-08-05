@@ -2,8 +2,8 @@
 
 # Elyssa Data Engineering — Bronze→Silver→Gold Pipeline
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production-green.svg)](docs/SMOKE_TEST.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production-green.svg)](../docs/SMOKE_TEST.md)
 [![DuckDB](https://img.shields.io/badge/DuckDB-Analytics-orange.svg)](../data-engineering/README.md)
 [![Airflow](https://img.shields.io/badge/Airflow-Orchestration-orange.svg)](../data-engineering/README.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-blue.svg)](../data-engineering/README.md)

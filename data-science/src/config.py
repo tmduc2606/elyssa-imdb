@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 import logging
 
 logger = logging.getLogger(__name__)

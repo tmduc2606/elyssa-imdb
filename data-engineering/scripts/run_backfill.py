@@ -16,7 +16,7 @@ import sys
 import time
 import json
 import urllib.request
-from datetime import datetime, date
+from datetime import date
 
 
 def run(cmd: list[str], check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:

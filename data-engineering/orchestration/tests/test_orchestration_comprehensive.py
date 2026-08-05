@@ -5,7 +5,6 @@ Validates: DAG structure, operator definitions, task dependencies, retry policie
 import os
 import sys
 import time
-import pytest
 import ast
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))

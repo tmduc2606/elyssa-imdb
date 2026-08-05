@@ -1,8 +1,6 @@
 import argparse
 import yaml
-import logging
 import numpy as np
-import pandas as pd
 import json
 import joblib
 import torch
@@ -14,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.loader import GoldDataLoader
 from src.data.splitter import temporal_split
-from src.features.builder import FeatureBuilder
 from src.features.tabular import build_preprocessor, fit_transform_features, binarize_multilabel
 from src.features.text import embed_text_batch
 from src.models.genre.gmu import GatedMultimodalUnit
@@ -22,7 +19,6 @@ from src.models.rating.catboost_regressor import train_catboost
 from src.evaluation.gates import QualityGateEvaluator
 from src.utils.verification import verify_artifacts
 from src.utils.logging import setup_logging
-from src.registry.model_registry import ModelRegistry
 
 logger = setup_logging("elyssa.pipeline")
 

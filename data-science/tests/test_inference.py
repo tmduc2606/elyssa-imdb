@@ -1,8 +1,6 @@
-import json
 import numpy as np
 from pathlib import Path
 
-from src.features.builder import FeatureBuilder
 
 
 def test_build_feature_vector_no_leakage():

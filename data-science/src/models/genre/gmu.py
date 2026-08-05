@@ -4,7 +4,6 @@ import torch.optim as optim
 import numpy as np
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.metrics import f1_score
-from pathlib import Path
 from typing import Tuple, Optional
 import logging
 

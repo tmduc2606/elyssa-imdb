@@ -2,8 +2,8 @@
 
 # Codename: Elyssa — Web Application
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production-green.svg)](docs/SMOKE_TEST.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production-green.svg)](../docs/SMOKE_TEST.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green.svg)](api)
 [![GraphQL](https://img.shields.io/badge/GraphQL-Strawberry-e10098.svg)](api)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](client)

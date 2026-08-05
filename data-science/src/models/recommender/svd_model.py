@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 from surprise import SVD, Reader, Dataset
 from pathlib import Path

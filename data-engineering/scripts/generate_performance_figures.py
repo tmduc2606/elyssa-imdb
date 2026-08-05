@@ -239,15 +239,15 @@ x = np.arange(len(containers))
 
 # Memory
 axes[0].bar(x, mem_gb, 0.5, label='Used', color=['#4472C4', '#ED7D31', '#70AD47'], edgecolor=EDGE, linewidth=LW)
-axes[0].bar(x, [l - u for l, u in zip(mem_limit, mem_gb)], 0.5, bottom=mem_gb,
+axes[0].bar(x, [lim - u for lim, u in zip(mem_limit, mem_gb)], 0.5, bottom=mem_gb,
             label='Free', color=['#BDD7EE', '#F8CBAD', '#C6EFCE'], edgecolor=EDGE, linewidth=LW, alpha=0.5)
 axes[0].set_xticks(x)
 axes[0].set_xticklabels(containers, rotation=15, ha='right', fontsize=TICK_FS)
 axes[0].set_ylabel('Memory (GB)', fontsize=LABEL_FS)
 axes[0].set_title('Memory Usage vs Limit', fontsize=TITLE_FS)
 axes[0].legend(fontsize=TICK_FS)
-for i, (u, l) in enumerate(zip(mem_gb, mem_limit)):
-    axes[0].text(i, l + 0.03, f'{u:.2f}/{l:.1f} GB\n({mem_pct[i]:.0f}%)',
+for i, (u, lim) in enumerate(zip(mem_gb, mem_limit)):
+    axes[0].text(i, lim + 0.03, f'{u:.2f}/{lim:.1f} GB\n({mem_pct[i]:.0f}%)',
                  ha='center', va='bottom', fontsize=8)
 axes[0].set_ylim(0, max(mem_limit) * 1.25)
 

@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from src.data.splitter import (
     temporal_split,
     TRAIN_YEAR_MAX,

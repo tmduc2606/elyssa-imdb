@@ -5,7 +5,6 @@ Validates: DQ config, check definitions, quarantine logic, freshness checks
 import os
 import sys
 import time
-import pytest
 import yaml
 import ast
 

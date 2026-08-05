@@ -2,7 +2,6 @@ import numpy as np
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
-from sklearn.metrics import f1_score
 from pathlib import Path
 import joblib
 import logging

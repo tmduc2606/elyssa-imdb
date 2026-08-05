@@ -5,7 +5,6 @@ to feature_statistics.joblib for the drift_detection Airflow DAG.
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np

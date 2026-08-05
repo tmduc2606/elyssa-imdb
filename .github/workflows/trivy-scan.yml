@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create DS staging dir (Dockerfile.model COPY source)
+        run: mkdir -p data-science/marts/processed
+
       - name: Build ${{ matrix.image }}
         run: docker compose -f mlops/docker-compose.yml build $(echo ${{ matrix.image }} | cut -d: -f1)
 

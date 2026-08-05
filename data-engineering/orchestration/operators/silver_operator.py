@@ -12,7 +12,6 @@ except ImportError:
         def warning(self, *a, **kw): print("[WARN]", a[0] if a else "")
         def error(self, *a, **kw): print("[ERROR]", a[0] if a else "")
 import json
-from typing import Optional
 import os
 import glob
 import sys

@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from pathlib import Path
 from src.models.genre.gmu import GatedMultimodalUnit, make_dataloaders
 
 

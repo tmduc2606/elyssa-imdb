@@ -1,5 +1,4 @@
 import numpy as np
-from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,6 @@ and logs results to silver.data_quality_log and silver.quarantine.
 
 import argparse
 import yaml
-import json
 import sys
 from datetime import datetime, timezone
 
@@ -19,7 +18,6 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
     """Execute checks from config, log results to data_quality_log and quarantine."""
     import psycopg2
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from datetime import datetime, timezone
 
     log = get_logger()
     batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -98,7 +96,7 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
                 passed = False
             if passed and alert_threshold_pct > 0 and value > (alert_threshold_pct / 100.0):
                 passed = False
-                cursor.execute(f"""
+                cursor.execute("""
                     INSERT INTO silver.data_quality_log
                         (check_name, table_name, metric_name, metric_value, threshold, passed, batch_id, logged_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
@@ -165,7 +163,7 @@ def run_checks(config_path: str, jdbc_url: str, jdbc_user: str, jdbc_password: s
 
     log.log_stage(stage="dq_runner", batch_id=batch_id,
                   status="complete" if all_passed else "failed",
-                  message=f"All checks passed" if all_passed else f"Some checks failed")
+                  message="All checks passed" if all_passed else "Some checks failed")
     return all_passed
 def main():
     parser = argparse.ArgumentParser(description="Data Quality Runner")

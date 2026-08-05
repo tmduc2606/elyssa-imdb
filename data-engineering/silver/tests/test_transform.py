@@ -1,12 +1,12 @@
 from silver.transform import (
     null_to_empty, empty_to_null, cast_types, rename_to_silver,
-    explode_array, ARRAY_FIELDS, TYPE_MAP, NULL_MARKER
+    explode_array
 )
-from silver.upsert import SILVER_TABLE_DDL, generate_merge_sql
-from silver.fk_checks import FK_CHECKS, run_fk_checks
+from silver.upsert import SILVER_TABLE_DDL
+from silver.fk_checks import FK_CHECKS
 
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+from pyspark.sql.types import StructType, StructField, StringType
 
 def _spark():
     spark = SparkSession.builder.appName("test").master("local[1]").getOrCreate()

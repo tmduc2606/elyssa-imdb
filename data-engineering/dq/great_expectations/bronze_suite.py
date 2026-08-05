@@ -8,9 +8,7 @@ Validates Silver PostgreSQL tables for data quality:
 Uses GX 1.18 PostgreSQL data source.
 """
 
-import os
 import sys
-from typing import Optional
 
 import great_expectations.expectations as gxe
 from great_expectations.data_context import get_context

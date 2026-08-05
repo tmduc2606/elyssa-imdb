@@ -2,8 +2,8 @@
 
 # Elyssa Data Science — Multi-Modal ML Pipeline
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production-green.svg)](docs/SMOKE_TEST.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production-green.svg)](../docs/SMOKE_TEST.md)
 [![PyTorch](https://img.shields.io/badge/PyTorch-GMU%20%2F%20BiLSTM-red.svg)](src/models/genre/gmu.py)
 [![CatBoost](https://img.shields.io/badge/CatBoost-Rating%20Regression-yellow.svg)](src/models/rating/catboost_regressor.py)
 [![SVD](https://img.shields.io/badge/SVD-Hybrid%20Recsys-blue.svg)](src/models/recommender/svd_model.py)

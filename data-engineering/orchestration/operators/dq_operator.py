@@ -105,7 +105,7 @@ class DataQualityOperator(BaseOperator):
                               status="warning", duration_ms=gx_elapsed,
                               message=f"GX issues: {gx_result.stderr[:200]}")
             else:
-                self.log.info(f"GX validation passed")
+                self.log.info("GX validation passed")
                 log.log_stage(stage="gx_validation", batch_id=batch_id,
                               status="complete", duration_ms=gx_elapsed,
                               message="All GX expectations passed")
