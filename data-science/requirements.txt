@@ -7,9 +7,10 @@
 duckdb==1.5.4
 pandas==2.3.3
 numpy==2.4.6
-pycountry>=24.6.1
-psycopg2>=2.9.12
-polars>=1.0.0
+pycountry==26.2.16
+psycopg2==2.9.12
+polars==1.43.0
+pyarrow==24.0.0
 scipy==1.18.0
 PyYAML==6.0.3
 
@@ -40,4 +41,4 @@ mlflow==3.14.0
 joblib==1.5.3
 
 # --- Jupyter Lab ---
-ipykernel>=7.3.0
+ipykernel==7.3.0

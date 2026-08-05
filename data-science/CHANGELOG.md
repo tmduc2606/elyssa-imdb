@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.1.1 — 2026-08-05
+### Changed
+- `requirements.txt` fully pinned to `.venv`: added `pyarrow==24.0.0`, exact-pinned `polars==1.43.0`, `pycountry==26.2.16`, `psycopg2==2.9.12`, `ipykernel==7.3.0` (consistency with the "Pinned versions from .venv" header)
+
 ## v3.1.0 — 2026-08-03
 ### Added
 - `src/data/interactions.py` — recommender interaction-table builder + persistence (`build_interactions`, `persist_interactions`, `load_interactions`, `interaction_summary`, `user_embeddings_from_interactions`) with FE-consistent `REPEATABLE(42)` dev sampling (plan §4.4)
