@@ -32,14 +32,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Create data directory
-        run: mkdir -p ../../data-science/marts/processed
-
       - name: Run tests
+        env:
+          ELYSSA_GOLD_MARTS_PATH: ${{ github.workspace }}/data-science/tests/fixtures/gold
         run: |
           python -m pytest tests/ -v --tb=short
 
       - name: Lint
         run: |
-          pip install ruff
+          pip install ruff==0.15.15
           ruff check app/ tests/ 2>&1 || true

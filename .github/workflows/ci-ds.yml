@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install ruff
+      - run: pip install ruff==0.15.15
       - run: ruff check data-science/
 
   verify-artifacts:
@@ -28,11 +28,11 @@ jobs:
           python -c "
           from joblib import load
           import json
-          load('data-science/marts/processed/preprocessor.joblib')
-          load('data-science/marts/processed/genre_list_mlb.joblib')
-          load('data-science/marts/processed/scaler.joblib')
-          json.load(open('data-science/marts/processed/feature_columns.json'))
-          json.load(open('data-science/marts/processed/model_inventory.json'))
+          load('data-science/tests/fixtures/processed/preprocessor.joblib')
+          load('data-science/tests/fixtures/processed/genre_list_mlb.joblib')
+          load('data-science/tests/fixtures/processed/scaler.joblib')
+          json.load(open('data-science/tests/fixtures/processed/feature_columns.json'))
+          json.load(open('data-science/tests/fixtures/processed/model_inventory.json'))
           print('All artifacts verified')
           "
 
@@ -43,5 +43,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install pyarrow pandas
-      - run: python data-science/scripts/validate_contracts.py
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install pyarrow pandas joblib catboost
+      - run: python data-science/scripts/validate_contracts.py --processed-dir data-science/tests/fixtures/processed

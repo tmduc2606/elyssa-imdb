@@ -42,7 +42,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push ${{ matrix.service.name }}
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'elyssa-ci-password' }}
         run: |
+          mkdir -p data-science/marts/processed
+          cp -r data-science/tests/fixtures/processed/. data-science/marts/processed/ 2>/dev/null || true
           docker compose -f mlops/docker-compose.yml build ${{ matrix.service.compose_service }}
           docker tag elyssa-${{ matrix.service.name }}:latest ${{ env.IMAGE_PREFIX }}/elyssa-${{ matrix.service.name }}:${{ github.sha }}
           docker tag elyssa-${{ matrix.service.name }}:latest ${{ env.IMAGE_PREFIX }}/elyssa-${{ matrix.service.name }}:latest

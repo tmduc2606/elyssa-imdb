@@ -47,3 +47,13 @@ marts/*
 !marts/gold/_MANIFEST.json
 marts/gold/*
 !marts/gold/_MANIFEST.json
+
+# CI test fixtures (committed so GitHub Actions can validate without runtime marts)
+!tests/fixtures/
+!tests/fixtures/gold/
+!tests/fixtures/gold/*.parquet
+!tests/fixtures/processed/
+!tests/fixtures/processed/*.json
+!tests/fixtures/processed/*.joblib
+!tests/fixtures/processed/*.pt
+!tests/fixtures/processed/*.cbm

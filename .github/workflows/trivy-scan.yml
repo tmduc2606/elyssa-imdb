@@ -16,10 +16,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create DS staging dir (Dockerfile.model COPY source)
-        run: mkdir -p data-science/marts/processed
+        run: |
+          mkdir -p data-science/marts/processed
+          cp -r data-science/tests/fixtures/processed/. data-science/marts/processed/ 2>/dev/null || true
 
       - name: Build ${{ matrix.image }}
-        run: docker compose -f mlops/docker-compose.yml build $(echo ${{ matrix.image }} | cut -d: -f1)
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'elyssa-ci-password' }}
+        run: |
+          docker compose -f mlops/docker-compose.yml build $(echo ${{ matrix.image }} | cut -d: -f1 | sed 's/^elyssa-//')
 
       - name: Run Trivy vulnerability scanner on ${{ matrix.image }}
         uses: aquasecurity/trivy-action@master

@@ -1,0 +1,224 @@
+[
+  {
+    "name": "genre_dummy",
+    "pillar": "genre_classification",
+    "type": "sklearn",
+    "file": "genre\\dummy_classifier.pkl",
+    "metrics": {
+      "val_macro_f1": 0.06267903860154964,
+      "test_macro_f1": 0.05809471618080026
+    },
+    "params": null,
+    "citation": null
+  },
+  {
+    "name": "genre_logreg",
+    "pillar": "genre_classification",
+    "type": "sklearn",
+    "file": "genre\\logistic_regression.pkl",
+    "metrics": {
+      "val_macro_f1": 0.28052857547599025,
+      "test_macro_f1": 0.2540823785239485
+    },
+    "params": null,
+    "citation": null
+  },
+  {
+    "name": "rating_dummy",
+    "pillar": "rating_regression",
+    "type": "sklearn",
+    "file": "rating\\dummy_regressor.pkl",
+    "metrics": {
+      "dummy_val_rmse": 1.5290747198960235,
+      "dummy_val_mae": 1.219294807830478,
+      "dummy_val_r2": -0.051572144988555335,
+      "dummy_test_rmse": 1.565150743082239,
+      "dummy_test_mae": 1.2380938899913112,
+      "dummy_test_r2": -0.045761851716158874
+    },
+    "params": null,
+    "citation": null
+  },
+  {
+    "name": "rating_ridge",
+    "pillar": "rating_regression",
+    "type": "sklearn",
+    "file": "rating\\ridge_regression.pkl",
+    "metrics": {
+      "ridge_val_rmse": 1.644892463943053,
+      "ridge_val_mae": 1.3104687269489734,
+      "ridge_val_r2": -0.216905009652534,
+      "ridge_test_rmse": 1.5494287981524792,
+      "ridge_test_mae": 1.1914767188892281,
+      "ridge_test_r2": -0.0248580080427403
+    },
+    "params": null,
+    "citation": null
+  },
+  {
+    "name": "rec_item_avg",
+    "pillar": "recommender",
+    "type": "baseline_formula",
+    "file": "recommender\\item_avg_recommender.pkl",
+    "metrics": {
+      "test_rmse": 1.5702352581240093
+    },
+    "params": null,
+    "citation": null
+  },
+  {
+    "name": "rec_content_cosine",
+    "pillar": "recommender",
+    "type": "baseline_formula",
+    "file": "recommender\\content_cosine_recommender.pkl",
+    "metrics": {
+      "test_rmse": 2.1037700386333253
+    },
+    "params": null,
+    "citation": null
+  },
+  {
+    "name": "rating_xgb_priyanka",
+    "pillar": "rating_regression",
+    "type": "xgboost",
+    "file": "rating\\xgboost_model.json",
+    "metrics": {
+      "val_rmse": 1.4902942804082773,
+      "test_rmse": 1.5601673315921216,
+      "test_mae": 1.2331893848889515,
+      "test_r2": 0.024382515348008615
+    },
+    "params": {
+      "iterations": 311,
+      "learning_rate": 0.07218050438187497,
+      "depth": 6,
+      "l2_leaf_reg": 7.880647825446016,
+      "bagging_temperature": 0.7038154671828274,
+      "random_strength": 9.183545720306354
+    },
+    "citation": "Priyanka-S2021/Movie-Rating-Prediction-DataScience-Project"
+  },
+  {
+    "name": "genre_bilstm_word2vec",
+    "pillar": "genre_classification",
+    "type": "keras",
+    "file": "genre\\bilstm_model.keras",
+    "metrics": {
+      "val_macro_f1": 0.017526095792358507,
+      "val_micro_f1": 0.10302697328833425,
+      "val_macro_precision": 0.07092059755014099,
+      "val_macro_recall": 0.010664004877450811,
+      "val_hamming_loss": 0.0631134624872061,
+      "val_subset_accuracy": 0.04711097366115149,
+      "test_macro_f1": 0.01724085421324188,
+      "test_micro_f1": 0.1004627009753337,
+      "test_macro_precision": 0.09709851443764726,
+      "test_macro_recall": 0.010625145296205044,
+      "test_hamming_loss": 0.06036446978090711,
+      "test_subset_accuracy": 0.04562797097823368
+    },
+    "params": {
+      "max_vocab": 50000,
+      "max_len": 20,
+      "embedding_dim": 100,
+      "lstm_units": 64
+    },
+    "citation": "ParitKansal/IMDb-Movie-Classification"
+  },
+  {
+    "name": "rec_svd_apraneeth",
+    "pillar": "recommender",
+    "type": "surprise",
+    "file": "recommender\\svd_model.pkl",
+    "metrics": {
+      "val_rmse": 1.3830931655954959,
+      "test_rmse": 1.4200550730366737
+    },
+    "params": {
+      "n_factors": 50
+    },
+    "citation": "apraneeth20/Movie-Recommendation-System"
+  },
+  {
+    "name": "rec_ncf_apraneeth",
+    "pillar": "recommender",
+    "type": "torch",
+    "file": "recommender\\ncf_model.pt",
+    "metrics": {
+      "val_rmse": 1.7158490060785554,
+      "test_rmse": 1.7820131106124482
+    },
+    "params": {
+      "embed_dim": 64,
+      "layers": "[64,32,16]"
+    },
+    "citation": "apraneeth20/Movie-Recommendation-System"
+  },
+  {
+    "name": "genre_gmu",
+    "pillar": "genre_classification",
+    "type": "torch",
+    "file": "genre\\gmu_genre_best.pt",
+    "metrics": {
+      "val_macro_f1": 0.19008213469573518,
+      "test_macro_f1": 0.14498341534707967
+    },
+    "params": {
+      "lr": 0.006774310647414401,
+      "hidden_dim": 256,
+      "dropout": 0.206113796680456,
+      "batch_size": 64
+    },
+    "citation": null
+  },
+  {
+    "name": "rating_catboost",
+    "pillar": "rating_regression",
+    "type": "catboost",
+    "file": "rating\\catboost_rating_model.cbm",
+    "metrics": {
+      "test_rmse": 1.5601673315921216,
+      "test_mae": 1.2331893848889515,
+      "q_error_pQ_error_p50": 1.169822319540605,
+      "q_error_pQ_error_p90": 1.4714307669458617,
+      "q_error_pQ_error_p95": 1.6278307285485218,
+      "q_error_pQ_error_p99": 2.8783685555187737
+    },
+    "params": {
+      "iterations": 311,
+      "learning_rate": 0.07218050438187497,
+      "depth": 6,
+      "l2_leaf_reg": 7.880647825446016,
+      "bagging_temperature": 0.7038154671828274,
+      "random_strength": 9.183545720306354
+    },
+    "citation": null
+  },
+  {
+    "name": "rec_hybrid_svd_bert",
+    "pillar": "recommender",
+    "type": "sklearn",
+    "file": "recommender\\hybrid_lr.pkl",
+    "metrics": {
+      "hybrid_cold_precision_at_10": 0.018181818181818184,
+      "hybrid_cold_recall_at_10": 0.18181818181818182
+    },
+    "params": {
+      "rating_threshold": 7.0,
+      "cold_start_thresh": 5
+    },
+    "citation": null
+  },
+  {
+    "name": "rec_svd_hybrid",
+    "pillar": "recommender",
+    "type": "surprise",
+    "file": "recommender\\svd_hybrid.pkl",
+    "metrics": {
+      "svd_cold_precision_at_10": 0.018181818181818184,
+      "svd_cold_recall_at_10": 0.18181818181818182
+    },
+    "params": null,
+    "citation": null
+  }
+]
