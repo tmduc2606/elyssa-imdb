@@ -44,6 +44,8 @@ jobs:
       - name: Build and push ${{ matrix.service.name }}
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'elyssa-ci-password' }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD || 'elyssa-ci-grafana' }}
+          RUSTFS_SECRET_KEY: ${{ secrets.RUSTFS_SECRET_KEY || 'elyssa-ci-rustfs-secret' }}
         run: |
           mkdir -p data-science/marts/processed
           cp -r data-science/tests/fixtures/processed/. data-science/marts/processed/ 2>/dev/null || true
