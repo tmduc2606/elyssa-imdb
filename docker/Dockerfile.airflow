@@ -27,6 +27,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     procps \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Pre-create output directories for bronze/silver/gold/tmp with correct ownership
@@ -38,9 +39,22 @@ USER airflow
 # Install prebuilt wheels from the builder stage (offline, no build deps)
 COPY --from=builder /tmp/wheels /tmp/wheels
 RUN pip install --no-cache-dir /tmp/wheels/*.whl
+
+# --- Security hardening --------------------------------------------------
+# Base image (apache/airflow:3.3.0) bundles outdated packages flagged by
+# trivy (CRITICAL/HIGH). Pin-upgrade them and drop unused bundles.
+RUN pip install --no-cache-dir --upgrade \
+        "litellm>=1.84.0" \
+        "GitPython>=3.1.57" \
+        "aiohttp>=3.14.3" \
+        "pyasn1>=0.6.4" \
+    && pip uninstall -y ray
 # Wheels are root-owned after COPY --from; remove as root
 USER root
 RUN rm -rf /tmp/wheels
+# Remove unused bundled binaries flagged by trivy: uv/uvx ship vulnerable
+# quinn-proto, docker CLI ships vulnerable Go stdlib — not used at runtime
+RUN rm -f /home/airflow/.local/bin/uv /home/airflow/.local/bin/uvx /usr/bin/docker
 USER airflow
 
 COPY data-engineering/gold /opt/gold-build

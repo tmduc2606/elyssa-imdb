@@ -6,6 +6,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         image:
           - elyssa-api:latest
