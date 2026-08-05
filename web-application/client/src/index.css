@@ -18,7 +18,7 @@
   --color-canvas: #ffffff;
   --color-surface: #f9f9f8;
   --color-text: #111111;
-  --color-text-muted: #787774;
+  --color-text-muted: #6f6f6c;
 
   --color-accent-red-bg: #fdebec;
   --color-accent-red-text: #9f2f2d;
@@ -31,8 +31,8 @@
 
   --color-background: #ffffff;
   --color-foreground: #111111;
-  --color-muted: #787774;
-  --color-muted-foreground: #787774;
+  --color-muted: #6f6f6c;
+  --color-muted-foreground: #6f6f6c;
   --color-card: #f9f9f8;
   --color-card-foreground: #111111;
   --color-border: #eaeaea;
