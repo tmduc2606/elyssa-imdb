@@ -21,6 +21,7 @@ from app.exceptions import (
 )
 from app.graphql.schema import schema
 from app.models.inference import get_model_service
+from app.services import get_poster_service
 
 structlog.configure(
     processors=[
@@ -47,6 +48,33 @@ graphql_router = GraphQLRouter(schema)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_model_service()
+
+    def _prewarm_posters() -> None:
+        _logger = structlog.get_logger()
+        try:
+            con = _prewarm_con()
+            if con is None:
+                return
+            rows = con.execute(
+                """SELECT tconst FROM dim_title
+                   WHERE average_rating IS NOT NULL AND num_votes > 1000
+                   ORDER BY average_rating DESC LIMIT 100"""
+            ).fetchall()
+            ids = [r[0] for r in rows]
+            get_poster_service().prewarm(ids, limit=100)
+        except Exception as exc:
+            _logger.warning("poster prewarm failed", error=str(exc))
+
+    def _prewarm_con():
+        try:
+            from app.graphql.resolvers import _get_con
+            return _get_con()
+        except Exception:
+            return None
+
+    t = threading.Thread(target=_prewarm_posters, daemon=True)
+    t.start()
+
     yield
 
 

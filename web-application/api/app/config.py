@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     redis_enabled: bool = True
 
+    poster_enabled: bool = True
+    poster_base_url: str = "http://localhost:3000"
+    poster_api_key: str = "t0-free-rpdb"
+
     model_artifacts_path: str = ""
 
     cors_origins: list[str] = ["http://localhost:5173"]

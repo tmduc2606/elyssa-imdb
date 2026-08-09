@@ -9,6 +9,7 @@ import duckdb
 
 from app.cache.memory import get_cache
 from app.config import get_settings
+from app.services import get_poster_service
 from app.graphql.types import (
     CastMember,
     Collaborator,
@@ -111,6 +112,7 @@ def resolve_title(tconst: str) -> TitleDetail | None:
     cols = [d[0] for d in con.description]
     data = dict(zip(cols, row))
     genre_str = data.get("genre_list") or ""
+    poster_url = get_poster_service().get_poster_url(data["tconst"])
     result = TitleDetail(
         id=data["tconst"],
         primary_title=data.get("primary_title") or "",
@@ -122,7 +124,7 @@ def resolve_title(tconst: str) -> TitleDetail | None:
         genres=_genres_list(genre_str),
         average_rating=data.get("average_rating"),
         num_votes=data.get("num_votes"),
-        poster_url=None,
+        poster_url=poster_url,
         parent_tconst=data.get("parent_tconst"),
         series_title=data.get("series_title"),
         season_number=data.get("season_number"),
@@ -316,13 +318,14 @@ def resolve_person(nconst: str) -> Person | None:
         return None
     cols = [d[0] for d in con.description]
     data = dict(zip(cols, row))
+    poster_url = get_poster_service().get_poster_url(data["nconst"])
     result = Person(
         id=data["nconst"],
         primary_name=data.get("primary_name") or "",
         birth_year=data.get("birth_year"),
         death_year=data.get("death_year"),
         primary_profession=_profession_list(data.get("profession_list")),
-        poster_url=None,
+        poster_url=poster_url,
         known_for_titles=_resolve_known_for(nconst),
         filmography=_resolve_filmography(nconst),
         collaborators=_resolve_collaborators(nconst),

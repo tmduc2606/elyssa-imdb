@@ -2,7 +2,7 @@
 # Build targets with Docker cache pruning to prevent bloat.
 # DE stack uses docker/docker-compose.yml; Web stack uses root docker-compose.yml.
 
-.PHONY: build build-svc build-quick prune up down clean web-up web-down export mlops-up mlops-down mlops-build
+.PHONY: build build-svc build-quick prune up down clean web-up web-down export mlops-up mlops-down mlops-build posters-up
 
 # ─── DE Stack (docker/docker-compose.yml) ──────────────────
 
@@ -65,3 +65,8 @@ mlops-down:
 mlops-build:
 	docker builder prune -f
 	docker compose -f mlops/docker-compose.yml build
+
+# ─── OpenPosterDB (self-hosted poster service) ──────────────
+
+posters-up:
+	docker compose -f mlops/docker-compose.yml --profile posters up -d openposterdb

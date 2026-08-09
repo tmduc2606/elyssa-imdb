@@ -68,6 +68,29 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── OpenPosterDB (self-hosted RPDB-compatible poster service) ──────
+  openposterdb:
+    image: pnrxadev/openposterdb:latest
+    container_name: elyssa-poster
+    environment:
+      OPDB_API_KEY: ${ELYSSA_POSTER_API_KEY:-t0-free-rpdb}
+      OPDB_CACHE_REDIS_URL: redis://redis:6379/1
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - elyssa-net
+    restart: unless-stopped
+    profiles:
+      - posters
 
   # ─── MLflow Tracking Server ─────────────────────────────────────────
   mlflow:
@@ -98,7 +121,7 @@ services:
       dockerfile: mlops/docker/Dockerfile.api
     container_name: elyssa-api
     environment:
-      ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/gold
       ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
       ELYSSA_DEBUG: "false"
       ELYSSA_REDIS_ENABLED: "true"
@@ -108,7 +131,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - gold_marts:/data/marts/processed:ro
+      - gold_marts:/data/marts/gold:ro
       - api_data:/data
     depends_on:
       redis:
@@ -127,14 +150,14 @@ services:
       dockerfile: mlops/docker/Dockerfile.model
     container_name: elyssa-model
     environment:
-      ELYSSA_GOLD_MARTS_PATH: /data/marts/processed
+      ELYSSA_GOLD_MARTS_PATH: /data/marts/gold
       ELYSSA_DATABASE_URL: sqlite:///data/elyssa.db
       ELYSSA_DEBUG: "false"
       ELYSSA_MLFLOW_TRACKING_URI: http://mlflow:5000
     ports:
       - "8001:8001"
     volumes:
-      - gold_marts:/data/marts/processed:ro
+      - gold_marts:/data/marts/gold:ro
       - api_data:/data
     depends_on:
       mlflow:
@@ -276,7 +299,7 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: ${PWD}/../data-science/marts/processed/
+      device: ${PWD}/../data-science/marts/gold/
       o: bind
 
 networks:

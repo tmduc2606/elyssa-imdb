@@ -47,6 +47,9 @@ export function TitleHero({ title, className }: TitleHeroProps) {
               src={title.posterUrl}
               alt={title.primaryTitle}
               loading="lazy"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
               className="size-full object-cover"
             />
           ) : (

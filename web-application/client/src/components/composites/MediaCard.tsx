@@ -42,6 +42,9 @@ export function MediaCard({
             src={posterUrl}
             alt={title}
             loading="lazy"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
             className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
