@@ -192,7 +192,8 @@ def test_error_format_standard():
 
 # ─── WA-18: REST / GraphQL crew parity ────────────────────────────────
 def test_crew_consistent_graphql_rest():
-    tconst = "tt1375666"
+    # The Matrix — must exist in data-science/tests/fixtures/gold (CI test data).
+    tconst = "tt0133093"
     rest = client.get(f"/api/v1/titles/{tconst}")
     assert rest.status_code == 200, rest.text[:200]
     rest_body = rest.json()["data"]

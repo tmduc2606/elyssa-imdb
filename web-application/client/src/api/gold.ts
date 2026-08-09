@@ -14,7 +14,7 @@ const SEARCH_PAGE_SIZE = 20;
 const BROWSE_PAGE_SIZE = 20;
 
 export const TITLE_DETAIL_QUERY = `
-  query TitleDetail($tconst: ID!) {
+  query TitleDetail($tconst: String!) {
     title(tconst: $tconst) {
       id
       primaryTitle
@@ -52,7 +52,7 @@ export const TITLE_DETAIL_QUERY = `
 `;
 
 export const PERSON_DETAIL_QUERY = `
-  query PersonDetail($nconst: ID!) {
+  query PersonDetail($nconst: String!) {
     person(nconst: $nconst) {
       id
       primaryName
@@ -81,12 +81,7 @@ export const SEARCH_QUERY = `
   query Search($query: String!, $first: Int, $after: String) {
     search(query: $query, first: $first, after: $after) {
       items {
-        ... on Title {
-          id primaryTitle titleType startYear averageRating posterUrl genres
-        }
-        ... on Person {
-          id primaryName birthYear primaryProfession posterUrl
-        }
+        id primaryTitle titleType startYear averageRating numVotes posterUrl genres
       }
       total
       hasMore
@@ -123,7 +118,7 @@ export const HOME_PAGE_QUERY = `
 `;
 
 export const TITLE_RATINGS_QUERY = `
-  query TitleRatings($tconst: ID!, $days: Int) {
+  query TitleRatings($tconst: String!, $days: Int) {
     titleRatings(tconst: $tconst, days: $days) {
       snapshotDate averageRating numVotes
     }

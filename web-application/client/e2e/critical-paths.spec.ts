@@ -4,8 +4,10 @@ test.describe("Critical Paths", () => {
   test("1. Homepage loads and displays header with navigation", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("link", { name: "Elyssa" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Browse" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Top Rated" })).toBeVisible();
+    // Scope to the header — the footer also links to Browse/Top Rated.
+    const header = page.locator("header");
+    await expect(header.getByRole("link", { name: "Browse" }).first()).toBeVisible();
+    await expect(header.getByRole("link", { name: "Top Rated" }).first()).toBeVisible();
     await expect(page.getByRole("search")).toBeVisible();
   });
 
@@ -21,8 +23,8 @@ test.describe("Critical Paths", () => {
   test("3. Browse page loads with genre filters", async ({ page }) => {
     await page.goto("/browse");
     await expect(page.getByRole("heading", { name: /browse/i })).toBeVisible();
-    const filterGroup = page.getByRole("group", { name: "Filters" });
-    await expect(filterGroup).toBeVisible();
+    // Multiple FilterBar groups share the same label — assert any one.
+    await expect(page.getByRole("group", { name: "Filters" }).first()).toBeVisible();
   });
 
   test("4. Auth flow: registration page has form elements", async ({ page }) => {

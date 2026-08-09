@@ -111,13 +111,15 @@ async def login(
 async def refresh(
     request: Request,
     response: Response,
-    _=Depends(check_auth_rate_limit),
 ):
     from datetime import datetime as _dt, timezone as _tz
     settings = get_settings()
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
+        # No cookie = unauthenticated bootstrap; must NOT consume the
+        # rate limit, or every SPA page load would exhaust the auth quota.
         raise HTTPException(401, "Missing refresh token")
+    check_auth_rate_limit(request)
     payload = decode_token(refresh_token)
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid or expired refresh token")

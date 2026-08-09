@@ -25,10 +25,15 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 async function authFetch<T>(path: string, body?: unknown): Promise<T> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = body
+    ? { "Content-Type": "application/json" }
+    : {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${AUTH_URL}${path}`, {
     method: body ? "POST" : "GET",
     credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {

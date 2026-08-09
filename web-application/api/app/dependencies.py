@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import re
 from functools import lru_cache
-from pathlib import Path
 
 import duckdb
-
-from app.config import get_settings
 
 
 @lru_cache
 def get_duckdb() -> duckdb.DuckDBPyConnection:
-    settings = get_settings()
-    con = duckdb.connect()
-    for parquet in sorted(Path(settings.gold_marts_path).glob("*.parquet")):
-        stem = re.sub(r"[^a-zA-Z0-9_]", "_", parquet.stem)
-        path = str(parquet.resolve()).replace("'", "''")
-        con.execute(f"CREATE VIEW IF NOT EXISTS {stem} AS SELECT * FROM read_parquet('{path}')")
-    return con
+    """Deprecated alias — returns the single shared DuckDB connection.
+
+    WA-25: deduplicated with ``app.graphql.resolvers._get_con`` so the API
+    never opens a second connection to the Gold marts. Kept as a thin alias
+    for backwards-compatible imports; all query paths use ``_get_con``.
+    """
+    from app.graphql.resolvers import _get_con
+
+    return _get_con()

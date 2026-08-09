@@ -100,9 +100,18 @@ def load_gmu_from_state_dict(state_dict_path: str, *, device: str = "cpu") -> Ga
 
     The DS notebook saved with ``torch.save(model.state_dict(), ...)``
     so we must instantiate the class first, then load the weights.
+    Input/output dimensions are derived from the checkpoint itself so a
+    retrained model with a different feature set loads without edits.
     """
     sd = torch.load(state_dict_path, map_location=device, weights_only=True)
-    model = GatedMultimodalUnit()
+    dims_tab = sd["encoder_tab.0.weight"].shape[1]
+    dims_text = sd["encoder_text.0.weight"].shape[1]
+    output_dim = sd["classifier.weight"].shape[0]
+    model = GatedMultimodalUnit(
+        dims_tab=int(dims_tab),
+        dims_text=int(dims_text),
+        output_dim=int(output_dim),
+    )
     model.load_state_dict(sd)
     model.to(device)
     model.eval()

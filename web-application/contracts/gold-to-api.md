@@ -7,7 +7,7 @@ Defines the interface between the Gold layer (DE) and the Web Application API ga
 **Producer:** Data Engineering (Gold layer)
 **Consumer:** Web Application API
 **Format:** Parquet (Snappy compression)
-**Location:** `data-science/marts/processed/` (mounted as `/data/marts/processed` in containers)
+**Location:** `data-science/marts/gold/` (mounts as `/data/marts/gold` in containers)
 
 ---
 

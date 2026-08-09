@@ -183,6 +183,16 @@ class ModelService:
                 pass
         return np.zeros(768, dtype=np.float32)
 
+    def get_title_embedding(self, title_id: str | None = None) -> np.ndarray | None:
+        if self._title_embeddings is not None and title_id is not None:
+            try:
+                return self._title_embeddings[title_id]
+            except (KeyError, IndexError, TypeError):
+                pass
+        if self._title_embeddings is not None:
+            return np.zeros(self._title_embeddings.shape[1], dtype=np.float32)
+        return None
+
     def predict_genre(self, features: np.ndarray) -> list[dict]:
         start = time.time()
         if self._gmu_model is not None:

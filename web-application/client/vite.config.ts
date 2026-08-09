@@ -33,6 +33,11 @@ export default defineConfig({
       "/auth": {
         target: process.env.VITE_API_TARGET ?? "http://localhost:8000",
         changeOrigin: true,
+        // /auth is BOTH the API prefix AND the SPA pages /auth/login,
+        // /auth/register. Full page loads (Accept: text/html) must be
+        // served by the SPA router, not proxied to the API.
+        bypass: (req) =>
+          req.headers.accept?.includes("text/html") ? "/" : undefined,
       },
       "/api": {
         target: process.env.VITE_API_TARGET ?? "http://localhost:8000",
