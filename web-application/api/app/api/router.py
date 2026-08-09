@@ -26,6 +26,7 @@ router = APIRouter(prefix="/api/v1")
 
 # ─── Predict Request Models ───────────────────────────────────────────
 class GenrePredictRequest(BaseModel):
+    title_id: str | None = None
     runtime_minutes: int | None = None
     start_year: int | None = None
     title_type: str | None = None
@@ -33,6 +34,7 @@ class GenrePredictRequest(BaseModel):
 
 
 class RatingPredictRequest(BaseModel):
+    title_id: str | None = None
     runtime_minutes: int | None = None
     start_year: int | None = None
     title_type: str | None = None
@@ -306,7 +308,9 @@ async def search(
 @router.post("/predict/genre")
 async def predict_genre(body: GenrePredictRequest):
     svc = get_model_service()
-    features = svc.build_feature_vector(body.model_dump())
+    features = svc.build_feature_vector(
+        body.model_dump(), text_embedding=svc.get_title_embedding(title_id=body.title_id)
+    )
     version = 1 if _inv_exists() else 0
     if features is None:
         return {
@@ -329,7 +333,9 @@ async def predict_genre(body: GenrePredictRequest):
 @router.post("/predict/rating")
 async def predict_rating(body: RatingPredictRequest):
     svc = get_model_service()
-    features = svc.build_feature_vector(body.model_dump())
+    features = svc.build_feature_vector(
+        body.model_dump(), text_embedding=svc.get_title_embedding(title_id=body.title_id)
+    )
     version = 1 if _inv_exists() else 0
     if features is None:
         return {
@@ -358,7 +364,7 @@ async def list_models():
     for m in models:
         m["version"] = 1 if exists else 0
 
-    return {"data": {"models": models}}
+    return {"data": {"models": models, "loaded": svc.ready}}
 
 
 # ─── POST /api/v1/admin/canary-deploy ──────────────────────────────

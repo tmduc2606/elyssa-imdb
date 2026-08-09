@@ -144,10 +144,11 @@ services:
     restart: unless-stopped
     mem_limit: 512m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v1/models | grep -q '\"loaded\":true' || exit 1"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
   # ─── Model Service (GMU + CatBoost + Recommender) ────────────────────
   model:

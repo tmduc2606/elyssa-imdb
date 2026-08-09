@@ -171,6 +171,15 @@ def test_list_titles_filter_genre():
         assert "Action" in item["genres"]
 
 
+def test_models_readiness_payload(client: TestClient):
+    r = client.get("/api/v1/models")
+    assert r.status_code == 200, r.text[:200]
+    body = r.json()["data"]
+    assert "models" in body
+    assert "loaded" in body
+    assert isinstance(body["loaded"], bool)
+
+
 def test_error_format_standard():
     r = client.get("/api/v1/titles/tt99999999")
     assert r.status_code == 404
