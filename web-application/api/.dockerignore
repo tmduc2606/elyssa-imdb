@@ -1,0 +1,28 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local data / logs
+data/
+*.db
+*.log

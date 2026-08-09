@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.next/
+
+# Tests / results
+test-results/
+playwright-report/
+playwright/.cache/
+src/test/
+src/**/*.test.tsx
+src/**/*.test.ts
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.local

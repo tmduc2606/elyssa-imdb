@@ -13,10 +13,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install --no-cache-dir -r web-application/api/requirements.txt
+      - run: pip install --no-cache-dir -r web-application/api/requirements-api.txt
       - run: pytest web-application/api/tests/ -q --tb=short
         env:
           ELYSSA_GOLD_MARTS_PATH: ${{ github.workspace }}/data-science/tests/fixtures/gold
+          ELYSSA_POSTER_ENABLED: "false"
 
   api-contract-test:
     runs-on: ubuntu-latest
@@ -25,10 +26,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install --no-cache-dir -r web-application/api/requirements.txt
+      - run: pip install --no-cache-dir -r web-application/api/requirements-api.txt
       - run: pytest web-application/api/tests/test_contract.py -v
         env:
           ELYSSA_GOLD_MARTS_PATH: ${{ github.workspace }}/data-science/tests/fixtures/gold
+          ELYSSA_POSTER_ENABLED: "false"
 
   frontend-lint:
     runs-on: ubuntu-latest

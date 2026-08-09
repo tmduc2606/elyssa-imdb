@@ -68,6 +68,7 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    mem_limit: 256m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -82,7 +83,7 @@ services:
       OPDB_API_KEY: ${ELYSSA_POSTER_API_KEY:-t0-free-rpdb}
       OPDB_CACHE_REDIS_URL: redis://redis:6379/1
     ports:
-      - "3000:3000"
+      - "3002:3000"
     depends_on:
       redis:
         condition: service_healthy
@@ -117,8 +118,8 @@ services:
   api:
     image: elyssa-api:latest
     build:
-      context: ..
-      dockerfile: mlops/docker/Dockerfile.api
+      context: ../web-application/api
+      dockerfile: Dockerfile
     container_name: elyssa-api
     environment:
       ELYSSA_GOLD_MARTS_PATH: /data/marts/gold
@@ -128,6 +129,8 @@ services:
       ELYSSA_REDIS_URL: redis://redis:6379/0
       ELYSSA_RATE_LIMIT_PER_MINUTE: "200"
       ELYSSA_MLFLOW_TRACKING_URI: http://mlflow:5000
+      ELYSSA_POSTER_ENABLED: "true"
+      ELYSSA_POSTER_BASE_URL: http://openposterdb:3000
     ports:
       - "8000:8000"
     volumes:
@@ -135,12 +138,16 @@ services:
       - api_data:/data
     depends_on:
       redis:
-        condition: service_started
-      mlflow:
-        condition: service_started
+        condition: service_healthy
     networks:
       - elyssa-net
     restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ─── Model Service (GMU + CatBoost + Recommender) ────────────────────
   model:
@@ -165,6 +172,12 @@ services:
     networks:
       - elyssa-net
     restart: unless-stopped
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ─── Frontend (React SPA) ───────────────────────────────────────────
   frontend:
@@ -176,10 +189,17 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - elyssa-net
     restart: unless-stopped
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ─── Airflow ────────────────────────────────────────────────────────
   airflow:
@@ -237,7 +257,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Grafana password required}
       GF_INSTALL_PLUGINS: ""
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
