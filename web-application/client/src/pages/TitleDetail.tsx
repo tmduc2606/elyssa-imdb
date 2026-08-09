@@ -32,6 +32,7 @@ export function TitleDetail() {
 
   const title = data.title;
   const cast = title.cast ?? [];
+  const crew = title.crew ?? [];
   const episodes = title.episodes ?? [];
   const similar = title.similar ?? [];
   const ratings = ratingsData?.titleRatings ?? [];
@@ -49,7 +50,7 @@ export function TitleDetail() {
         <TitleHero title={title} />
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           <div className="lg:col-span-2">
-            <CastList cast={cast} />
+            <CastList cast={cast} crew={crew} />
           </div>
           <div>
             <TitleStatsPanel title={title} />

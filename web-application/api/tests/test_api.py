@@ -179,3 +179,29 @@ def test_error_format_standard():
     assert body["error"]["code"] == "NOT_FOUND"
     assert body["error"]["message"]
     assert "details" in body["error"]
+
+
+# ─── WA-18: REST / GraphQL crew parity ────────────────────────────────
+def test_crew_consistent_graphql_rest():
+    tconst = "tt1375666"
+    rest = client.get(f"/api/v1/titles/{tconst}")
+    assert rest.status_code == 200, rest.text[:200]
+    rest_body = rest.json()["data"]
+    rest_directors = [n.strip() for n in rest_body.get("director_names", "").split(",") if n.strip()]
+    rest_writers = [n.strip() for n in rest_body.get("writer_names", "").split(",") if n.strip()]
+    assert len(rest_directors) > 0, "REST should return at least one director"
+
+    gql = client.post("/graphql", json={
+        "query": "{ title(tconst: \"%s\") { crew { person { primaryName } category } } }" % tconst,
+    })
+    assert gql.status_code == 200, gql.text[:200]
+    crew = gql.json()["data"]["title"]["crew"]
+    gql_directors = [c["person"]["primaryName"] for c in crew if c.get("category") == "director"]
+    gql_writers = [c["person"]["primaryName"] for c in crew if c.get("category") == "writer"]
+
+    assert sorted(rest_directors) == sorted(gql_directors), (
+        f"director mismatch: rest={rest_directors} gql={gql_directors}"
+    )
+    assert sorted(rest_writers) == sorted(gql_writers), (
+        f"writer mismatch: rest={rest_writers} gql={gql_writers}"
+    )

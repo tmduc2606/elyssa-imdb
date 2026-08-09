@@ -1,4 +1,6 @@
 import { useGoldQuery } from "@/hooks/useGoldQuery";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { goldClient } from "@/lib/urql";
 import { QUERY_STALE_TIME } from "@/lib/constants";
 import type {
   TitleDetail,
@@ -7,6 +9,9 @@ import type {
   RatingSnapshot,
   PaginatedResult,
 } from "@/lib/types";
+
+const SEARCH_PAGE_SIZE = 20;
+const BROWSE_PAGE_SIZE = 20;
 
 export const TITLE_DETAIL_QUERY = `
   query TitleDetail($tconst: ID!) {
@@ -152,11 +157,18 @@ export function usePersonDetail(nconst: string) {
 }
 
 export function useSearch(query: string) {
-  return useGoldQuery<{ search: PaginatedResult<TitleSummary> }>({
-    query: SEARCH_QUERY,
-    variables: { query, first: 50 },
+  return useInfiniteQuery({
     queryKey: ["search", query],
-    staleTime: QUERY_STALE_TIME.search,
+    queryFn: async ({ pageParam }) => {
+      const result = await goldClient
+        .query(SEARCH_QUERY, { query, first: SEARCH_PAGE_SIZE, after: pageParam as string | null })
+        .toPromise();
+      if (result.error) throw new Error(result.error.message);
+      return result.data as { search: PaginatedResult<TitleSummary> };
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.search.hasMore ? lastPage.search.cursor : undefined,
     enabled: query.length > 0,
   });
 }
@@ -168,18 +180,26 @@ export function useBrowse(filters: {
   minRating?: number | null;
   sortBy?: string;
 }) {
-  return useGoldQuery<{ browse: PaginatedResult<TitleSummary> }>({
-    query: BROWSE_QUERY,
-    variables: {
-      genres: filters.genres?.length ? filters.genres : undefined,
-      decade: filters.decade ?? undefined,
-      titleType: filters.titleType ?? undefined,
-      minRating: filters.minRating ?? undefined,
-      sortBy: filters.sortBy ?? "rating",
-      first: 100,
-    },
+  return useInfiniteQuery({
     queryKey: ["browse", filters],
-    staleTime: QUERY_STALE_TIME.browse,
+    queryFn: async ({ pageParam }) => {
+      const result = await goldClient
+        .query(BROWSE_QUERY, {
+          genres: filters.genres?.length ? filters.genres : undefined,
+          decade: filters.decade ?? undefined,
+          titleType: filters.titleType ?? undefined,
+          minRating: filters.minRating ?? undefined,
+          sortBy: filters.sortBy ?? "rating",
+          first: BROWSE_PAGE_SIZE,
+          after: pageParam as string | null,
+        })
+        .toPromise();
+      if (result.error) throw new Error(result.error.message);
+      return result.data as { browse: PaginatedResult<TitleSummary> };
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.browse.hasMore ? lastPage.browse.cursor : undefined,
   });
 }
 
