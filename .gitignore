@@ -17,6 +17,8 @@ docker/.env
 !docs/qa_catalog_template.md
 !docs/pipeline_plug_and_play_test.md
 !docs/scripts/
+# Final-release blueprint + module implementation checklists are tracked:
+!docs/final-release/
 
 # ─── Documentation (not source code — agent planning docs excluded) ─
 data-engineering/docs/*
