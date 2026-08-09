@@ -39,8 +39,58 @@ def _get_db() -> sqlite3.Connection:
                 UNIQUE(user_id, tconst)
             )
         """)
+        _local.conn.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                jti TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                family_id TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
         _local.conn.commit()
     return _local.conn
+
+
+def _hash_token(token: str) -> str:
+    import hashlib
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def store_refresh_token(jti: str, user_id: str, family_id: str, token: str, expires_at: str) -> None:
+    db = _get_db()
+    db.execute(
+        """INSERT INTO refresh_tokens (jti, user_id, family_id, token_hash, expires_at, revoked, created_at)
+           VALUES (?, ?, ?, ?, ?, 0, ?)""",
+        [jti, user_id, family_id, _hash_token(token), expires_at, datetime.now(timezone.utc).isoformat()],
+    )
+    db.commit()
+
+
+def revoke_refresh_token(jti: str) -> None:
+    db = _get_db()
+    db.execute("UPDATE refresh_tokens SET revoked = 1 WHERE jti = ?", [jti])
+    db.commit()
+
+
+def revoke_token_family(family_id: str) -> None:
+    db = _get_db()
+    db.execute("UPDATE refresh_tokens SET revoked = 1 WHERE family_id = ?", [family_id])
+    db.commit()
+
+
+def get_refresh_token(jti: str) -> dict | None:
+    db = _get_db()
+    row = db.execute(
+        "SELECT jti, user_id, family_id, token_hash, expires_at, revoked FROM refresh_tokens WHERE jti = ?",
+        [jti],
+    ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
 
 
 def hash_password(password: str) -> str:

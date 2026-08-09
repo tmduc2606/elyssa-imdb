@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { setAccessToken, getAccessToken } from "@/lib/urql";
 import { AUTH_URL } from "@/lib/constants";
 import type { User } from "@/lib/types";
@@ -67,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         setAccessToken(null);
         setUser(null);
+        toast.error("Session expired. Please log in again.");
       }
     };
     tryRestore().finally(() => setIsLoading(false));

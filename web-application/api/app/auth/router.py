@@ -1,21 +1,38 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, Response
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from app.auth.models import (
     add_to_watchlist,
     create_user,
+    get_refresh_token,
     get_user_by_email,
     get_user_by_id,
     get_watchlist,
     remove_from_watchlist,
+    revoke_token_family,
     verify_password,
 )
 from app.auth.utils import create_access_token, create_refresh_token, decode_token
+from app.cache.rate_limiter import SlidingWindowRateLimiter
 from app.config import get_settings
 
 router = APIRouter()
+
+_auth_limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=60)
+
+
+def check_auth_rate_limit(request: Request) -> None:
+    client_ip = request.client.host if request.client else "unknown"
+    if not _auth_limiter.check(client_ip):
+        raise HTTPException(
+            429,
+            "Too many attempts. Try again later.",
+            headers={"Retry-After": "60"},
+        )
 
 
 class RegisterRequest(BaseModel):
@@ -39,7 +56,12 @@ class WatchlistAddRequest(BaseModel):
 
 
 @router.post("/register")
-async def register(body: RegisterRequest, response: Response):
+async def register(
+    body: RegisterRequest,
+    response: Response,
+    request: Request,
+    _=Depends(check_auth_rate_limit),
+):
     settings = get_settings()
     display_name = body.get_display_name()
     try:
@@ -47,12 +69,13 @@ async def register(body: RegisterRequest, response: Response):
     except ValueError:
         raise HTTPException(409, "Email already registered")
     access_token = create_access_token(user["id"])
-    refresh_token = create_refresh_token(user["id"])
+    refresh_token, _, _ = create_refresh_token(user["id"])
+    secure = settings.secure_cookies and request.url.scheme == "https"
     response.set_cookie(
         "refresh_token",
         refresh_token,
         httponly=True,
-        secure=settings.secure_cookies,
+        secure=secure,
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
@@ -60,13 +83,18 @@ async def register(body: RegisterRequest, response: Response):
 
 
 @router.post("/login")
-async def login(request: Request, body: LoginRequest, response: Response):
+async def login(
+    body: LoginRequest,
+    response: Response,
+    request: Request,
+    _=Depends(check_auth_rate_limit),
+):
     settings = get_settings()
     user = get_user_by_email(body.email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
     access_token = create_access_token(user["id"])
-    refresh_token = create_refresh_token(user["id"])
+    refresh_token, _, _ = create_refresh_token(user["id"])
     secure = settings.secure_cookies and request.url.scheme == "https"
     response.set_cookie(
         "refresh_token",
@@ -80,28 +108,74 @@ async def login(request: Request, body: LoginRequest, response: Response):
 
 
 @router.post("/refresh")
-async def refresh(request: Request, response: Response):
+async def refresh(
+    request: Request,
+    response: Response,
+    _=Depends(check_auth_rate_limit),
+):
+    from datetime import datetime as _dt, timezone as _tz
+    settings = get_settings()
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(401, "Missing refresh token")
     payload = decode_token(refresh_token)
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid or expired refresh token")
+    jti = payload.get("jti")
+    family_id = payload.get("family_id")
+    if not jti or not family_id:
+        raise HTTPException(401, "Invalid refresh token claims")
+    row = get_refresh_token(jti)
+    if row is None:
+        raise HTTPException(401, "Refresh token not recognized")
+    if row["revoked"]:
+        # Reuse of a spent token — revoke the whole family
+        revoke_token_family(family_id)
+        response.delete_cookie("refresh_token")
+        raise HTTPException(401, "Refresh token reused; family revoked")
+    expires_at = _dt.fromisoformat(row["expires_at"])
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=_tz.utc)
+    if _dt.now(_tz.utc) > expires_at:
+        raise HTTPException(401, "Refresh token expired")
     user = get_user_by_id(payload["sub"])
     if user is None:
         raise HTTPException(404, "User not found")
+    # Rotate: revoke current token, issue new one in the same family
+    from app.auth.models import revoke_refresh_token
+    revoke_refresh_token(jti)
+    new_refresh, _, _ = create_refresh_token(user["id"], family_id=family_id)
     access_token = create_access_token(user["id"])
+    secure = settings.secure_cookies and request.url.scheme == "https"
+    response.set_cookie(
+        "refresh_token",
+        new_refresh,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,
+    )
     return {"accessToken": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    refresh_token = request.cookies.get("refresh_token")
+    if refresh_token:
+        payload = decode_token(refresh_token)
+        if payload and payload.get("family_id"):
+            revoke_token_family(payload["family_id"])
     response.delete_cookie("refresh_token")
     return {"ok": True}
 
 
 @router.get("/logout")
-async def logout_get(response: Response):
+async def logout_get(request: Request, response: Response):
+    refresh_token = request.cookies.get("refresh_token")
+    if refresh_token:
+        payload = decode_token(refresh_token)
+        if payload and payload.get("family_id"):
+            revoke_token_family(payload["family_id"])
     response.delete_cookie("refresh_token")
     return {"ok": True}
 

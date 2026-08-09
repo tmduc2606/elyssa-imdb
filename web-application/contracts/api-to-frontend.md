@@ -18,7 +18,7 @@ Defines the interface between the FastAPI backend and the React SPA frontend. Th
 | `/auth/refresh` | POST | Yes | Refresh JWT |
 | `/auth/me` | GET | Yes | Current user info |
 
-JWT tokens expire after 24 hours. Refresh tokens valid for 7 days.
+Access tokens expire after **15 minutes**. Refresh tokens are valid for **7 days**, delivered via `HttpOnly; SameSite=Lax` cookie, and are **rotated on every use** (single-use, with reuse detection that revokes the whole token family).
 
 ---
 

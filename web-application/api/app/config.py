@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     app_name: str = "Elyssa API"
     debug: bool = False
 
+    environment: str = "dev"
+
     host: str = "0.0.0.0"
     port: int = 8000
 
@@ -60,6 +62,11 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     if settings.jwt_secret == _DEFAULT_JWT_SECRET:
+        if settings.environment != "dev":
+            raise RuntimeError(
+                "ELYSSA_JWT_SECRET must be set to a secure random value when "
+                "ELYSSA_ENVIRONMENT != 'dev'. Refusing to start."
+            )
         warnings.warn(
             "JWT secret is still the default dev value. "
             "Set ELYSSA_JWT_SECRET to a secure random value in production. "
