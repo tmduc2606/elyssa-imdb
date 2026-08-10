@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { ROLE_LABELS } from "./constants";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -30,7 +31,8 @@ export function formatYear(start: number | null | undefined, end?: number | null
   return `${start}–${end}`;
 }
 
-export function getInitials(name: string): string {
+export function getInitials(name: string | null | undefined): string {
+  if (!name) return "";
   return name
     .split(" ")
     .map((n) => n[0])
@@ -38,4 +40,15 @@ export function getInitials(name: string): string {
     .slice(0, 2)
     .join("")
     .toUpperCase();
+}
+
+export function formatRole(
+  category: string | null | undefined,
+  job: string | null | undefined,
+  character?: string | null,
+): string {
+  if (character) return character;
+  const key = job ?? category;
+  if (!key) return "";
+  return ROLE_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

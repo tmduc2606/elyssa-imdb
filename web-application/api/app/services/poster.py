@@ -44,46 +44,40 @@ class PosterService:
         return url
 
     def _fetch(self, imdb_id: str) -> str | None:
-        endpoint = f"{self.base_url.rstrip('/')}/v1/{POSTER_KIND}/{imdb_id}"
-        headers = {"accept": "application/json"}
-        if self.api_key:
-            headers["x-api-key"] = self.api_key
+        # OpenPosterDB documented contract: GET {base}/{api_key}/imdb/poster-default/{id}.jpg
+        # The response IS the image (JPEG with rating badges), not JSON.
+        endpoint = (
+            f"{self.base_url.rstrip('/')}/{self.api_key}/imdb/poster-default/{imdb_id}.jpg"
+        )
+        headers = {"accept": "image/jpeg"}
 
         last_exc: Exception | None = None
         for attempt in range(MAX_RETRIES):
             try:
                 with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-                    resp = client.get(endpoint, headers=headers)
+                    resp = client.head(endpoint, headers=headers)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    poster_url = self._extract_url(data)
-                    if poster_url:
-                        return poster_url
-                    logger.debug("Poster response for %s had no URL: %s", imdb_id, data)
+                    content_type = resp.headers.get("content-type", "")
+                    if content_type.startswith("image/"):
+                        return endpoint
+                    logger.debug(
+                        "Poster endpoint %s returned non-image content-type %s",
+                        imdb_id,
+                        content_type,
+                    )
                     return None
                 if resp.status_code in (404, 410):
                     logger.debug("No poster found for %s (HTTP %s)", imdb_id, resp.status_code)
                     return None
-                logger.warning("Poster fetch %s -> HTTP %s", imdb_id, resp.status_code)
+                if resp.status_code == 405:
+                    # HEAD unsupported by the server — trust the documented URL shape
+                    return endpoint
+                logger.warning("Poster HEAD %s -> HTTP %s", imdb_id, resp.status_code)
             except httpx.HTTPError as exc:
                 last_exc = exc
                 logger.warning("Poster fetch attempt %s for %s failed: %s", attempt + 1, imdb_id, exc)
 
         logger.warning("All poster fetch attempts failed for %s: %s", imdb_id, last_exc)
-        return None
-
-    @staticmethod
-    def _extract_url(data) -> str | None:
-        if isinstance(data, str) and data.startswith("http"):
-            return data
-        if isinstance(data, dict):
-            for key in ("url", "poster_url", "poster", "link", "source"):
-                val = data.get(key)
-                if isinstance(val, str) and val.startswith("http"):
-                    return val
-            nested = data.get("data")
-            if isinstance(nested, dict):
-                return PosterService._extract_url(nested)
         return None
 
     def prewarm(self, imdb_ids: list[str], limit: int = 100) -> int:

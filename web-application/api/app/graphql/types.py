@@ -30,7 +30,8 @@ class Title:
 @strawberry.type
 class PersonSummary:
     id: str
-    primary_name: str
+    primary_name: str | None = None
+    headshot_url: str | None = None
     poster_url: str | None = None
 
 
@@ -46,6 +47,7 @@ class CastMember:
 @strawberry.type
 class CrewMember:
     person: PersonSummary
+    ordering: int | None = None
     category: str | None = None
     job: str | None = None
 
@@ -78,6 +80,8 @@ class RatingSnapshot:
 
 @strawberry.type
 class TitleDetail(Title):
+    overview: str | None = None
+    tagline: str | None = None
     ratings: list[RatingSnapshot] = strawberry.field(default_factory=list)
 
     @strawberry.field

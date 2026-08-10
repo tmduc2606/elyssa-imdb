@@ -55,6 +55,9 @@ export function Footer() {
         </div>
         <div className="mt-10 border-t border-border pt-6 text-center text-xs text-muted">
           <p>Data sourced from IMDb. Not affiliated with IMDb.</p>
+          <p className="mt-1">
+            This product uses the TMDB API but is not endorsed or certified by TMDB.
+          </p>
         </div>
       </div>
     </footer>

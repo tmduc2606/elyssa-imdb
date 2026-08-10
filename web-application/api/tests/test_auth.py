@@ -152,7 +152,7 @@ def test_refresh_rotates_token(client: TestClient):
     assert new_cookie != old_cookie, "Refresh token must rotate on use"
 
 
-def test_refresh_reuse_detected_401(client: TestClient):
+def test_refresh_reuse_within_grace_reissues(client: TestClient):
     email = f"wa02b_{uuid.uuid4().hex[:8]}@example.com"
     client.post("/auth/register", json={
         "email": email, "password": "Qa1234567!", "display_name": "WA02b",
@@ -165,32 +165,42 @@ def test_refresh_reuse_detected_401(client: TestClient):
     r2 = client.post("/auth/refresh")
     assert r2.status_code == 200
 
-    # Reusing the spent token must be rejected
+    # Reusing the spent token within the grace window is a rotation race:
+    # a fresh token is issued and the family is NOT revoked.
     client.cookies.clear()
     client.cookies.set("refresh_token", spent_token)
     r3 = client.post("/auth/refresh")
-    assert r3.status_code == 401, f"Expected 401 on reuse, got {r3.status_code}"
-    assert "reused" in r3.text.lower() or "revoked" in r3.text.lower()
+    assert r3.status_code == 200, f"Expected race-recovery 200, got {r3.status_code}"
+    new_cookie = r3.cookies.get("refresh_token")
+    assert new_cookie is not None and new_cookie != spent_token
 
 
-def test_refresh_family_revoked(client: TestClient):
-    email = f"wa02c_{uuid.uuid4().hex[:8]}@example.com"
-    client.post("/auth/register", json={
-        "email": email, "password": "Qa1234567!", "display_name": "WA02c",
-    })
-    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
-    spent = r.cookies.get("refresh_token")
+def test_refresh_reuse_after_grace_revokes_family(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    import app.auth.router as auth_router
+    orig = auth_router.get_settings
 
-    # Rotate once
-    assert client.post("/auth/refresh").status_code == 200
-    # Rotate again (second-generation token is now current)
-    assert client.post("/auth/refresh").status_code == 200
+    def _zero_grace_settings():
+        settings = orig()
+        settings.refresh_reuse_grace_seconds = 0
+        return settings
 
-    # Reusing the original (now family-revoked) token must fail
-    client.cookies.clear()
-    client.cookies.set("refresh_token", spent)
-    r4 = client.post("/auth/refresh")
-    assert r4.status_code == 401
+    monkeypatch.setattr(auth_router, "get_settings", _zero_grace_settings)
+    try:
+        email = f"wa02c_{uuid.uuid4().hex[:8]}@example.com"
+        client.post("/auth/register", json={
+            "email": email, "password": "Qa1234567!", "display_name": "WA02c",
+        })
+        r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+        spent = r.cookies.get("refresh_token")
+        assert client.post("/auth/refresh").status_code == 200
+
+        client.cookies.clear()
+        client.cookies.set("refresh_token", spent)
+        r4 = client.post("/auth/refresh")
+        assert r4.status_code == 401, f"Expected family revocation after grace, got {r4.status_code}"
+        assert "reused" in r4.text.lower() or "revoked" in r4.text.lower()
+    finally:
+        orig().refresh_reuse_grace_seconds = 5
 
 
 # ─── WA-03: logout revokes the whole family ───────────────────────────
@@ -248,3 +258,121 @@ def test_cors_preflight_origin_echoed(client: TestClient):
     assert r.status_code == 200, r.text[:200]
     assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
     assert "POST" in r.headers.get("access-control-allow-methods", "")
+
+
+# ─── P2: PATCH /auth/me — display name updates ────────────────────────
+def test_patch_me_updates_display_name(client: TestClient):
+    email = f"me_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "Old"})
+    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+    token = r.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    r2 = client.patch("/auth/me", headers=headers, json={"displayName": "New Name"})
+    assert r2.status_code == 200, r2.text[:200]
+    assert r2.json()["display_name"] == "New Name"
+
+    r3 = client.get("/auth/me", headers=headers)
+    assert r3.json()["display_name"] == "New Name"
+
+
+def test_patch_me_validation(client: TestClient):
+    email = f"me2_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "A"})
+    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+    token = r.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    r2 = client.patch("/auth/me", headers=headers, json={"displayName": ""})
+    assert r2.status_code == 422
+    r3 = client.patch("/auth/me", headers=headers, json={})
+    assert r3.status_code == 422
+    r4 = client.patch("/auth/me", json={"displayName": "X"})
+    assert r4.status_code == 401
+
+
+# ─── P2: DELETE /auth/account — cascade ───────────────────────────────
+def test_delete_account_cascades(client: TestClient):
+    email = f"del_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "D"})
+    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+    token = r.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    client.post("/auth/watchlist", headers=headers, json={"tconst": "tt9999999"})
+    assert len(client.get("/auth/watchlist", headers=headers).json()) == 1
+
+    r2 = client.request(
+        "DELETE", "/auth/account",
+        headers={**headers, "Content-Type": "application/json"},
+        content=b'{"confirm": "DELETE"}',
+    )
+    assert r2.status_code == 204
+
+    # Watchlist 404s (user gone), login fails, refresh 401s
+    assert client.get("/auth/watchlist", headers=headers).status_code == 404
+    assert client.get("/auth/me", headers=headers).status_code == 404
+    assert client.post("/auth/login", json={"email": email, "password": "Qa1234567!"}).status_code == 401
+    assert client.post("/auth/refresh").status_code == 401
+
+
+def test_delete_account_requires_confirmation(client: TestClient):
+    email = f"del2_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "D2"})
+    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+    token = r.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    r2 = client.request(
+        "DELETE", "/auth/account",
+        headers={**headers, "Content-Type": "application/json"},
+        content=b'{"confirm": "yes"}',
+    )
+    assert r2.status_code == 422
+    assert client.get("/auth/me", headers=headers).status_code == 200
+
+
+# ─── P2: watchlist notes ──────────────────────────────────────────────
+def test_watchlist_notes_roundtrip(client: TestClient):
+    email = f"notes_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "N"})
+    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+    token = r.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    entry = client.post("/auth/watchlist", headers=headers, json={"tconst": "tt7777777"}).json()
+    entry_id = entry["id"]
+
+    r2 = client.patch(f"/auth/watchlist/{entry_id}", headers=headers, json={"notes": "rewatch in 2027"})
+    assert r2.status_code == 200, r2.text[:200]
+
+    wl = client.get("/auth/watchlist", headers=headers).json()
+    assert wl[0]["notes"] == "rewatch in 2027"
+
+    r3 = client.patch(f"/auth/watchlist/{entry_id}", headers=headers, json={"notes": ""})
+    assert r3.status_code == 200
+    assert client.get("/auth/watchlist", headers=headers).json()[0]["notes"] == ""
+
+
+def test_watchlist_notes_unauthorized_and_404(client: TestClient):
+    email = f"notes2_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "N2"})
+    r = client.post("/auth/login", json={"email": email, "password": "Qa1234567!"})
+    token = r.json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert client.patch("/auth/watchlist/nope", headers=headers, json={"notes": "x"}).status_code == 404
+    assert client.patch("/auth/watchlist/nope", json={"notes": "x"}).status_code == 401
+
+
+# ─── P1: concurrent refresh stays within one family ───────────────────
+def test_refresh_concurrent_single_family(client: TestClient):
+    email = f"race_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/auth/register", json={"email": email, "password": "Qa1234567!", "display_name": "R"})
+    assert client.post("/auth/login", json={"email": email, "password": "Qa1234567!"}).status_code == 200
+
+    r1 = client.post("/auth/refresh")
+    r2 = client.post("/auth/refresh")
+    assert r1.status_code == 200 and r2.status_code == 200, (r1.text[:200], r2.text[:200])
+    # Both refreshes rotated within the same family; the session must still work
+    assert client.post("/auth/refresh").status_code == 200

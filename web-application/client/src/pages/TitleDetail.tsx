@@ -8,6 +8,7 @@ import { RatingTimelineChart } from "@/components/features/title/RatingTimelineC
 import { TitleStatsPanel } from "@/components/features/title/TitleStatsPanel";
 import { SkeletonGrid } from "@/components/composites/SkeletonGrid";
 import { useTitleDetail, useTitleRatings } from "@/api/gold";
+import { EPISODIC_TITLE_TYPES } from "@/lib/constants";
 
 export function TitleDetail() {
   const { tconst } = useParams();
@@ -56,7 +57,7 @@ export function TitleDetail() {
             <TitleStatsPanel title={title} />
           </div>
         </div>
-        <EpisodeTable episodes={episodes} />
+        <EpisodeTable episodes={episodes} isEpisodic={EPISODIC_TITLE_TYPES.has(title.titleType)} />
         <RatingTimelineChart snapshots={ratings} />
         <SimilarTitlesRow titles={similar} />
       </div>

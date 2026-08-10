@@ -1,40 +1,29 @@
-import { AUTH_URL } from "@/lib/constants";
+import { authApiFetch } from "@/lib/authApi";
 
 export async function apiPost<TBody, TResponse>(
   path: string,
   body: TBody,
 ): Promise<TResponse> {
-  const res = await fetch(`${AUTH_URL}${path}`, {
+  return authApiFetch<TResponse>(path, {
     method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `API error: ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function apiGet<TResponse>(path: string): Promise<TResponse> {
-  const res = await fetch(`${AUTH_URL}${path}`, {
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `API error: ${res.status}`);
-  }
-  return res.json();
+  return authApiFetch<TResponse>(path);
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${AUTH_URL}${path}`, {
-    method: "DELETE",
-    credentials: "include",
+  await authApiFetch<void>(path, { method: "DELETE" });
+}
+
+export async function apiPatch<TBody, TResponse>(
+  path: string,
+  body: TBody,
+): Promise<TResponse> {
+  return authApiFetch<TResponse>(path, {
+    method: "PATCH",
+    body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `API error: ${res.status}`);
-  }
 }

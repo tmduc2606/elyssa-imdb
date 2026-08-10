@@ -23,6 +23,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Always surface render crashes so the next occurrence is visible in
+    // console/telemetry instead of only showing the friendly fallback.
+    console.error("Elyssa render error:", error, errorInfo);
     this.props.onError?.(error, errorInfo);
   }
 

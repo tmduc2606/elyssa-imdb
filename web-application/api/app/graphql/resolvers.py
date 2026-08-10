@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 from pathlib import Path
 from functools import lru_cache
 
@@ -10,6 +11,7 @@ import duckdb
 from app.cache.memory import get_cache
 from app.config import get_settings
 from app.services import get_poster_service
+from app.services.enrichment import get_enrichment_service
 from app.graphql.types import (
     CastMember,
     Collaborator,
@@ -33,6 +35,12 @@ GOLD_MARTS = [
     "fact_performance",
     "fact_episode",
 ]
+
+EPISODIC_TYPES = {"tvSeries", "tvMiniSeries", "tvMovie", "tvSpecial"}
+
+_thread_local = threading.local()
+_conns: set[duckdb.DuckDBPyConnection] = set()
+_conns_lock = threading.Lock()
 
 
 def _genres_list(genre_str: str | None) -> list[str]:
@@ -69,8 +77,7 @@ def _row_to_summary(r) -> TitleSummary:
     )
 
 
-@lru_cache
-def _get_con() -> duckdb.DuckDBPyConnection:
+def _open_connection() -> duckdb.DuckDBPyConnection:
     settings = get_settings()
     con = duckdb.connect()
     gold_root = Path(settings.gold_marts_path)
@@ -93,7 +100,39 @@ def _get_con() -> duckdb.DuckDBPyConnection:
             f"CREATE OR REPLACE VIEW base_features AS SELECT * FROM read_parquet('{path}')"
         )
 
+    with _conns_lock:
+        _conns.add(con)
     return con
+
+
+@lru_cache
+def _get_con() -> duckdb.DuckDBPyConnection:
+    """Return a DuckDB connection local to the calling thread.
+
+    Connections are created on first use in whichever thread needs them;
+    DuckDB connections must not be shared across threads. ``_close_cons``
+    closes every tracked connection (used by reload-cache).
+    """
+    con = getattr(_thread_local, "con", None)
+    if con is None:
+        con = _open_connection()
+        _thread_local.con = con
+    return con
+
+
+def _close_cons() -> None:
+    """Close all tracked DuckDB connections (thread-safe, idempotent)."""
+    with _conns_lock:
+        conns = list(_conns)
+        _conns.clear()
+    for con in conns:
+        try:
+            con.close()
+        except Exception:
+            pass
+    if hasattr(_thread_local, "con"):
+        del _thread_local.con
+    _get_con.cache_clear()
 
 
 def resolve_title(tconst: str) -> TitleDetail | None:
@@ -113,6 +152,7 @@ def resolve_title(tconst: str) -> TitleDetail | None:
     data = dict(zip(cols, row))
     genre_str = data.get("genre_list") or ""
     poster_url = get_poster_service().get_poster_url(data["tconst"])
+    enrich = get_enrichment_service().get_title_enrichment(data["tconst"])
     result = TitleDetail(
         id=data["tconst"],
         primary_title=data.get("primary_title") or "",
@@ -129,6 +169,8 @@ def resolve_title(tconst: str) -> TitleDetail | None:
         series_title=data.get("series_title"),
         season_number=data.get("season_number"),
         episode_number=data.get("episode_number"),
+        overview=(enrich or {}).get("overview"),
+        tagline=(enrich or {}).get("tagline"),
         ratings=[],
     )
     cache.set(cache_key, result, ttl=300)
@@ -152,7 +194,7 @@ def _resolve_cast(tconst: str, limit: int = 20) -> list[CastMember]:
     results = []
     for r in rows:
         results.append(CastMember(
-            person=PersonSummary(id=r[0] or "", primary_name=r[1] or "Unknown"),
+            person=PersonSummary(id=r[0] or "", primary_name=r[1]),
             character=r[2],
             ordering=r[3],
             category=r[4],
@@ -165,7 +207,7 @@ def _resolve_crew(tconst: str) -> list[CrewMember]:
     con = _get_con()
     rows = con.execute("""
         SELECT p.nconst, p.primary_name,
-               f.category, f.job
+               f.ordering, f.category, f.job
         FROM fact_title_principal f
         LEFT JOIN dim_person p ON f.name_key = p.nconst
         WHERE f.title_key = ?
@@ -177,9 +219,10 @@ def _resolve_crew(tconst: str) -> list[CrewMember]:
     results = []
     for r in rows:
         results.append(CrewMember(
-            person=PersonSummary(id=r[0] or "", primary_name=r[1] or "Unknown"),
-            category=r[2],
-            job=r[3],
+            person=PersonSummary(id=r[0] or "", primary_name=r[1]),
+            ordering=r[2],
+            category=r[3],
+            job=r[4],
         ))
     return results
 
@@ -203,7 +246,18 @@ def _resolve_similar(tconst: str, genres: list[str] | None = None, limit: int = 
     return [_row_to_summary(r) for r in rows]
 
 
+def _is_episodic(tconst: str) -> bool:
+    con = _get_con()
+    row = con.execute(
+        "SELECT title_type FROM dim_title WHERE tconst = ?", [tconst]
+    ).fetchone()
+    return bool(row and row[0] in EPISODIC_TYPES)
+
+
 def _resolve_episodes(tconst: str, limit: int = 100) -> list[EpisodeContent]:
+    if not _is_episodic(tconst):
+        # Movies/shorts/others: skip the wasted query entirely
+        return []
     con = _get_con()
     rows = con.execute("""
         SELECT e.episode_key, e.season_number, e.episode_number,
@@ -250,18 +304,51 @@ def _resolve_filmography(nconst: str, limit: int = 50) -> list[FilmographyEntry]
     return results
 
 
+def _person_cols(con) -> set[str]:
+    return {d[0] for d in con.execute("DESCRIBE dim_person").fetchall()}
+
+
 def _resolve_known_for(nconst: str, limit: int = 10) -> list[TitleSummary]:
     con = _get_con()
-    row = con.execute(
-        "SELECT known_for_titles FROM dim_person WHERE nconst = ?", [nconst]
-    ).fetchone()
+    has_ids = "known_for_ids" in _person_cols(con)
+    if has_ids:
+        row = con.execute(
+            "SELECT known_for_titles, known_for_ids FROM dim_person WHERE nconst = ?",
+            [nconst],
+        ).fetchone()
+    else:
+        row = con.execute(
+            "SELECT known_for_titles, NULL FROM dim_person WHERE nconst = ?",
+            [nconst],
+        ).fetchone()
     if not row or not row[0]:
-        return []
-    names = [t.strip() for t in row[0].split(",") if t.strip()]
-    if not names:
         return []
     seen: set[str] = set()
     results: list[TitleSummary] = []
+
+    # Preferred path: exact tconst lookups (requires DE delta with known_for_ids)
+    ids = [t.strip() for t in (row[1] or "").split(",") if t.strip()]
+    if ids:
+        for tconst in ids:
+            if tconst in seen:
+                continue
+            r = con.execute(
+                """SELECT tconst, primary_title, title_type, average_rating,
+                          start_year, num_votes, genre_list
+                   FROM dim_title
+                   WHERE tconst = ?""",
+                [tconst],
+            ).fetchone()
+            if r:
+                seen.add(r[0])
+                results.append(_row_to_summary(r))
+            if len(results) >= limit:
+                break
+        if results:
+            return results
+
+    # Fallback: fuzzy name matching against the names column
+    names = [t.strip() for t in row[0].split(",") if t.strip()]
     for name in names:
         r = con.execute(
             """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
@@ -297,7 +384,7 @@ def _resolve_collaborators(nconst: str, limit: int = 20) -> list[Collaborator]:
     results = []
     for r in rows:
         results.append(Collaborator(
-            person=PersonSummary(id=r[0], primary_name=r[1] or "Unknown"),
+            person=PersonSummary(id=r[0], primary_name=r[1]),
             collaboration_count=r[2],
         ))
     return results
@@ -319,13 +406,14 @@ def resolve_person(nconst: str) -> Person | None:
     cols = [d[0] for d in con.description]
     data = dict(zip(cols, row))
     poster_url = get_poster_service().get_poster_url(data["nconst"])
+    headshot_url = get_enrichment_service().get_person_headshot(data["nconst"])
     result = Person(
         id=data["nconst"],
         primary_name=data.get("primary_name") or "",
         birth_year=data.get("birth_year"),
         death_year=data.get("death_year"),
         primary_profession=_profession_list(data.get("profession_list")),
-        poster_url=poster_url,
+        poster_url=headshot_url or poster_url,
         known_for_titles=_resolve_known_for(nconst),
         filmography=_resolve_filmography(nconst),
         collaborators=_resolve_collaborators(nconst),

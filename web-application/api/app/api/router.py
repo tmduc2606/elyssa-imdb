@@ -389,11 +389,11 @@ async def canary_deploy(body: dict | None = None):
 # ─── POST /api/v1/admin/reload-cache ────────────────────────────────
 @router.post("/admin/reload-cache")
 async def reload_cache():
-    from app.graphql.resolvers import _get_con
+    from app.graphql.resolvers import _close_cons
     from app.cache.memory import get_cache
-    _get_con.cache_clear()
+    _close_cons()
     cache = get_cache()
     cache.clear()
     svc = get_model_service()
     svc.load()
-    return {"status": "ok", "message": "DuckDB connection, cache, and models reloaded"}
+    return {"status": "ok", "message": "DuckDB connections, cache, and models reloaded"}

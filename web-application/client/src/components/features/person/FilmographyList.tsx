@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/composites/EmptyState";
+import { formatRole } from "@/lib/utils";
 import type { FilmographyEntry } from "@/lib/types";
 
 interface FilmographyListProps {
@@ -52,7 +53,7 @@ export function FilmographyList({ entries, isLoading }: FilmographyListProps) {
                 >
                   <span className="truncate flex-1">{entry.title.primaryTitle}</span>
                   <span className="shrink-0 text-muted">
-                    {entry.character ?? entry.category}
+                    {formatRole(entry.category, null, entry.character)}
                   </span>
                 </Link>
               ))}

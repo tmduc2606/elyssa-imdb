@@ -1,38 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { AUTH_URL } from "@/lib/constants";
-import { getAccessToken } from "@/lib/urql";
+import { authApiFetch } from "@/lib/authApi";
 import type { WatchlistItem } from "@/lib/types";
-
-async function authFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = getAccessToken();
-  const res = await fetch(`${AUTH_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "Content-Type": "application/json",
-      ...(options?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: "Request failed" }));
-    throw new Error(err.message);
-  }
-  return res.json();
-}
 
 export function useWatchlist() {
   const queryClient = useQueryClient();
 
   const query = useQuery<WatchlistItem[]>({
     queryKey: ["watchlist"],
-    queryFn: () => authFetch<WatchlistItem[]>("/watchlist"),
+    queryFn: () => authApiFetch<WatchlistItem[]>("/watchlist"),
     staleTime: 30_000,
   });
 
   const addMutation = useMutation({
     mutationFn: (args: { tconst: string; title?: unknown }) =>
-      authFetch("/watchlist", {
+      authApiFetch("/watchlist", {
         method: "POST",
         body: JSON.stringify(args),
       }),
@@ -41,7 +22,16 @@ export function useWatchlist() {
 
   const removeMutation = useMutation({
     mutationFn: (entryId: string) =>
-      authFetch(`/watchlist/${entryId}`, { method: "DELETE" }),
+      authApiFetch(`/watchlist/${entryId}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
+  });
+
+  const notesMutation = useMutation({
+    mutationFn: (args: { entryId: string; notes: string }) =>
+      authApiFetch(`/watchlist/${args.entryId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ notes: args.notes }),
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["watchlist"] }),
   });
 
@@ -50,7 +40,23 @@ export function useWatchlist() {
     isLoading: query.isLoading,
     add: addMutation.mutate,
     remove: removeMutation.mutate,
+    setNotes: notesMutation.mutate,
     isAdding: addMutation.isPending,
     isRemoving: removeMutation.isPending,
+  };
+}
+
+export function useWatchlistState(tconst: string) {
+  const { items, isLoading, add, remove, isAdding, isRemoving } = useWatchlist();
+  const entry = items.find((i) => i.title.id === tconst);
+  return {
+    isSaved: Boolean(entry),
+    entry,
+    saveCount: items.length,
+    isLoading,
+    add,
+    remove,
+    isAdding,
+    isRemoving,
   };
 }

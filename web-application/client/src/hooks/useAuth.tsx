@@ -10,7 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { setAccessToken, getAccessToken } from "@/lib/urql";
-import { AUTH_URL } from "@/lib/constants";
+import { authApiFetch, refreshAccessToken } from "@/lib/authApi";
 import type { User } from "@/lib/types";
 
 interface AuthState {
@@ -20,28 +20,10 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-
-async function authFetch<T>(path: string, body?: unknown): Promise<T> {
-  const token = getAccessToken();
-  const headers: Record<string, string> = body
-    ? { "Content-Type": "application/json" }
-    : {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${AUTH_URL}${path}`, {
-    method: body ? "POST" : "GET",
-    credentials: "include",
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: "Request failed" }));
-    throw new Error(err.message);
-  }
-  return res.json();
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -50,29 +32,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const tryRestore = async () => {
-      const token = getAccessToken();
-      if (token) {
-        try {
-          const u = await authFetch<User>("/me");
+      const hadSession = !!getAccessToken();
+      try {
+        if (hadSession) {
+          try {
+            const u = await authApiFetch<User>("/me");
+            setUser(u);
+            return;
+          } catch {
+            // Token expired — try refresh below
+          }
+        }
+        const ok = await refreshAccessToken();
+        if (ok) {
+          // Do not re-enter the 401-retry loop for the /me bootstrap call
+          const u = await authApiFetch<User>("/me", {}, false);
           setUser(u);
           return;
-        } catch {
-          // Token expired — try refresh below
         }
-      }
-      try {
-        const res = await fetch(`${AUTH_URL}/refresh`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error("No session");
-        const { accessToken } = await res.json();
-        setAccessToken(accessToken);
-        const u = await authFetch<User>("/me");
-        setUser(u);
       } catch {
-        setAccessToken(null);
-        setUser(null);
+        // fall through to the session-expired handling below
+      }
+      // Only visitors who HAD a session and lost it get the toast; anonymous
+      // page loads fail silently (no cookie is a perfectly normal state).
+      if (hadSession) {
         toast.error("Session expired. Please log in again.");
       }
     };
@@ -82,12 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      const { accessToken } = await authFetch<{ accessToken: string }>("/login", {
-        email,
-        password,
+      const { accessToken } = await authApiFetch<{ accessToken: string }>("/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
       });
       setAccessToken(accessToken);
-      const me = await authFetch<User>("/me");
+      const me = await authApiFetch<User>("/me", {}, false);
       setUser(me);
     } finally {
       setIsLoading(false);
@@ -98,13 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string, displayName: string) => {
       setIsLoading(true);
       try {
-        const { accessToken } = await authFetch<{ accessToken: string }>("/register", {
-          email,
-          password,
-          displayName,
+        const { accessToken } = await authApiFetch<{ accessToken: string }>("/register", {
+          method: "POST",
+          body: JSON.stringify({ email, password, displayName }),
         });
         setAccessToken(accessToken);
-        const me = await authFetch<User>("/me");
+        const me = await authApiFetch<User>("/me", {}, false);
         setUser(me);
       } finally {
         setIsLoading(false);
@@ -116,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     setIsLoading(true);
     try {
-      await authFetch("/logout");
+      await authApiFetch("/logout", { method: "POST" });
     } catch {
       /* ignore */
     }
@@ -126,9 +108,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, [queryClient]);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const u = await authApiFetch<User>("/me", {}, false);
+      setUser(u);
+      return u;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const value = useMemo<AuthState>(
-    () => ({ user, isLoading, isAuthenticated: user != null, login, register, logout }),
-    [user, isLoading, login, register, logout],
+    () => ({ user, isLoading, isAuthenticated: user != null, login, register, logout, refreshUser }),
+    [user, isLoading, login, register, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

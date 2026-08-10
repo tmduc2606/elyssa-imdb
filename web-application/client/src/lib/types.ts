@@ -27,6 +27,8 @@ export type TitleType =
   | "video";
 
 export interface TitleDetail extends Title {
+  overview: string | null;
+  tagline: string | null;
   cast: TitlePrincipal[];
   crew: TitlePrincipal[];
   episodes: EpisodeContent[];
@@ -74,14 +76,15 @@ export interface Collaborator {
 
 export interface PersonSummary {
   id: string;
-  primaryName: string;
+  primaryName: string | null;
+  headshotUrl: string | null;
   posterUrl: string | null;
 }
 
 export interface TitlePrincipal {
   person: PersonSummary;
   character: string | null;
-  ordering: number;
+  ordering: number | null;
   category: PrincipalCategory;
   job: string | null;
 }
@@ -102,7 +105,7 @@ export type PrincipalCategory =
 export interface EpisodeContent {
   seasonNumber: number | null;
   episodeNumber: number | null;
-  title: TitleSummary;
+  title: TitleSummary | null;
 }
 
 export interface RatingSnapshot {

@@ -4,17 +4,21 @@ import json
 import pickle
 import threading
 import time
+from collections import OrderedDict
 from functools import wraps
 from typing import Any, Callable
 
 from app.cache.redis import cache_get as redis_get
 from app.cache.redis import cache_set as redis_set
 
+MEMORY_CACHE_MAXSIZE = 4096
+
 
 class MultiTierCache:
-    def __init__(self, default_ttl: int = 120):
-        self._store: dict[str, tuple[float, Any]] = {}
+    def __init__(self, default_ttl: int = 120, maxsize: int = MEMORY_CACHE_MAXSIZE):
+        self._store: OrderedDict[str, tuple[float, Any]] = OrderedDict()
         self._default_ttl = default_ttl
+        self._maxsize = maxsize
         self._lock = threading.Lock()
 
     def _redis_key(self, key: str) -> str:
@@ -35,6 +39,7 @@ class MultiTierCache:
             if time.time() > expires:
                 del self._store[key]
                 return None
+            self._store.move_to_end(key)
             return value
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -45,13 +50,18 @@ class MultiTierCache:
             pass
         with self._lock:
             self._store[key] = (time.time() + effective_ttl, value)
+            self._store.move_to_end(key)
+            while len(self._store) > self._maxsize:
+                self._store.popitem(last=False)
 
     def clear(self, prefix: str | None = None) -> None:
         with self._lock:
             if prefix is None:
                 self._store.clear()
             else:
-                self._store = {k: v for k, v in self._store.items() if not k.startswith(prefix)}
+                self._store = OrderedDict(
+                    (k, v) for k, v in self._store.items() if not k.startswith(prefix)
+                )
 
 
 _cache: MultiTierCache | None = None

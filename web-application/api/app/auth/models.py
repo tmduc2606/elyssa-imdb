@@ -51,6 +51,10 @@ def _get_db() -> sqlite3.Connection:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
+        try:
+            _local.conn.execute("ALTER TABLE watchlist ADD COLUMN notes TEXT")
+        except sqlite3.OperationalError:
+            pass
         _local.conn.commit()
     return _local.conn
 
@@ -143,10 +147,16 @@ def get_user_by_id(user_id: str) -> dict | None:
 def get_watchlist(user_id: str) -> list[dict]:
     db = _get_db()
     import json
-    rows = db.execute(
-        "SELECT id, tconst, title_data, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
-        [user_id],
-    ).fetchall()
+    try:
+        rows = db.execute(
+            "SELECT id, tconst, title_data, notes, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
+            [user_id],
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = db.execute(
+            "SELECT id, tconst, title_data, NULL AS notes, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
+            [user_id],
+        ).fetchall()
     result = []
     for r in rows:
         d = dict(r)
@@ -185,5 +195,40 @@ def remove_from_watchlist(user_id: str, entry_id: str) -> bool:
         "DELETE FROM watchlist WHERE user_id = ? AND id = ?",
         [user_id, entry_id],
     )
+    db.commit()
+    return cur.rowcount > 0
+
+
+def update_watchlist_notes(user_id: str, entry_id: str, notes: str | None) -> bool:
+    db = _get_db()
+    notes = (notes or "").strip()
+    cur = db.execute(
+        "UPDATE watchlist SET notes = ? WHERE user_id = ? AND id = ?",
+        [notes, user_id, entry_id],
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+
+def update_user_display_name(user_id: str, display_name: str) -> dict | None:
+    db = _get_db()
+    display_name = display_name.strip()
+    if not 1 <= len(display_name) <= 64:
+        raise ValueError("Display name must be 1-64 characters")
+    cur = db.execute(
+        "UPDATE users SET display_name = ? WHERE id = ?",
+        [display_name, user_id],
+    )
+    db.commit()
+    if cur.rowcount == 0:
+        return None
+    return get_user_by_id(user_id)
+
+
+def delete_user(user_id: str) -> bool:
+    db = _get_db()
+    db.execute("DELETE FROM watchlist WHERE user_id = ?", [user_id])
+    db.execute("DELETE FROM refresh_tokens WHERE user_id = ?", [user_id])
+    cur = db.execute("DELETE FROM users WHERE id = ?", [user_id])
     db.commit()
     return cur.rowcount > 0

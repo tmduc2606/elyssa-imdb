@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     poster_base_url: str = "http://localhost:3000"
     poster_api_key: str = "t0-free-rpdb"
 
+    tmdb_api_key: str = ""
+    enrichment_enabled: bool = True
+
+    refresh_reuse_grace_seconds: int = 5
+
     model_artifacts_path: str = ""
 
     cors_origins: list[str] = ["http://localhost:5173"]

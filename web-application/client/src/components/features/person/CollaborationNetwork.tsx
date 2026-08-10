@@ -36,7 +36,7 @@ export function CollaborationNetwork({ collaborators, isLoading }: Collaboration
             className="flex items-center gap-2 rounded-lg border border-border p-2 text-sm transition-colors hover:bg-muted"
           >
             <Avatar className="size-8 rounded-full">
-              <AvatarImage src={collab.person.posterUrl ?? undefined} alt={collab.person.primaryName} />
+              <AvatarImage src={collab.person.posterUrl ?? undefined} alt={collab.person.primaryName ?? "Collaborator"} />
               <AvatarFallback className="text-[10px]">{getInitials(collab.person.primaryName)}</AvatarFallback>
             </Avatar>
             <div className="flex flex-col">

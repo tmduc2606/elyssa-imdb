@@ -9,16 +9,23 @@ from app.main import app
 
 
 @pytest.fixture(autouse=True)
-def _reset_auth_limiter():
-    """Reset the shared auth rate limiter so tests are independent."""
+def _reset_global_rate_limiters():
+    """Reset shared rate limiters so tests are independent."""
+    from app.cache.rate_limiter import get_rate_limiter
     _auth_limiter._clients.clear()
+    try:
+        get_rate_limiter()._clients.clear()
+    except Exception:
+        pass
     yield
 
 
 @pytest.fixture(autouse=True)
-def _disable_poster(monkeypatch: pytest.MonkeyPatch):
-    """Disable poster HTTP calls in tests (no OpenPosterDB server)."""
+def _disable_external_services(monkeypatch: pytest.MonkeyPatch):
+    """Disable poster/enrichment HTTP calls in tests (no external servers)."""
     monkeypatch.setenv("ELYSSA_POSTER_ENABLED", "false")
+    monkeypatch.setenv("ELYSSA_ENRICHMENT_ENABLED", "false")
+    monkeypatch.setenv("ELYSSA_TMDB_API_KEY", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

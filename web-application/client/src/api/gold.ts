@@ -27,15 +27,18 @@ export const TITLE_DETAIL_QUERY = `
       averageRating
       numVotes
       posterUrl
+      overview
+      tagline
       cast(limit: 20) {
-        person { id primaryName posterUrl }
+        person { id primaryName posterUrl headshotUrl }
         character
         ordering
         category
         job
       }
       crew {
-        person { id primaryName posterUrl }
+        person { id primaryName posterUrl headshotUrl }
+        ordering
         category
         job
       }
@@ -70,7 +73,7 @@ export const PERSON_DETAIL_QUERY = `
         year
       }
       collaborators(limit: 20) {
-        person { id primaryName posterUrl }
+        person { id primaryName posterUrl headshotUrl }
         collaborationCount
       }
     }
