@@ -7,7 +7,14 @@ import {
   type Exchange,
   type CombinedError,
 } from "urql";
-import { pipe, mergeMap, fromPromise, fromArray, take, fromValue } from "wonka";
+import {
+  pipe,
+  mergeMap,
+  merge,
+  fromValue,
+  empty,
+  makeSubject,
+} from "wonka";
 import { API_URL } from "./constants";
 import { refreshAccessToken } from "./authApi";
 
@@ -37,42 +44,65 @@ interface RetriedContext {
 
 /**
  * On UNAUTHENTICATED responses, refresh the session once (single-flight in
- * authApi) and replay the failed operation. Each operation retries at most
- * once (tracked in its context), so a genuinely dead session still surfaces
- * the GraphQL error instead of looping.
+ * authApi) and replay the failed operations through this exchange itself.
+ *
+ * Two constraints drive the design:
+ *
+ * 1. urql composes exchanges once per client and throws "forward() must only
+ *    be called once in each Exchange" if any exchange invokes its `forward`
+ *    more than once — ever. `forward` is therefore wired ONCE over a stream
+ *    that merges the client's operations with a local retry subject.
+ * 2. `client.reexecuteOperation` silently drops operations whose key is no
+ *    longer in its internal `active` map, which (race-prone) makes it
+ *    unsuitable for result-driven retries. The retried operation is instead
+ *    pushed into the retry subject and flows through the same single
+ *    pipeline like a normal operation.
+ *
+ * The UNAUTHENTICATED result is suppressed while a refresh is in flight;
+ * failed operations are queued and re-dispatched once (marked
+ * `retriedOnce`), so a genuinely dead session surfaces the real GraphQL
+ * error without looping or flashing errors mid-refresh.
  */
-function authRetryExchange(): Exchange {
-  return ({ forward }) =>
-    (ops$) =>
-      pipe(
-        ops$,
-        mergeMap((op: Operation) => {
+export function authRetryExchange(): Exchange {
+  return ({ forward }) => {
+    const retries = makeSubject<Operation>();
+    let retryQueue = new Map<number, Operation>();
+    let refreshing: Promise<unknown> | null = null;
+
+    function flushRetries() {
+      refreshing = null;
+      const queue = retryQueue;
+      retryQueue = new Map();
+      queue.forEach(retries.next);
+    }
+
+    return (ops$) => {
+      const opsWithRetries$ = merge([retries.source, ops$]);
+      return pipe(
+        forward(opsWithRetries$),
+        mergeMap((result) => {
+          const op = result.operation;
           if (
-            (op.context as RetriedContext).retriedOnce ||
-            (op.kind !== "query" && op.kind !== "mutation")
+            (op.kind !== "query" && op.kind !== "mutation") ||
+            !result.error ||
+            !isUnauthenticated(result.error) ||
+            (op.context as RetriedContext).retriedOnce
           ) {
-            return forward(fromArray([op]));
+            return fromValue(result);
           }
-          return pipe(
-            forward(fromArray([op])),
-            take(1),
-            mergeMap((result) => {
-              if (result.error && isUnauthenticated(result.error)) {
-                const retriedOp = makeOperation(op.kind, op, {
-                  ...op.context,
-                  retriedOnce: true,
-                });
-                return pipe(
-                  fromPromise(refreshAccessToken()),
-                  mergeMap((ok) => (ok ? forward(fromArray([retriedOp])) : fromValue(result))),
-                  take(1),
-                );
-              }
-              return fromValue(result);
-            }),
-          );
+          const retriedOp = makeOperation(op.kind, op, {
+            ...op.context,
+            retriedOnce: true,
+          });
+          retryQueue.set(op.key, retriedOp);
+          if (!refreshing) {
+            refreshing = refreshAccessToken().then(flushRetries).catch(flushRetries);
+          }
+          return empty;
         }),
       );
+    };
+  };
 }
 
 export const goldClient = createClient({

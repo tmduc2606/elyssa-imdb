@@ -1,0 +1,76 @@
+react-dom_client.js?v=762a7e8a:20103 Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+:5173/auth/refresh:1  Failed to load resource: the server responded with a status of 401 (Unauthorized)
+:5173/auth/refresh:1  Failed to load resource: the server responded with a status of 401 (Unauthorized)
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-screenplay`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-screenplay`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-developed by`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-created by`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-producer`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-developed by`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-created by`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-producer`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-null-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:4925 Encountered two children with the same key, `-undefined-null`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+(anonymous) @ react-dom_client.js?v=762a7e8a:4925
+react-dom_client.js?v=762a7e8a:7001 TypeError: Cannot read properties of null (reading 'id')
+    at EpisodeTable.tsx:46:40
+    at Array.map (<anonymous>)
+    at EpisodeTable.tsx:43:18
+    at Array.map (<anonymous>)
+    at EpisodeTable (EpisodeTable.tsx:37:32)
+    at Object.react_stack_bottom_frame (react-dom_client.js?v=762a7e8a:18509:20)
+    at renderWithHooks (react-dom_client.js?v=762a7e8a:5654:24)
+    at updateFunctionComponent (react-dom_client.js?v=762a7e8a:7475:21)
+    at beginWork (react-dom_client.js?v=762a7e8a:8525:20)
+    at runWithFiberInDEV (react-dom_client.js?v=762a7e8a:997:72)
+
+The above error occurred in the <EpisodeTable> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+defaultOnCaughtError @ react-dom_client.js?v=762a7e8a:7001

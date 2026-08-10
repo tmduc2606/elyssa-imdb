@@ -1,0 +1,16 @@
+services:
+  openposterdb:
+    image: pnrxa/openposterdb
+    container_name: elyssa-openposterdb
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - elyssa-posters-cache:/data/cache
+      - elyssa-posters-db:/data/db
+
+volumes:
+  elyssa-posters-cache:
+  elyssa-posters-db:

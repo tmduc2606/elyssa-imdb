@@ -346,13 +346,13 @@ Hero `FeaturedCarousel` (exists) + **"Top 10 this week" ranked list with large n
 
 Phases ordered by dependency (frontend fixes < backend endpoints < enrichment < polish). Storm/estimate: single experienced dev.
 
-| Phase | Scope | Depends on | Effort | Requires DE re-run? |
-|---|---|---|---|---|
-| **P1 — Critical fixes** | §2.1 cast/crew/keys/roles · §2.2 episodes · §2.3 rating widget · §2.6 auth toasts/races · §2.7 null guards + resilience, `ErrorBoundary` logging · 2.8.1 favicon | — | 3–4 days | ❌ |
-| **P2 — Accounts & watchlist** | §2.4 PATCH `/auth/me`, DELETE account, Settings wiring, Account layout · §2.5 watchlist wiring + notes endpoint + contract fix | P1 | 2–3 days | ❌ |
-| **P3 — Poster verify + enrichment** | §3.3 PosterService adaptation · EnrichmentService SQLite + TMDB adapter + batch script + GraphQL fields + UI (headshots, overview, tagline) + attribution | P1 (resolver surface) | 4–5 days | ❌ (hot-set batch is an API-side job) |
-| **P4 — UI/UX overhaul** | §4.1 title page, §4.2 person page, §4.3 home, §4.4 motion/a11y, 2.8.2 filter unification | P1 | 3–4 days | ❌ |
-| **P5 — DE deltas** | §3.2 known_for_ids (+ optional akas) → Gold contract bump `gold-to-api.md`/`gold-to-ds.md` → API switch to `tconst = ?` lookups | — | 1 day code + **7 h re-run** + QA | ✅ |
+| Phase | Scope | Depends on | Effort | Requires DE re-run? | Status |
+|---|---|---|---|---|---|
+| **P1 — Critical fixes** | §2.1 cast/crew/keys/roles · §2.2 episodes · §2.3 rating widget · §2.6 auth toasts/races · §2.7 null guards + resilience, `ErrorBoundary` logging · 2.8.1 favicon | — | 3–4 days | ❌ | ✅ shipped (`ea85c03`) |
+| **P2 — Accounts & watchlist** | §2.4 PATCH `/auth/me`, DELETE account, Settings wiring, Account layout · §2.5 watchlist wiring + notes endpoint + contract fix | P1 | 2–3 days | ❌ | ✅ shipped (`ea85c03`) |
+| **P3 — Poster verify + enrichment** | §3.3 PosterService adaptation · EnrichmentService SQLite + TMDB adapter + batch script + GraphQL fields + UI (headshots, overview, tagline) + attribution | P1 (resolver surface) | 4–5 days | ❌ (hot-set batch is an API-side job) | ✅ shipped (`ea85c03`) + live-verified (TMDB heat, OPDB posters); poster timeout/negative-cache hardening ✓ (`0d7…` follow-up) |
+| **P4 — UI/UX overhaul** | §4.1 title page, §4.2 person page, §4.3 home, §4.4 motion/a11y, 2.8.2 filter unification | P1 | 3–4 days | ❌ | ⏳ optional stretch — pending owner prioritization |
+| **P5 — DE deltas** | §3.2 known_for_ids (+ optional akas) → Gold contract bump `gold-to-api.md`/`gold-to-ds.md` → API switch to `tconst = ?` lookups | — | 1 day code + **7 h re-run** + QA | ✅ | ⚠️ API path ✅ code + tests (`test_graphql.py`); DE delta pending next scheduled re-run — see `BLUEPRINT.md` §8.5 |
 
 **Quick wins first day:** 2.1 role labels + keys, 2.2 null guard + episodes gating, 2.3 rating stat card, 2.6 toast suppression, 2.8.1 favicon — all 🟢, no backend work beyond GraphQL nullability.
 
@@ -362,11 +362,11 @@ Phases ordered by dependency (frontend fixes < backend endpoints < enrichment < 
 
 ## 6. Open Questions for the Project Owner
 
-1. **Missing cast/crew handling** (drives §2.1): hide unknown-person rows entirely, show them with a silhouette + "Details coming soon", or keep them with a neutral placeholder ("Uncredited" is *wrong* — these are unresolved IDs, not uncredited roles)? *Recommendation: hide unknown *actors/actresses* (noise), keep unknown crew with placeholder.*
-2. **Enrichment source:** are you willing to sign up for a **free TMDB API key** (adds the attribution logo + footer notice)? *Recommendation: yes — it is the only well-rounded free source for headshots + overviews. If not, fall back to Wikidata-only (headshots sparse, prose minimal).*
-3. **Data freshness budget:** the DE pipeline re-run costs 7+ h. Is the `known_for_ids` fix worth a dedicated re-run, or should it piggyback on the next scheduled run (recommended)? Also: accept that poster/headshot caches refresh on 30-day TTL rather than per release?
-4. **Scope of "save list":** ship per-entry watchlist **notes** (recommended, small) now, and Collections (multi-list grouping) in a later phase — or defer notes too? Note the dead `CollectionList.tsx` either way.
-5. **Home page conversion elements:** Netflix ref is conversion-driven (email CTA). Elyssa is a browsing tool — confirm **no** signup CTA on home (recommended), keeping it a showcase page.
+1. **Missing cast/crew handling** (drives §2.1): hide unknown-person rows entirely, show them with a silhouette + "Details coming soon", or keep them with a neutral placeholder ("Uncredited" is *wrong* — these are unresolved IDs, not uncredited roles)? *Recommendation: hide unknown *actors/actresses* (noise), keep unknown crew with placeholder.* **🟡 OPEN**
+2. **Enrichment source:** are you willing to sign up for a **free TMDB API key** (adds the attribution logo + footer notice)? *Recommendation: yes — it is the only well-rounded free source for headshots + overviews. If not, fall back to Wikidata-only (headshots sparse, prose minimal).* **✅ RESOLVED — key in hand, enrichment live (P3), TMDB attribution in footer**
+3. **Data freshness budget:** the DE pipeline re-run costs 7+ h. Is the `known_for_ids` fix worth a dedicated re-run, or should it piggyback on the next scheduled run (recommended)? Also: accept that poster/headshot caches refresh on 30-day TTL rather than per release? **✅ RESOLVED — piggyback on next scheduled re-run (`BLUEPRINT.md` §8.5); posters live via self-hosted OpenPosterDB, cache just hardened against timeout poisoning**
+4. **Scope of "save list":** ship per-entry watchlist **notes** (recommended, small) now, and Collections (multi-list grouping) in a later phase — or defer notes too? Note the dead `CollectionList.tsx` either way. **✅ RESOLVED — notes shipped (P2); dead `CollectionList.tsx` deleted**
+5. **Home page conversion elements:** Netflix ref is conversion-driven (email CTA). Elyssa is a browsing tool — confirm **no** signup CTA on home (recommended), keeping it a showcase page. **🟡 OPEN**
 
 ---
 
@@ -391,7 +391,9 @@ Phases ordered by dependency (frontend fixes < backend endpoints < enrichment < 
 | Filter unification + Browse URL params | `FacetedFilters.tsx`, `BrowseFilters.tsx`, `Browse.tsx`, `Footer.tsx` | 🟡 |
 
 ### 7.3 Gold mart SQL delta (P5)
-Covered in §3.2 (additive `known_for_ids` on `dim_person`) + contract bumps (`gold-to-ds.md`, `gold-to-api.md`) + API switch of `_resolve_known_for` to `tconst = ?` (`resolvers.py:253–279`).
+Covered in §3.2 (additive `known_for_ids` on `dim_person`) + contract bumps (`gold-to-ds.md`, `gold-to-api.md`) + API switch of `_resolve_known_for` to `tconst = ?` (`resolvers.py:311–366`).
+
+**Status (2026-08-10):** the API switch shipped — `_resolve_known_for` auto-detects `known_for_ids` and prefers exact `tconst` lookups, with the ILIKE fallback intact; both paths are unit-tested (`test_graphql.py::test_known_for_*`, in-memory DuckDB). The only remaining piece is the DE delta (`known_for_ids` column in `int_person_details.sql` → `dim_person`), scheduled to piggyback on the next 7 h pipeline re-run. Full investigation: `BLUEPRINT.md` §8.5.
 
 ### 7.4 Configuration changes
 - `api/app/config.py` (+`.env.example`, `mlops/docker-compose.yml`): `ELYSSA_TMDB_API_KEY` (optional), `ELYSSA_ENRICHMENT_ENABLED` (default false → true with key), `ELYSSA_REFRESH_REUSE_GRACE_SECONDS` (default 5), `ELYSSA_POSTER_BASE_URL` unchanged (verify OPDB key handling), optional `ELYSSA_POSTER_KIND` per call (`poster` | `backdrop` | `logo`).
@@ -416,4 +418,4 @@ Covered in §3.2 (additive `known_for_ids` on `dim_person`) + contract bumps (`g
 
 ---
 
-*End of catalogue — ready for §6 owner decisions, then ticket creation.*
+*End of catalogue — P1–P3 shipped (`ea85c03` legacy), remaining: §6 Q1/Q5 owner decisions, P4 stretch, P5 DE piggyback.*

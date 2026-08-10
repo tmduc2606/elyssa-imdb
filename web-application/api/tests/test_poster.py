@@ -48,7 +48,7 @@ def test_get_poster_url_http_success():
         assert cs.call_args.kwargs.get("ttl") == POSTER_TTL
 
 
-def test_poster_timeout_returns_none_with_negative_cache():
+def test_poster_timeout_returns_none_without_negative_cache():
     svc = _svc()
     with patch("app.services.poster.cache_get", return_value=None), \
          patch("app.services.poster.cache_set") as cs, \
@@ -57,9 +57,7 @@ def test_poster_timeout_returns_none_with_negative_cache():
             httpx.TimeoutException("timed out")
         )
         assert svc.get_poster_url("tt0111161") is None
-        cs.assert_called_once_with(
-            svc._cache_key("tt0111161"), "", ttl=POSTER_TTL
-        )
+        cs.assert_not_called()
 
 
 def test_poster_head_unsupported_falls_back_to_documented_url():

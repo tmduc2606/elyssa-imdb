@@ -619,6 +619,34 @@ All ten open questions resolved below. Decisions are hardware-bound (AMD Athlon 
 
 ---
 
+## 8.5 P5 Investigation: `known_for_ids` exact-ID lookups
+
+**Status (2026-08-10):** API side complete + unit-tested (TDD, `test_graphql.py`); DE delta is the only remaining piece. Piggyback on the next scheduled pipeline re-run — **no dedicated 7 h run**.
+
+### Current state
+
+| Layer | State | Evidence |
+|---|---|---|
+| Silver | Exact tconsts exist: `silver.name_known_for_title(nconst, tconst, known_for_order 1–4)` | `data-engineering/silver/schema.sql:254–262` |
+| Gold | Names only: `int_person_details.sql` aggregates `primary_title`, exports via `dim_person.known_for_titles` | `int_person_details.sql:11–18,30` |
+| API | Dual-path resolver: exact-ID fast path + ILIKE fuzzy fallback, auto-detects the column via `DESCRIBE dim_person` | `resolvers.py:311–366` |
+| API tests | ID path (`known_for_ids` present), fallback path (column absent) — both unit-tested with in-memory DuckDB | `test_graphql.py::test_known_for_*` |
+
+### Findings
+
+1. **The ID fast path already works end-to-end once Gold ships the column** — the resolver probes `known_for_ids` presence and returns titles in `known_for_order` (not `num_votes`), fixing the "wrong known-for movies" complaint (§2.8.5).
+2. **Dedup semantics differ per path** — the ID path dedups by `tconst` (`resolvers.py:333`); the fuzzy fallback dedups by returned `tconst` too but can surface a *different* title with the same name (`ORDER BY num_votes DESC LIMIT 1`). With exact IDs, fallback will never run for persons whose row has IDs.
+3. **Column placement:** add `known_for_ids` in `int_person_details.sql` (STRING_AGG of `k.tconst` ordered by `known_for_order`), propagate to `dim_person.sql`. `known_for_order` is NOT NULL (1–4), so no `FILTER` clause is needed.
+4. **Contract impact:** additive column → bump `gold-to-ds.md` (§dim_person) + `gold-to-api.md` (dim_person row 46 area) as an additive, non-breaking change.
+5. **Runtime guard:** `_person_cols()` runs `DESCRIBE dim_person` per resolver call — fine on DuckDB (advisory: cache at startup if profiling shows jitter on cold cache).
+6. **QA after re-run:** sample 100 persons with known-for; assert API `knownForTitles` ids match `silver.name_known_for_title` order (one-off DuckDB check), and that no fuzzy fallback fires for rows with ids (log line or `known_for_ids IS NOT NULL` coverage).
+
+### Cost / recommendation
+
+DE delta = 1 dbt model edit + 2 contract bumps + 1 QA script ≈ **1 dev day**; the 7 h re-run itself piggybacks on the next scheduled run. Verdict: **approved as designed in WA_REMNANT_CATALOGUE.md §3.2**, no architectural blockers found.
+
+---
+
 ## 9. Review Gates & Approval
 
 ### PR Checklist (for every merge to main)

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 POSTER_TTL = 60 * 60 * 24 * 7  # 7 days
 POSTER_KIND = "poster"
-REQUEST_TIMEOUT = 3.0
+REQUEST_TIMEOUT = 10.0
 MAX_RETRIES = 2
 
 
@@ -39,11 +39,12 @@ class PosterService:
         if cached is not None:
             return cached or None
 
-        url = self._fetch(imdb_id)
-        cache_set(self._cache_key(imdb_id), url or "", ttl=POSTER_TTL)
+        url, cacheable = self._fetch(imdb_id)
+        if cacheable:
+            cache_set(self._cache_key(imdb_id), url or "", ttl=POSTER_TTL)
         return url
 
-    def _fetch(self, imdb_id: str) -> str | None:
+    def _fetch(self, imdb_id: str) -> tuple[str | None, bool]:
         # OpenPosterDB documented contract: GET {base}/{api_key}/imdb/poster-default/{id}.jpg
         # The response IS the image (JPEG with rating badges), not JSON.
         endpoint = (
@@ -59,26 +60,26 @@ class PosterService:
                 if resp.status_code == 200:
                     content_type = resp.headers.get("content-type", "")
                     if content_type.startswith("image/"):
-                        return endpoint
+                        return endpoint, True
                     logger.debug(
                         "Poster endpoint %s returned non-image content-type %s",
                         imdb_id,
                         content_type,
                     )
-                    return None
+                    return None, True
                 if resp.status_code in (404, 410):
                     logger.debug("No poster found for %s (HTTP %s)", imdb_id, resp.status_code)
-                    return None
+                    return None, True
                 if resp.status_code == 405:
                     # HEAD unsupported by the server — trust the documented URL shape
-                    return endpoint
+                    return endpoint, True
                 logger.warning("Poster HEAD %s -> HTTP %s", imdb_id, resp.status_code)
             except httpx.HTTPError as exc:
                 last_exc = exc
                 logger.warning("Poster fetch attempt %s for %s failed: %s", attempt + 1, imdb_id, exc)
 
         logger.warning("All poster fetch attempts failed for %s: %s", imdb_id, last_exc)
-        return None
+        return None, False
 
     def prewarm(self, imdb_ids: list[str], limit: int = 100) -> int:
         """Warm the poster cache for the given ids. Returns count of cache hits/misses fetched."""

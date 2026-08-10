@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import duckdb
 from fastapi.testclient import TestClient
 
+from app.graphql.resolvers import _resolve_known_for
 from app.main import app
 
 client = TestClient(app)
@@ -144,3 +148,51 @@ def test_cache_control_header():
     r = client.get("/health")
     cc = r.headers.get("Cache-Control", "")
     assert "max-age=30" in cc
+
+
+# ─── P5: known_for_ids exact-ID path (resolvers.py:311) ──────────────
+def _known_for_con(with_ids: bool):
+    con = duckdb.connect()
+    cols = (
+        "nconst VARCHAR, primary_name VARCHAR, known_for_titles VARCHAR"
+        + (", known_for_ids VARCHAR" if with_ids else "")
+    )
+    con.execute(f"CREATE TABLE dim_person ({cols})")
+    con.execute(
+        """CREATE TABLE dim_title (
+            tconst VARCHAR, primary_title VARCHAR, title_type VARCHAR,
+            average_rating DOUBLE, start_year INTEGER, num_votes INTEGER,
+            genre_list VARCHAR
+        )"""
+    )
+    con.execute("""INSERT INTO dim_title VALUES
+        ('tt100', 'The Shawshank Redemption', 'movie', 9.3, 1994, 2800000, 'Drama'),
+        ('tt200', 'The Matrix', 'movie', 8.7, 1999, 2000000, 'Action, Sci-Fi')""")
+    return con
+
+
+def test_known_for_resolves_via_exact_ids_when_column_present():
+    con = _known_for_con(with_ids=True)
+    con.execute(
+        "INSERT INTO dim_person VALUES ('nm1', 'Keanu Reeves', "
+        "'The Matrix, The Shawshank Redemption', 'tt200,tt100')"
+    )
+
+    with patch("app.graphql.resolvers._get_con", return_value=con):
+        result = _resolve_known_for("nm1")
+
+    assert [t.id for t in result] == ["tt200", "tt100"]
+    assert result[0].primary_title == "The Matrix"
+
+
+def test_known_for_falls_back_to_fuzzy_names_without_ids_column():
+    con = _known_for_con(with_ids=False)
+    con.execute(
+        "INSERT INTO dim_person VALUES ('nm1', 'Keanu Reeves', "
+        "'The Matrix, Something Else')"
+    )
+
+    with patch("app.graphql.resolvers._get_con", return_value=con):
+        result = _resolve_known_for("nm1")
+
+    assert [t.id for t in result] == ["tt200"]
