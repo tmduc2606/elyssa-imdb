@@ -26,6 +26,12 @@ router = APIRouter()
 _auth_limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=60)
 
 
+def _public_user(user: dict) -> dict:
+    public = {k: v for k, v in user.items() if k != "password_hash"}
+    public["displayName"] = public.get("display_name")
+    return public
+
+
 def check_auth_rate_limit(request: Request) -> None:
     client_ip = request.client.host if request.client else "unknown"
     if not _auth_limiter.check(client_ip):
@@ -80,7 +86,7 @@ async def register(
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
-    return {"accessToken": access_token, "user": user}
+    return {"accessToken": access_token, "user": _public_user(user)}
 
 
 @router.post("/login")
@@ -105,7 +111,7 @@ async def login(
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
-    return {"accessToken": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
+    return {"accessToken": access_token, "user": _public_user(user)}
 
 
 @router.post("/refresh")
@@ -200,7 +206,7 @@ async def refresh(
         samesite="lax",
         max_age=60 * 60 * 24 * 7,
     )
-    return {"accessToken": access_token, "user": {k: v for k, v in user.items() if k != "password_hash"}}
+    return {"accessToken": access_token, "user": _public_user(user)}
 
 
 @router.post("/logout")
@@ -236,7 +242,7 @@ async def me(request: Request):
     user = get_user_by_id(payload["sub"])
     if user is None:
         raise HTTPException(404, "User not found")
-    return user
+    return _public_user(user)
 
 
 @router.get("/watchlist")
@@ -299,7 +305,7 @@ async def update_me(request: Request, body: UpdateMeRequest):
         raise HTTPException(422, str(exc))
     if user is None:
         raise HTTPException(404, "User not found")
-    return user
+    return _public_user(user)
 
 
 class DeleteAccountRequest(BaseModel):

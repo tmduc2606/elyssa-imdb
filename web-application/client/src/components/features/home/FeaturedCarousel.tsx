@@ -58,27 +58,32 @@ export function FeaturedCarousel({ titles }: FeaturedCarouselProps) {
             aria-roledescription="slide"
             aria-label={`Slide ${index + 1}: ${title.primaryTitle}`}
             data-animate
-            className="group relative min-w-[280px] snap-start overflow-hidden rounded-lg border border-border"
+            className="group relative w-36 shrink-0 sm:w-44 md:w-52 overflow-hidden rounded-lg border border-border"
           >
-            <div className="aspect-[16/9] bg-muted">
-              {title.posterUrl && (
+            <div className="aspect-[2/3] bg-muted relative">
+              {title.posterUrl ? (
                 <img
                   src={title.posterUrl}
                   alt={title.primaryTitle}
                   loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                   className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />
+              ) : (
+                <div className="flex size-full items-center justify-center bg-surface p-3">
+                  <span className="text-center text-xs text-muted">{title.primaryTitle}</span>
+                </div>
               )}
             </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
-            <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
-              <h3 className="truncate text-lg font-semibold">{title.primaryTitle}</h3>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+            <div className="absolute bottom-0 left-0 right-0 p-3 text-white">
+              <h3 className="truncate text-sm font-semibold">{title.primaryTitle}</h3>
               <div className="mt-1 flex items-center gap-2">
                 {title.averageRating != null && (
                   <RatingBadge rating={title.averageRating} />
                 )}
                 {title.startYear && (
-                  <span className="text-sm text-white/80">{title.startYear}</span>
+                  <span className="text-xs text-white/80">{title.startYear}</span>
                 )}
               </div>
             </div>

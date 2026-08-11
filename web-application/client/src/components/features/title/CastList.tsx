@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { ChevronDown, ChevronUp, User } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { EntityLink } from "@/components/composites/EntityLink";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,18 +25,10 @@ function CastCard({ member }: { member: TitlePrincipal }) {
       aria-label={member.person.primaryName ?? "Person details coming soon"}
     >
       <Avatar className="size-16 rounded-full border border-border">
-        {headshot ? (
-          <>
-            <AvatarImage src={headshot} alt={member.person.primaryName ?? ""} />
-            <AvatarFallback className="text-sm">
-              {getInitials(member.person.primaryName ?? "?")}
-            </AvatarFallback>
-          </>
-        ) : (
-          <AvatarFallback className="bg-muted text-muted">
-            <User className="size-6" />
-          </AvatarFallback>
-        )}
+        {headshot ? <AvatarImage src={headshot} alt={member.person.primaryName ?? ""} /> : null}
+        <AvatarFallback className="bg-muted text-sm text-muted">
+          {getInitials(member.person.primaryName ?? "?")}
+        </AvatarFallback>
       </Avatar>
       <span className="truncate text-sm font-medium group-hover:text-foreground">
         {member.person.primaryName ?? "Details coming soon"}

@@ -14,6 +14,7 @@ def _svc(api_key="k", enabled=True) -> EnrichmentService:
     svc._lock = threading.Lock()
     svc._failures = 0
     svc._circuit_open_until = 0.0
+    svc._inflight = {}
     return svc
 
 

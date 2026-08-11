@@ -40,6 +40,7 @@ class EnrichmentService:
         self._lock = threading.Lock()
         self._failures = 0
         self._circuit_open_until = 0.0
+        self._inflight: dict[str, dict] = {}
 
     # ── cache plumbing ────────────────────────────────────────────────
     def _get_db(self) -> sqlite3.Connection:
@@ -85,6 +86,26 @@ class EnrichmentService:
     def _record_success(self) -> None:
         with self._lock:
             self._failures = 0
+
+    def _single_flight(self, key: str, fn):
+        with self._lock:
+            holder = self._inflight.get(key)
+            if holder is None:
+                holder = {"done": threading.Event(), "result": None}
+                self._inflight[key] = holder
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            holder["done"].wait(timeout=REQUEST_TIMEOUT * MAX_RETRIES + 5)
+            return holder["result"]
+        try:
+            holder["result"] = fn()
+            return holder["result"]
+        finally:
+            holder["done"].set()
+            with self._lock:
+                self._inflight.pop(key, None)
 
     @staticmethod
     def _fresh(updated_at: str, ttl: int = CACHE_TTL_SECONDS) -> bool:
@@ -194,14 +215,18 @@ class EnrichmentService:
         if row is not None and row["tmdb_id"] is None:
             return None  # negative cache
 
-        found = self._find_tmdb_id(nconst, kind="person")
-        headshot: str | None = None
-        if found:
-            images = self._get(f"/person/{found}/images")
-            if images and images.get("profiles"):
-                path = images["profiles"][0].get("file_path")
-                if path:
-                    headshot = f"{IMAGE_BASE}{path}"
+        def _fetch():
+            found = self._find_tmdb_id(nconst, kind="person")
+            headshot: str | None = None
+            if found:
+                images = self._get(f"/person/{found}/images")
+                if images and images.get("profiles"):
+                    path = images["profiles"][0].get("file_path")
+                    if path:
+                        headshot = f"{IMAGE_BASE}{path}"
+            return found, headshot
+
+        found, headshot = self._single_flight(f"person:{nconst}", _fetch)
         db.execute(
             "INSERT OR REPLACE INTO enrich_person (nconst, tmdb_id, headshot_url, updated_at) VALUES (?, ?, ?, ?)",
             [
