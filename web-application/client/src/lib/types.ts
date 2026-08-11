@@ -14,6 +14,7 @@ export interface Title {
   seriesTitle: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
+  popularitySegment: string | null;
 }
 
 export type TitleType =

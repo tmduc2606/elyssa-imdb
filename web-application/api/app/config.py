@@ -62,7 +62,6 @@ class Settings(BaseSettings):
     feature_rating_prediction: bool = True
     feature_watchlist: bool = True
     feature_recommendations: bool = False
-    feature_gsap_animations: bool = True
 
     model_config = ConfigDict(env_file=".env", env_prefix="ELYSSA_")
 

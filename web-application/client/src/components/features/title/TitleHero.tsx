@@ -19,6 +19,12 @@ type TitleHeroTitle = Title & {
   tagline?: string | null;
 };
 
+const POPULARITY_LABELS: Record<string, string> = {
+  high: "Highly popular",
+  medium: "Popular",
+  low: "Niche",
+};
+
 interface TitleHeroProps {
   title: TitleHeroTitle;
   className?: string;
@@ -141,6 +147,11 @@ export function TitleHero({ title, className }: TitleHeroProps) {
           <span className="rounded border border-border px-1.5 py-0.5 text-[11px] uppercase">
             {title.titleType.replace(/([A-Z])/g, " $1").trim()}
           </span>
+          {title.popularitySegment && POPULARITY_LABELS[title.popularitySegment] && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted">
+              {POPULARITY_LABELS[title.popularitySegment]}
+            </span>
+          )}
         </div>
 
         {title.genres.length > 0 && <GenreTags genres={title.genres} />}

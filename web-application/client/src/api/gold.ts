@@ -27,6 +27,7 @@ export const TITLE_DETAIL_QUERY = `
       averageRating
       numVotes
       posterUrl
+      popularitySegment
       overview
       tagline
       cast(limit: 20) {

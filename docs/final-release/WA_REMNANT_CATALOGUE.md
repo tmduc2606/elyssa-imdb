@@ -340,6 +340,18 @@ Hero `FeaturedCarousel` (exists) + **"Top 10 this week" ranked list with large n
 - **Accessibility:** focus-visible rings on all new interactive elements; `aria-label`s on icon-only buttons (`WatchlistButton` today has no label — add one); `prefers-reduced-motion` gate for GSAP.
 - **Responsive:** hamburger/drawer for the filter sidebar on < lg (log §5 flags this).
 
+### P4 shipped status (2026-08-11)
+
+| §4 item | Delivered |
+|---|---|
+| 4.1 Title page | `CastList` → cast **card grid** (circular headshots + character, expand "View all N cast members"); crew stays Directors/Writers/Crew lines under the hero; `popularity_segment` now exposed via GraphQL and shown as a popularity pill in `TitleHero` (rank chip: Highly popular/Popular/Niche) |
+| 4.2 Person page | already at target composition (headshot hero → Known For → filmography → collaborators) — verified, no gaps |
+| 4.3 Home | new `TopTenRow` — "Top 10 this week" ranked strip with large number overlays (first 10 of cached `trending`); no signup CTA (Q5) |
+| 4.4 Motion/a11y | `prefers-reduced-motion` gate already active in `TitleHero`; icon-only buttons have `aria-label`s (WatchlistButton, theme toggle, menu, filters); dead backend `feature_gsap_animations` flag **deleted** (frontend `FEATURE_FLAGS.gsapAnimations` remains the live switch); Browse filter sidebar → **Sheet drawer on < lg** |
+| 2.8.2 Filter unification | single chip source in `lib/constants.ts` (`GENRE_CHIPS`, `TYPE_CHIPS`, `DECADE_CHIPS`, `SORT_CHIPS`, `MIN_RATING_CHIPS`) consumed by `BrowseFilters` + `FacetedFilters`; Browse now **respects `?type=` footer links** and adds Type/Min-rating filters; `/browse/top-rated` fixed (was treated as a genre → returned zero results; now minRating 8) |
+
+**Q1 delivered in P4 hardening:** unknown actors/actresses hidden entirely; unknown crew rendered as "Details coming soon" **non-link** placeholder (`EntityLink`); verified live on `tt38627828` ("Mala Eleccion": 10/10 unknown cast hidden, 7/7 unknown crew placeholder) and unit-tested (`CastList.test.tsx` 5 cases).
+
 ---
 
 ## 5. Implementation Roadmap
@@ -351,7 +363,7 @@ Phases ordered by dependency (frontend fixes < backend endpoints < enrichment < 
 | **P1 — Critical fixes** | §2.1 cast/crew/keys/roles · §2.2 episodes · §2.3 rating widget · §2.6 auth toasts/races · §2.7 null guards + resilience, `ErrorBoundary` logging · 2.8.1 favicon | — | 3–4 days | ❌ | ✅ shipped (`ea85c03`) |
 | **P2 — Accounts & watchlist** | §2.4 PATCH `/auth/me`, DELETE account, Settings wiring, Account layout · §2.5 watchlist wiring + notes endpoint + contract fix | P1 | 2–3 days | ❌ | ✅ shipped (`ea85c03`) |
 | **P3 — Poster verify + enrichment** | §3.3 PosterService adaptation · EnrichmentService SQLite + TMDB adapter + batch script + GraphQL fields + UI (headshots, overview, tagline) + attribution | P1 (resolver surface) | 4–5 days | ❌ (hot-set batch is an API-side job) | ✅ shipped (`ea85c03`) + live-verified (TMDB heat, OPDB posters); poster timeout/negative-cache hardening ✓ (`0d7…` follow-up) |
-| **P4 — UI/UX overhaul** | §4.1 title page, §4.2 person page, §4.3 home, §4.4 motion/a11y, 2.8.2 filter unification | P1 | 3–4 days | ❌ | ⏳ optional stretch — pending owner prioritization |
+| **P4 — UI/UX overhaul** | §4.1 title page, §4.2 person page, §4.3 home, §4.4 motion/a11y, 2.8.2 filter unification | P1 | 3–4 days | ❌ | ✅ shipped (`9b784b5`) — see §4 status notes below |
 | **P5 — DE deltas** | §3.2 known_for_ids (+ optional akas) → Gold contract bump `gold-to-api.md`/`gold-to-ds.md` → API switch to `tconst = ?` lookups | — | 1 day code + **7 h re-run** + QA | ✅ | ⚠️ API path ✅ code + tests (`test_graphql.py`); DE delta pending next scheduled re-run — see `BLUEPRINT.md` §8.5 |
 
 **Quick wins first day:** 2.1 role labels + keys, 2.2 null guard + episodes gating, 2.3 rating stat card, 2.6 toast suppression, 2.8.1 favicon — all 🟢, no backend work beyond GraphQL nullability.
@@ -362,11 +374,11 @@ Phases ordered by dependency (frontend fixes < backend endpoints < enrichment < 
 
 ## 6. Open Questions for the Project Owner
 
-1. **Missing cast/crew handling** (drives §2.1): hide unknown-person rows entirely, show them with a silhouette + "Details coming soon", or keep them with a neutral placeholder ("Uncredited" is *wrong* — these are unresolved IDs, not uncredited roles)? *Recommendation: hide unknown *actors/actresses* (noise), keep unknown crew with placeholder.* **🟡 OPEN**
+1. **Missing cast/crew handling** (drives §2.1): hide unknown-person rows entirely, show them with a silhouette + "Details coming soon", or keep them with a neutral placeholder ("Uncredited" is *wrong* — these are unresolved IDs, not uncredited roles)? *Recommendation: hide unknown *actors/actresses* (noise), keep unknown crew with placeholder.* **✅ RESOLVED (owner 2026-08-11) — hide unknown actors/actresses; unknown crew kept with "Details coming soon" placeholder (no dead links). Shipped in P4; unit-tested (`CastList.test.tsx`) + live-verified on `tt38627828` (10/10 unknown cast hidden, 7/7 unknown crew placeholder)**
 2. **Enrichment source:** are you willing to sign up for a **free TMDB API key** (adds the attribution logo + footer notice)? *Recommendation: yes — it is the only well-rounded free source for headshots + overviews. If not, fall back to Wikidata-only (headshots sparse, prose minimal).* **✅ RESOLVED — key in hand, enrichment live (P3), TMDB attribution in footer**
 3. **Data freshness budget:** the DE pipeline re-run costs 7+ h. Is the `known_for_ids` fix worth a dedicated re-run, or should it piggyback on the next scheduled run (recommended)? Also: accept that poster/headshot caches refresh on 30-day TTL rather than per release? **✅ RESOLVED — piggyback on next scheduled re-run (`BLUEPRINT.md` §8.5); posters live via self-hosted OpenPosterDB, cache just hardened against timeout poisoning**
 4. **Scope of "save list":** ship per-entry watchlist **notes** (recommended, small) now, and Collections (multi-list grouping) in a later phase — or defer notes too? Note the dead `CollectionList.tsx` either way. **✅ RESOLVED — notes shipped (P2); dead `CollectionList.tsx` deleted**
-5. **Home page conversion elements:** Netflix ref is conversion-driven (email CTA). Elyssa is a browsing tool — confirm **no** signup CTA on home (recommended), keeping it a showcase page. **🟡 OPEN**
+5. **Home page conversion elements:** Netflix ref is conversion-driven (email CTA). Elyssa is a browsing tool — confirm **no** signup CTA on home (recommended), keeping it a showcase page. **✅ RESOLVED (owner 2026-08-11) — no signup CTA; home remains a showcase page (verified: no signup/newsletter/email CTA anywhere in `Home.tsx`/home components; email only exists in the auth `RegisterForm`)**
 
 ---
 
@@ -418,4 +430,4 @@ Covered in §3.2 (additive `known_for_ids` on `dim_person`) + contract bumps (`g
 
 ---
 
-*End of catalogue — P1–P3 shipped (`ea85c03` legacy), remaining: §6 Q1/Q5 owner decisions, P4 stretch, P5 DE piggyback.*
+*End of catalogue — P1–P4 shipped, §6 Q1–Q5 resolved; only P5 (DE `known_for_ids`) remains, piggybacked per `BLUEPRINT.md` §8.5.*

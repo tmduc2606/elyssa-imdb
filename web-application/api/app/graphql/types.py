@@ -25,6 +25,7 @@ class Title:
     series_title: str | None = None
     season_number: int | None = None
     episode_number: int | None = None
+    popularity_segment: str | None = None
 
 
 @strawberry.type

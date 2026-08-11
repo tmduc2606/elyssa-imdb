@@ -17,6 +17,21 @@ export function EntityLink({ id, name, type, posterUrl, className, placeholder }
   const isRound = type === "person";
   const isUnknown = !name || name.trim() === "";
 
+  if (isUnknown) {
+    return (
+      <span className={cn("group flex items-center gap-2 text-sm", className)}>
+        <Avatar className={cn(isRound ? "size-8 rounded-full" : "size-8 rounded")}>
+          <AvatarFallback className="bg-muted text-muted">
+            <User className="size-4" />
+          </AvatarFallback>
+        </Avatar>
+        <span className="truncate text-muted italic">
+          {placeholder ?? "Details coming soon"}
+        </span>
+      </span>
+    );
+  }
+
   return (
     <Link
       to={to}
@@ -24,27 +39,13 @@ export function EntityLink({ id, name, type, posterUrl, className, placeholder }
         "group flex items-center gap-2 text-sm transition-colors hover:text-foreground",
         className,
       )}
-      aria-label={isUnknown ? "Person details coming soon" : name ?? undefined}
+      aria-label={name ?? undefined}
     >
       <Avatar className={cn(isRound ? "size-8 rounded-full" : "size-8 rounded")}>
-        {isUnknown ? (
-          <AvatarFallback className="bg-muted text-muted">
-            <User className="size-4" />
-          </AvatarFallback>
-        ) : (
-          <>
-            <AvatarImage src={posterUrl ?? undefined} alt={name ?? ""} />
-            <AvatarFallback className="text-[10px]">{getInitials(name)}</AvatarFallback>
-          </>
-        )}
+        <AvatarImage src={posterUrl ?? undefined} alt={name ?? ""} />
+        <AvatarFallback className="text-[10px]">{getInitials(name)}</AvatarFallback>
       </Avatar>
-      {isUnknown ? (
-        <span className="truncate text-muted italic">
-          {placeholder ?? "Details coming soon"}
-        </span>
-      ) : (
-        <span className="truncate text-muted group-hover:text-foreground">{name}</span>
-      )}
+      <span className="truncate text-muted group-hover:text-foreground">{name}</span>
     </Link>
   );
 }

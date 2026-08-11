@@ -40,6 +40,44 @@ export const GENRES = [
   "Talk-Show", "Thriller", "War", "Western",
 ] as const;
 
+export interface FilterChip {
+  label: string;
+  value: string;
+}
+
+// Single source of truth for all filter chip groups (WA 2.8.2)
+export const GENRE_CHIPS: FilterChip[] = GENRES.map((g) => ({ label: g, value: g }));
+
+export const TYPE_CHIPS: FilterChip[] = TITLE_TYPES.map((t) => ({
+  label: t.replace(/([A-Z])/g, " $1").trim(),
+  value: t,
+}));
+
+export const DECADE_CHIPS: FilterChip[] = [
+  { label: "2020s", value: "2020" },
+  { label: "2010s", value: "2010" },
+  { label: "2000s", value: "2000" },
+  { label: "1990s", value: "1990" },
+  { label: "1980s", value: "1980" },
+  { label: "1970s", value: "1970" },
+  { label: "1960s", value: "1960" },
+  { label: "1950s", value: "1950" },
+  { label: "Older", value: "older" },
+];
+
+export const SORT_CHIPS: FilterChip[] = [
+  { label: "Rating", value: "rating" },
+  { label: "Votes", value: "votes" },
+  { label: "Year", value: "year" },
+  { label: "Title", value: "title" },
+];
+
+export const MIN_RATING_CHIPS: FilterChip[] = [
+  { label: "Any", value: "" },
+  { label: "7+", value: "7" },
+  { label: "8+", value: "8" },
+];
+
 export type FeatureFlagKey =
   | "genrePrediction"
   | "ratingPrediction"

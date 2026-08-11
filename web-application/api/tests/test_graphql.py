@@ -61,12 +61,13 @@ def test_graphql_search():
 
 
 def test_graphql_title_detail():
-    q = '{ title(tconst: "tt28262612") { id primaryTitle titleType startYear genres cast { person { id primaryName } } similar { id } } }'
+    q = '{ title(tconst: "tt28262612") { id primaryTitle titleType startYear genres popularitySegment cast { person { id primaryName } } similar { id } } }'
     r = client.post("/graphql", json={"query": q})
     assert r.status_code == 200
     data = r.json()["data"]["title"]
     assert data is not None
     assert len(data["id"]) > 0
+    assert data["popularitySegment"] in {"high", "medium", "low", "unknown"}
 
 
 def test_graphql_browse():

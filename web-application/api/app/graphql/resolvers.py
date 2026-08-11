@@ -169,6 +169,7 @@ def resolve_title(tconst: str) -> TitleDetail | None:
         series_title=data.get("series_title"),
         season_number=data.get("season_number"),
         episode_number=data.get("episode_number"),
+        popularity_segment=data.get("popularity_segment"),
         overview=(enrich or {}).get("overview"),
         tagline=(enrich or {}).get("tagline"),
         ratings=[],

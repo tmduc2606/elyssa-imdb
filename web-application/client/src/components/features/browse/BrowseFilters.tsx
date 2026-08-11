@@ -1,41 +1,28 @@
 import { FilterBar } from "@/components/composites/FilterBar";
-import { GENRES } from "@/lib/constants";
+import { DECADE_CHIPS, GENRE_CHIPS, MIN_RATING_CHIPS, SORT_CHIPS, TYPE_CHIPS } from "@/lib/constants";
 
 interface BrowseFiltersProps {
   selectedGenres: string[];
   onGenresChange: (genres: string[]) => void;
   decade: number | null;
   onDecadeChange: (decade: number | null) => void;
+  titleType: string | null;
+  onTitleTypeChange: (titleType: string | null) => void;
+  minRating: number | null;
+  onMinRatingChange: (minRating: number | null) => void;
   sortBy: string;
   onSortChange: (sort: string) => void;
 }
-
-const genreChips = GENRES.map((g) => ({ label: g, value: g }));
-
-const decadeChips = [
-  { label: "2020s", value: "2020" },
-  { label: "2010s", value: "2010" },
-  { label: "2000s", value: "2000" },
-  { label: "1990s", value: "1990" },
-  { label: "1980s", value: "1980" },
-  { label: "1970s", value: "1970" },
-  { label: "1960s", value: "1960" },
-  { label: "1950s", value: "1950" },
-  { label: "Older", value: "older" },
-];
-
-const sortChips = [
-  { label: "Rating", value: "rating" },
-  { label: "Votes", value: "votes" },
-  { label: "Year", value: "year" },
-  { label: "Title", value: "title" },
-];
 
 export function BrowseFilters({
   selectedGenres,
   onGenresChange,
   decade,
   onDecadeChange,
+  titleType,
+  onTitleTypeChange,
+  minRating,
+  onMinRatingChange,
   sortBy,
   onSortChange,
 }: BrowseFiltersProps) {
@@ -43,19 +30,37 @@ export function BrowseFilters({
     <div className="flex flex-col gap-4">
       <div>
         <label className="mb-2 block text-sm font-medium text-muted">Genre</label>
-        <FilterBar chips={genreChips} selected={selectedGenres} onChange={onGenresChange} />
+        <FilterBar chips={GENRE_CHIPS} selected={selectedGenres} onChange={onGenresChange} />
+      </div>
+      <div>
+        <label className="mb-2 block text-sm font-medium text-muted">Type</label>
+        <FilterBar
+          chips={TYPE_CHIPS}
+          selected={titleType ? [titleType] : []}
+          onChange={(v) => onTitleTypeChange(v.length > 0 ? v[0] ?? null : null)}
+        />
       </div>
       <div>
         <label className="mb-2 block text-sm font-medium text-muted">Decade</label>
         <FilterBar
-          chips={decadeChips}
+          chips={DECADE_CHIPS}
           selected={decade ? [String(decade)] : []}
           onChange={(v) => onDecadeChange(v.length > 0 ? Number(v[0]) : null)}
         />
       </div>
       <div>
+        <label className="mb-2 block text-sm font-medium text-muted">Min rating</label>
+        <FilterBar
+          chips={MIN_RATING_CHIPS}
+          selected={minRating != null ? [String(minRating)] : []}
+          onChange={(v) =>
+            onMinRatingChange(v.length > 0 && v[0] ? Number(v[0]) : null)
+          }
+        />
+      </div>
+      <div>
         <label className="mb-2 block text-sm font-medium text-muted">Sort by</label>
-        <FilterBar chips={sortChips} selected={[sortBy]} onChange={(v) => onSortChange(v[0] ?? "rating")} />
+        <FilterBar chips={SORT_CHIPS} selected={[sortBy]} onChange={(v) => onSortChange(v[0] ?? "rating")} />
       </div>
     </div>
   );

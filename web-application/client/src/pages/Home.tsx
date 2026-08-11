@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/composites/PageHeader";
 import { FeaturedCarousel } from "@/components/features/home/FeaturedCarousel";
+import { TopTenRow } from "@/components/features/home/TopTenRow";
 import { TrendingRow } from "@/components/features/home/TrendingRow";
 import { TopRatedRow } from "@/components/features/home/TopRatedRow";
 import { GenreQuickLinks } from "@/components/features/home/GenreQuickLinks";
@@ -21,6 +22,7 @@ export function Home() {
         ) : (
           <>
             <FeaturedCarousel titles={data?.featured ?? []} />
+            <TopTenRow titles={data?.trending ?? []} />
             <TrendingRow titles={data?.trending ?? []} />
             <TopRatedRow titles={data?.topRated ?? []} />
           </>
