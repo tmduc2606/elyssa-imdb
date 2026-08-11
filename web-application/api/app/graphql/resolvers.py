@@ -9,6 +9,7 @@ from functools import lru_cache
 import duckdb
 
 from app.cache.memory import get_cache
+from app.cache.redis import cache_mget, make_cache_key
 from app.config import get_settings
 from app.services import get_poster_service
 from app.services.enrichment import get_enrichment_service
@@ -75,6 +76,41 @@ def _row_to_summary(r) -> TitleSummary:
         average_rating=r[3], start_year=r[4], num_votes=r[5],
         genres=_genres_list(r[6]),
     )
+
+
+def _attach_posters(items: list[TitleSummary]) -> list[TitleSummary]:
+    if not items:
+        return items
+    ids = [t.id for t in items]
+    keys = [make_cache_key("poster", i) for i in ids]
+    cached = cache_mget(keys)
+
+    uncached_indices = [i for i, url in enumerate(cached) if url is None]
+    for i, url in enumerate(cached):
+        if url is not None:
+            items[i].poster_url = url
+
+    if not uncached_indices:
+        return items
+
+    poster_svc = get_poster_service()
+    if not poster_svc.enabled:
+        return items
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch(idx: int) -> tuple[int, str | None]:
+        return idx, poster_svc.get_poster_url(items[idx].id)
+
+    max_workers = min(len(uncached_indices), 8)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch, i): i for i in uncached_indices}
+        for future in as_completed(futures):
+            idx, url = future.result()
+            if url:
+                items[idx].poster_url = url
+
+    return items
 
 
 def _open_connection() -> duckdb.DuckDBPyConnection:
@@ -193,9 +229,12 @@ def _resolve_cast(tconst: str, limit: int = 20) -> list[CastMember]:
     if not rows:
         return []
     results = []
+    enrich = get_enrichment_service()
     for r in rows:
+        nconst = r[0] or ""
+        headshot = enrich.get_person_headshot(nconst) if nconst else None
         results.append(CastMember(
-            person=PersonSummary(id=r[0] or "", primary_name=r[1]),
+            person=PersonSummary(id=nconst, primary_name=r[1], headshot_url=headshot),
             character=r[2],
             ordering=r[3],
             category=r[4],
@@ -218,9 +257,12 @@ def _resolve_crew(tconst: str) -> list[CrewMember]:
     if not rows:
         return []
     results = []
+    enrich = get_enrichment_service()
     for r in rows:
+        nconst = r[0] or ""
+        headshot = enrich.get_person_headshot(nconst) if nconst else None
         results.append(CrewMember(
-            person=PersonSummary(id=r[0] or "", primary_name=r[1]),
+            person=PersonSummary(id=nconst, primary_name=r[1], headshot_url=headshot),
             ordering=r[2],
             category=r[3],
             job=r[4],
@@ -232,19 +274,39 @@ def _resolve_similar(tconst: str, genres: list[str] | None = None, limit: int = 
     con = _get_con()
     if not genres:
         return []
-    params: list[str] = [f"%{g}%" for g in genres[:3]]
+    filtered = [g for g in genres[:3] if g.lower() != "adult"]
+    if not filtered:
+        return []
+
+    source = con.execute(
+        "SELECT title_type FROM dim_title WHERE tconst = ?", [tconst]
+    ).fetchone()
+    source_type = source[0] if source else None
+
+    if source_type in ("movie", "short", "video"):
+        type_filter = "AND title_type IN ('movie', 'short', 'video')"
+    elif source_type in ("tvSeries", "tvMiniSeries", "tvSpecial"):
+        type_filter = "AND title_type IN ('tvSeries', 'tvMiniSeries', 'tvSpecial')"
+    else:
+        type_filter = "AND title_type IN ('movie', 'tvSeries', 'tvMiniSeries')"
+
+    params: list[str] = [f"%{g}%" for g in filtered]
     placeholders = " OR ".join(["genre_list ILIKE ?"] * len(params))
     sql = f"""
         SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
         FROM dim_title
         WHERE tconst != ?
+          AND genre_list NOT LIKE '%Adult%'
           AND ({placeholders})
           AND average_rating IS NOT NULL
-        ORDER BY average_rating DESC
+          AND num_votes >= 1000
+          {type_filter}
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY primary_title ORDER BY num_votes DESC) = 1
+        ORDER BY average_rating DESC, num_votes DESC
         LIMIT ?
     """
     rows = con.execute(sql, [tconst, *params, limit]).fetchall()
-    return [_row_to_summary(r) for r in rows]
+    return _attach_posters([_row_to_summary(r) for r in rows])
 
 
 def _is_episodic(tconst: str) -> bool:
@@ -278,6 +340,7 @@ def _resolve_episodes(tconst: str, limit: int = 100) -> list[EpisodeContent]:
             episode_number=r[2],
             title=_row_to_summary(r[3:]) if r[3] else None,
         ))
+    _attach_posters([e.title for e in results if e.title is not None])
     return results
 
 
@@ -302,6 +365,7 @@ def _resolve_filmography(nconst: str, limit: int = 50) -> list[FilmographyEntry]
             character=r[2],
             year=r[6],
         ))
+    _attach_posters([e.title for e in results])
     return results
 
 
@@ -346,7 +410,7 @@ def _resolve_known_for(nconst: str, limit: int = 10) -> list[TitleSummary]:
             if len(results) >= limit:
                 break
         if results:
-            return results
+            return _attach_posters(results)
 
     # Fallback: fuzzy name matching against the names column
     names = [t.strip() for t in row[0].split(",") if t.strip()]
@@ -364,7 +428,7 @@ def _resolve_known_for(nconst: str, limit: int = 10) -> list[TitleSummary]:
             results.append(_row_to_summary(r))
         if len(results) >= limit:
             break
-    return results
+    return _attach_posters(results)
 
 
 def _resolve_collaborators(nconst: str, limit: int = 20) -> list[Collaborator]:
@@ -447,7 +511,7 @@ def resolve_search(
 
     has_more = (offset + first) < total
     next_cursor = _encode_cursor(offset + first, "votes") if has_more else None
-    return items, total, has_more, next_cursor
+    return _attach_posters(items), total, has_more, next_cursor
 
 
 def resolve_browse(
@@ -511,7 +575,7 @@ def resolve_browse(
 
     has_more = (offset + first) < total
     next_cursor = _encode_cursor(offset + first, current_sort) if has_more else None
-    return items, total, has_more, next_cursor
+    return _attach_posters(items), total, has_more, next_cursor
 
 
 def resolve_trending(limit: int = 20) -> list[TitleSummary]:
@@ -524,11 +588,13 @@ def resolve_trending(limit: int = 20) -> list[TitleSummary]:
         """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
            FROM dim_title
            WHERE average_rating IS NOT NULL AND num_votes > 100
+             AND title_type IN ('movie', 'tvSeries', 'tvMiniSeries')
+           QUALIFY ROW_NUMBER() OVER (PARTITION BY primary_title ORDER BY num_votes DESC) = 1
            ORDER BY num_votes DESC
            LIMIT ?""",
         [limit],
     ).fetchall()
-    results = [_row_to_summary(r) for r in rows]
+    results = _attach_posters([_row_to_summary(r) for r in rows])
     cache.set(f"trending:{limit}", results, ttl=120)
     return results
 
@@ -543,11 +609,13 @@ def resolve_top_rated(limit: int = 20) -> list[TitleSummary]:
         """SELECT tconst, primary_title, title_type, average_rating, start_year, num_votes, genre_list
            FROM dim_title
            WHERE average_rating IS NOT NULL AND num_votes > 1000
+             AND title_type IN ('movie', 'tvSeries', 'tvMiniSeries')
+           QUALIFY ROW_NUMBER() OVER (PARTITION BY primary_title ORDER BY average_rating DESC, num_votes DESC) = 1
            ORDER BY average_rating DESC
            LIMIT ?""",
         [limit],
     ).fetchall()
-    results = [_row_to_summary(r) for r in rows]
+    results = _attach_posters([_row_to_summary(r) for r in rows])
     cache.set(f"top_rated:{limit}", results, ttl=120)
     return results
 

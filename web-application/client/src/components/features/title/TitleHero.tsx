@@ -19,11 +19,12 @@ type TitleHeroTitle = Title & {
   tagline?: string | null;
 };
 
-const POPULARITY_LABELS: Record<string, string> = {
-  high: "Highly popular",
-  medium: "Popular",
-  low: "Niche",
-};
+const POPULARITY_ENTRIES: [string, { label: string; className: string }][] = [
+  ["high", { label: "Highly popular", className: "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30" }],
+  ["medium", { label: "Popular", className: "bg-sky-500/15 text-sky-400 ring-1 ring-sky-500/30" }],
+  ["low", { label: "Niche", className: "bg-muted text-muted-foreground ring-1 ring-border" }],
+];
+const POPULARITY_MAP = new Map(POPULARITY_ENTRIES);
 
 interface TitleHeroProps {
   title: TitleHeroTitle;
@@ -147,11 +148,14 @@ export function TitleHero({ title, className }: TitleHeroProps) {
           <span className="rounded border border-border px-1.5 py-0.5 text-[11px] uppercase">
             {title.titleType.replace(/([A-Z])/g, " $1").trim()}
           </span>
-          {title.popularitySegment && POPULARITY_LABELS[title.popularitySegment] && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted">
-              {POPULARITY_LABELS[title.popularitySegment]}
-            </span>
-          )}
+          {(() => {
+            const entry = title.popularitySegment ? POPULARITY_MAP.get(title.popularitySegment) : undefined;
+            return entry ? (
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${entry.className}`}>
+                {entry.label}
+              </span>
+            ) : null;
+          })()}
         </div>
 
         {title.genres.length > 0 && <GenreTags genres={title.genres} />}

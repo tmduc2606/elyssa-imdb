@@ -47,3 +47,16 @@ def cache_set(key: str, value: str, ttl: int = 300) -> None:
 
 def make_cache_key(prefix: str, *parts: str) -> str:
     return f"elyssa:{prefix}:{':'.join(parts)}"
+
+
+def cache_mget(keys: list[str]) -> list[str | None]:
+    if not keys:
+        return []
+    r = get_redis()
+    if r is None:
+        return [None] * len(keys)
+    try:
+        return r.mget(keys)
+    except Exception as e:
+        logger.warning("Redis mget failed: %s", e)
+        return [None] * len(keys)

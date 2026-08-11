@@ -12,7 +12,7 @@ const footerLinks = [
   {
     heading: "Connect",
     links: [
-      { label: "GitHub", to: "https://github.com/anomalyco/elyssa-frontend" },
+      { label: "GitHub", to: "https://github.com/tmduc2606/elyssa-imdb" },
     ],
   },
 ];

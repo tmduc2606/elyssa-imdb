@@ -13,23 +13,26 @@ export function TopTenRow({ titles }: TopTenRowProps) {
   return (
     <section aria-label="Top 10 this week">
       <h2 className="mb-4 text-2xl font-semibold tracking-tight">Top 10 this week</h2>
-      <div className="flex gap-3 overflow-x-auto pb-4 [scrollbar-width:thin]">
+      <div className="flex items-end gap-0 overflow-x-auto pb-4 [scrollbar-width:thin]">
         {top.map((title, i) => (
-          <div key={title.id} className="relative w-32 shrink-0 sm:w-36 md:w-40">
-            <MediaCard
-              id={title.id}
-              title={title.primaryTitle}
-              year={title.startYear}
-              rating={title.averageRating}
-              genres={title.genres}
-              posterUrl={title.posterUrl}
-            />
+          <div key={title.id} className="flex shrink-0 items-end">
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute -bottom-1 left-1 text-6xl font-black leading-none text-foreground/80 sm:text-7xl"
+              className="pointer-events-none mr-2 flex items-end text-[72px] font-black leading-none text-transparent sm:text-[88px]"
+              style={{ WebkitTextStroke: "2px var(--color-foreground)" }}
             >
               {i + 1}
             </span>
+            <div className="w-32 sm:w-36 md:w-40">
+              <MediaCard
+                id={title.id}
+                title={title.primaryTitle}
+                year={title.startYear}
+                rating={title.averageRating}
+                genres={title.genres}
+                posterUrl={title.posterUrl}
+              />
+            </div>
           </div>
         ))}
       </div>
