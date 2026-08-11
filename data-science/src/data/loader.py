@@ -29,7 +29,10 @@ def parquet_row_count(con: duckdb.DuckDBPyConnection, path: Path) -> int:
     if not Path(path).exists():
         raise FileNotFoundError(f"Parquet file missing: {path}")
     row = con.execute(
-        "SELECT COALESCE(SUM(row_count), 0) AS n FROM parquet_metadata(?)",
+        "SELECT COALESCE(SUM(row_group_num_rows), 0) AS n FROM ("
+        "SELECT DISTINCT file_name, row_group_id, row_group_num_rows "
+        "FROM parquet_metadata(?)"
+        ")",
         [str(path)],
     ).fetchone()
     return int(row[0]) if row else 0
@@ -38,11 +41,17 @@ def parquet_row_count(con: duckdb.DuckDBPyConnection, path: Path) -> int:
 class GoldDataLoader:
     def __init__(self, marts_dir: Path, development_mode: bool = True,
                  sample_percent: int = 5, random_seed: int = 42):
-        self.marts_dir = marts_dir
+        self.marts_dir = self._resolve_marts_dir(marts_dir)
         self.development_mode = development_mode
         self.sample_percent = sample_percent
         self.random_seed = random_seed
         self.con: Optional[duckdb.DuckDBPyConnection] = None
+
+    @staticmethod
+    def _resolve_marts_dir(marts_dir: Path) -> Path:
+        if (marts_dir / "gold" / "dim_title.parquet").exists():
+            return marts_dir / "gold"
+        return marts_dir
 
     def connect(self) -> duckdb.DuckDBPyConnection:
         self.con = duckdb.connect(":memory:")

@@ -8,7 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureBuilder:
-    RATING_EXCLUDED = {"average_rating", "num_votes"}
+    RATING_EXCLUDED = {
+        "average_rating",
+        "num_votes",
+        "rating_bucket",
+        "avg_rating_genre_year",
+        "avg_votes_genre_year",
+    }
 
     def __init__(self, processed_dir: Path):
         self.processed_dir = processed_dir

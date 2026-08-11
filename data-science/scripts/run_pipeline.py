@@ -70,6 +70,9 @@ def run_stage_features(config: dict):
     tab_cols = config["features"]["tabular_columns"]
     genre_col = "genre_list"
     y_genre_train, y_genre_val, y_genre_test, mlb = binarize_multilabel(dim_title, genre_col, train_mask, val_mask, test_mask)
+    np.save(processed_dir / "y_train_genre.npy", y_genre_train)
+    np.save(processed_dir / "y_val_genre.npy", y_genre_val)
+    np.save(processed_dir / "y_test_genre.npy", y_genre_test)
     joblib.dump(mlb, processed_dir / "genre_list_mlb.joblib")
     logger.info(f"Genre binarizer saved: {len(mlb.classes_)} classes")
 
@@ -84,7 +87,8 @@ def run_stage_features(config: dict):
     logger.info("Computing text embeddings via DistilBERT...")
     from src.features.text import load_text_encoder
     title_texts = dim_title["primary_title"].fillna("").tolist()
-    tokenizer, model, device = load_text_encoder()
+    quantized_path = config["features"].get("text_embedding_quantized_path")
+    tokenizer, model, device = load_text_encoder(quantized_path=quantized_path)
     X_text = embed_text_batch(title_texts, tokenizer, model, device)
     np.save(processed_dir / "X_text.npy", X_text)
     logger.info(f"Text embeddings: {X_text.shape}")
@@ -105,7 +109,22 @@ def run_stage_features(config: dict):
     X_rating_idx = [i for i, c in enumerate(tab_cols) if c in rating_cols]
     np.save(processed_dir / "rating_feature_indices.npy", X_rating_idx)
 
-    con.execute("SELECT * FROM fact_title_rating").df().to_parquet(processed_dir / "fact_title_rating_features.parquet")
+    rating_df = con.execute(
+        "SELECT d.tconst, r.average_rating "
+        "FROM dim_title d LEFT JOIN fact_title_rating r ON d.tconst = r.tconst"
+    ).df()
+    y_rating_all = rating_df["average_rating"].astype(np.float32).to_numpy()
+    y_rating_train = y_rating_all[train_mask.to_numpy()]
+    y_rating_val = y_rating_all[val_mask.to_numpy()]
+    y_rating_test = y_rating_all[test_mask.to_numpy()]
+    np.save(processed_dir / "y_train_rating.npy", y_rating_train)
+    np.save(processed_dir / "y_val_rating.npy", y_rating_val)
+    np.save(processed_dir / "y_test_rating.npy", y_rating_test)
+    logger.info(
+        f"Rating targets aligned with features (train={y_rating_train.shape[0]}, "
+        f"val={y_rating_val.shape[0]}, test={y_rating_test.shape[0]})"
+    )
+    rating_df.to_parquet(processed_dir / "fact_title_rating_features.parquet")
 
     loader.close()
     logger.info("Feature engineering stage complete")
@@ -224,14 +243,17 @@ def run_stage_models(config: dict, model_name: str = "all"):
         X_rating_train = np.concatenate([X_train_tab[:, rating_idx], X_train_text], axis=1)
         X_rating_val = np.concatenate([X_val_tab[:, rating_idx], X_val_text], axis=1)
 
-        if y_genre_train is not None:
-            y_rating_train = y_genre_train[:, 0] if y_genre_train.ndim > 1 else y_genre_train
-        else:
-            y_rating_train = np.zeros(X_rating_train.shape[0])
-        if y_genre_val is not None:
-            y_rating_val = y_genre_val[:, 0] if y_genre_val.ndim > 1 else y_genre_val
-        else:
-            y_rating_val = np.zeros(X_rating_val.shape[0])
+        rating_target_files = [
+            processed_dir / "y_train_rating.npy",
+            processed_dir / "y_val_rating.npy",
+        ]
+        missing = [f.name for f in rating_target_files if not f.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"Rating targets missing (run '--stage features' first): {missing}"
+            )
+        y_rating_train = np.load(processed_dir / "y_train_rating.npy")
+        y_rating_val = np.load(processed_dir / "y_val_rating.npy")
 
         model, metrics = train_catboost(X_rating_train, y_rating_train, X_rating_val, y_rating_val)
         model.save_model(str(processed_dir / "catboost_rating_model.cbm"))
@@ -284,10 +306,35 @@ def run_stage_analytics(config: dict):
         gate_results = evaluator.evaluate(metrics)
         for gate, result in gate_results.items():
             status = "PASS" if result["pass"] else "FAIL"
-            logger.info(f"  {gate}: {status} (value={result.get('value', 'N/A')}, threshold={result['threshold']})")
+            logger.info(f"  {gate}: {status} (value={result.get('value', 'N/A')}, threshold={result.get('threshold', 'N/A')})")
         logger.info(f"All gates passed: {evaluator.all_passed(gate_results)}")
     else:
         logger.warning("model_inventory.json not found — skipping quality gates")
+
+    logger.info("Running feature-audit gate (G7)...")
+    try:
+        import catboost as cb
+        catboost_model = cb.CatBoostRegressor()
+        catboost_model.load_model(str(processed_dir / "catboost_rating_model.cbm"))
+        with open(processed_dir / "feature_columns.json") as f:
+            feat_info = json.load(f)
+        feature_names = feat_info["tabular_features"] + feat_info["text_features"]
+        importances = {
+            name: float(imp)
+            for name, imp in zip(feature_names, catboost_model.get_feature_importance())
+        }
+        from src.evaluation.gates import evaluate_feature_audit
+        audit = evaluate_feature_audit(importances)
+        offenders = [f for f, r in audit.items() if not r["pass"]]
+        for name, result in sorted(audit.items(), key=lambda kv: -kv[1]["importance"])[:5]:
+            status = "PASS" if result["pass"] else "FAIL"
+            logger.info(f"  feature_audit[{name}]: {status} (importance={result['importance']:.4f})")
+        if offenders:
+            logger.warning(f"Feature audit FAILED — {len(offenders)} dominant feature(s): {offenders}")
+        else:
+            logger.info("Feature audit passed (no dominant feature)")
+    except Exception as e:
+        logger.warning(f"Feature audit skipped: {e}")
 
     logger.info("Analytics stage complete")
 
@@ -297,6 +344,10 @@ def main():
     parser.add_argument("--stage", choices=["eda", "features", "models", "analytics", "all"])
     parser.add_argument("--model", default="all", help="Specific model to train")
     parser.add_argument("--config", default="config/settings.yaml")
+    parser.add_argument(
+        "--validate-only", action="store_true",
+        help="Skip feature engineering and training; only check artifact freshness and gates",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -310,7 +361,11 @@ def main():
         "analytics": run_stage_analytics,
     }
 
-    if args.stage == "all":
+    if args.validate_only:
+        logger.info("Validate-only mode: skipping feature engineering and training")
+        run_stage_eda(config)
+        run_stage_analytics(config)
+    elif args.stage == "all":
         for stage_name, stage_fn in stages.items():
             stage_fn(config)
     else:

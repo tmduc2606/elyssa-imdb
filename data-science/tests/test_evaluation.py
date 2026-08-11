@@ -6,7 +6,11 @@ from src.evaluation.metrics import (
     precision_recall_at_k,
 )
 from src.evaluation.qerror import q_error, add_noise
-from src.evaluation.gates import QualityGateEvaluator
+from src.evaluation.gates import (
+    QualityGateEvaluator,
+    evaluate_feature_audit,
+    feature_audit_passed,
+)
 
 
 def test_evaluate_multilabel():
@@ -83,7 +87,14 @@ def test_quality_gate_evaluator():
 
 def test_quality_gate_all_passed():
     evaluator = QualityGateEvaluator()
-    metrics = {"test_rmse": 0.3, "test_macro_f1": 0.7}
+    metrics = {
+        "test_rmse": 0.3,
+        "test_macro_f1": 0.7,
+        "val_test_delta": 0.05,
+        "naming_compliant": True,
+        "p95_latency_ms": 50,
+        "all_artifacts_present": True,
+    }
     results = evaluator.evaluate(metrics)
     assert evaluator.all_passed(results)
 
@@ -100,3 +111,23 @@ def test_quality_gate_missing_metric():
     metrics = {}
     results = evaluator.evaluate(metrics)
     assert not evaluator.all_passed(results)
+
+
+def test_feature_audit_flags_dominant_feature():
+    importances = {"avg_rating_genre_year": 91.1, "start_year": 1.0, "runtime_minutes": 2.0}
+    results = evaluate_feature_audit(importances)
+    assert not feature_audit_passed(results)
+    assert not results["avg_rating_genre_year"]["pass"]
+    assert results["start_year"]["pass"]
+    assert abs(results["avg_rating_genre_year"]["importance"] - 0.968) < 0.01
+
+
+def test_feature_audit_passes_balanced():
+    importances = {"start_year": 0.4, "runtime_minutes": 0.3, "genre_cnt": 0.3}
+    results = evaluate_feature_audit(importances)
+    assert feature_audit_passed(results)
+
+
+def test_feature_audit_empty():
+    results = evaluate_feature_audit({})
+    assert feature_audit_passed(results)

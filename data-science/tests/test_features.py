@@ -6,10 +6,14 @@ from src.features.builder import FeatureBuilder
 def test_no_rating_leakage(sample_data):
     builder = FeatureBuilder(Path("."))
     rating_features = builder.get_rating_features(
-        ["start_year", "runtime_minutes", "average_rating", "num_votes"]
+        ["start_year", "runtime_minutes", "average_rating", "num_votes",
+         "rating_bucket", "avg_rating_genre_year", "avg_votes_genre_year"]
     )
     assert "average_rating" not in rating_features
     assert "num_votes" not in rating_features
+    assert "rating_bucket" not in rating_features
+    assert "avg_rating_genre_year" not in rating_features
+    assert "avg_votes_genre_year" not in rating_features
     assert "start_year" in rating_features
     assert "runtime_minutes" in rating_features
 
@@ -45,7 +49,10 @@ def test_rating_matrix_with_exclude_cols(sample_data):
 def test_rating_excluded_constant():
     assert "average_rating" in FeatureBuilder.RATING_EXCLUDED
     assert "num_votes" in FeatureBuilder.RATING_EXCLUDED
-    assert len(FeatureBuilder.RATING_EXCLUDED) == 2
+    assert "rating_bucket" in FeatureBuilder.RATING_EXCLUDED
+    assert "avg_rating_genre_year" in FeatureBuilder.RATING_EXCLUDED
+    assert "avg_votes_genre_year" in FeatureBuilder.RATING_EXCLUDED
+    assert len(FeatureBuilder.RATING_EXCLUDED) == 5
 
 
 def test_load_preprocessors_no_error(processed_dir):

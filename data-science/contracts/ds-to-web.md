@@ -167,9 +167,9 @@ with open("feature_columns.json") as f:
     schema = json.load(f)
 
 # schema = {
-#   "tabular_features": ["start_year", "runtime_minutes", ...],  # incl. genre-year features (avg_rating_genre_year, avg_votes_genre_year, genre_year_title_count)
+#   "tabular_features": ["start_year", "runtime_minutes", ...],  # genre-year rating/votes aggregates excluded (BLUEPRINT DS1); genre_year_title_count retained
 #   "text_features": ["text_emb_0", ..., "text_emb_767"],         # 768 columns
-#   "total_features": 794
+#   "total_features": 793
 # }
 
 def build_feature_vector(raw_input: dict, text_embedding: np.ndarray) -> np.ndarray:
@@ -188,7 +188,7 @@ def build_feature_vector(raw_input: dict, text_embedding: np.ndarray) -> np.ndar
     return np.concatenate([tabular, text_embedding])
 ```
 
-**Note:** `average_rating` and `num_votes` are excluded from `tabular_features` — these columns are the prediction target for rating regression and must not be passed as input features.
+**Note:** `average_rating`, `num_votes`, `rating_bucket`, `avg_rating_genre_year` and `avg_votes_genre_year` are excluded from `tabular_features` — the first three are the rating target or its derivations, the genre-year aggregates leak the target across the sample (BLUEPRINT DS1/DS4) and must not be passed as input features.
 
 ---
 

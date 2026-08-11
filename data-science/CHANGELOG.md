@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.2.0 — 2026-08-11
+### Added
+- `src/features/quantize.py` — PyTorch dynamic INT8 quantization for the DistilBERT encoder (`quantize_embedding_encoder`, `load_quantized_encoder`, `try_load_quantized_encoder`); wired into `src/features/text.py::load_text_encoder(quantized_path=...)` and `run_pipeline.py` via `features.text_embedding_quantized_path` (BLUEPRINT DS5)
+- `scripts/check_temporal_split.py` — post-hoc temporal-split enforcement (DS.1): validates train ≤ 2014 / val 2015–2018 / test ≥ 2019, no nulls/duplicates/unknown labels, full coverage (BLUEPRINT DS7)
+- Feature-audit gate G7 in `src/evaluation/gates.py` (`evaluate_feature_audit`, `feature_audit_passed`) — flags any single feature above 80% normalized importance (leakage detection); wired into `run_pipeline.py` analytics stage (BLUEPRINT DS6)
+- `run_pipeline.py --validate-only` — checks artifact freshness + quality/feature gates without feature engineering or training (BLUEPRINT DS3)
+- Model cards generated for all 14 inventory models under `docs/model_cards/` (BLUEPRINT DS10)
+
+### Changed
+- **Leakage removal (BLUEPRINT DS1):** `avg_rating_genre_year` / `avg_votes_genre_year` removed from `numeric_cols` in the FE notebook and added to `FeatureBuilder.RATING_EXCLUDED`, `settings.yaml::rating_excluded_features`, and `src/config.py` defaults; `genre_year_title_count` retained as a non-leaking count. The production CatBoost model's 91.1% `avg_rating_genre_year` importance confirmed the leak
+- **DS4:** `rating_bucket` added to all rating-pillar exclusion sets
+- **Inference pipeline fixed (BLUEPRINT DS2):** `src/inference/pipeline.py` now uses CLS token + `max_length=32` (matching training), applies the fitted preprocessor (raw columns from `preprocessor.feature_names_in_`) + `safe_minmax` + float32 instead of the double-scaling `scaler.transform(preprocessor.transform())` path, and feeds real text embeddings to `predict_genre`/`predict_rating` instead of zeros
+- **Rating target fix (BLUEPRINT DS8):** `run_pipeline.py` features stage now saves `y_*_genre` and `y_*_rating` (rating target from `fact_title_rating` joined to `dim_title`); the models stage loads real rating targets instead of reusing genre labels; missing targets raise a clear error
+- **BiLSTM epochs 20 → 8** in `settings.yaml` and the modeling notebook (BLUEPRINT DS9)
+- `ds-to-web.md` contract updated: genre-year aggregates + `rating_bucket` documented as excluded; `total_features` 794 → 793
+
+### Notes
+- Full end-to-end re-run (`run_pipeline.py --stage all`) intentionally deferred — artifact re-baselining (float32 matrices, new feature set) happens on the next scheduled run (BLUEPRINT DS3); `--validate-only` reports freshness without training
+
 ## v3.1.1 — 2026-08-05
 ### Changed
 - `requirements.txt` fully pinned to `.venv`: added `pyarrow==24.0.0`, exact-pinned `polars==1.43.0`, `pycountry==26.2.16`, `psycopg2==2.9.12`, `ipykernel==7.3.0` (consistency with the "Pinned versions from .venv" header)

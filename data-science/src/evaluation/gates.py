@@ -12,6 +12,8 @@ QUALITY_GATES = {
     "G6_artifacts_exist": {"metric": "all_artifacts_present", "threshold": True, "op": "=="},
 }
 
+FEATURE_AUDIT_MAX_SINGLE_IMPORTANCE = 0.80
+
 
 class QualityGateEvaluator:
     def evaluate(self, metrics: Dict[str, Any]) -> Dict[str, dict]:
@@ -50,3 +52,27 @@ class QualityGateEvaluator:
             "==": lambda a, b: a == b,
         }
         return ops[op](value, threshold)
+
+
+def evaluate_feature_audit(
+    importances: Dict[str, float],
+    max_single_importance: float = FEATURE_AUDIT_MAX_SINGLE_IMPORTANCE,
+) -> Dict[str, dict]:
+    """Gate G7: flag any single feature dominating the model (leakage audit).
+
+    A normalized importance above ``max_single_importance`` is treated as a
+    probable target leak (e.g. ``avg_rating_genre_year`` at ~0.91).
+    """
+    total = sum(importances.values()) or 1.0
+    results = {}
+    for feature, raw_importance in importances.items():
+        norm = raw_importance / total
+        results[feature] = {
+            "importance": norm,
+            "pass": norm <= max_single_importance,
+        }
+    return results
+
+
+def feature_audit_passed(results: Dict[str, dict]) -> bool:
+    return all(r["pass"] for r in results.values())

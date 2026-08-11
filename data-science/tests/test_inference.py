@@ -1,37 +1,104 @@
 import numpy as np
+import pandas as pd
 from pathlib import Path
 
 
+def _fitted_preprocessor():
+    from src.features.tabular import build_preprocessor
+
+    df = pd.DataFrame({
+        "start_year": [2000, 2005, 2010],
+        "runtime_minutes": [90, 120, 150],
+        "title_type": ["movie", "tvSeries", "short"],
+        "is_adult": [0, 0, 1],
+    })
+    numeric_cols = ["start_year", "runtime_minutes"]
+    categorical_cols = ["title_type", "is_adult"]
+    preprocessor = build_preprocessor(numeric_cols, categorical_cols)
+    preprocessor.fit(df[numeric_cols + categorical_cols])
+    return preprocessor
+
+
+def _models_dict(preprocessor):
+    tabular = ["start_year", "runtime_minutes",
+               "title_type_movie", "title_type_tvSeries", "title_type_short",
+               "is_adult_0", "is_adult_1"]
+    text = ["text_emb_0", "text_emb_1"]
+    return {
+        "feature_info": {"tabular_features": tabular, "text_features": text},
+        "preprocessor": preprocessor,
+        "scaler": None,
+        "num_tab": len(tabular),
+        "num_text": len(text),
+    }
+
 
 def test_build_feature_vector_no_leakage():
-    dummy_features = [
-        "start_year", "runtime_minutes", "title_type_movie",
-        "title_type_tvSeries", "is_adult_0", "is_adult_1",
-        "num_persons", "unique_persons",
-    ]
-    raw = {
+    from src.inference.pipeline import build_feature_vector
+
+    models = _models_dict(_fitted_preprocessor())
+    vec = build_feature_vector({
         "start_year": 2010,
         "runtime_minutes": 148,
         "title_type": "movie",
         "is_adult": 0,
-    }
-    num_tab = len(dummy_features)
-    tab_vec = np.zeros(num_tab, dtype=np.float32)
-    for i, col in enumerate(dummy_features):
-        if col in raw:
-            tab_vec[i] = float(raw[col])
-        elif col.startswith("title_type_"):
-            expected = col.split("_", 2)[-1]
-            tab_vec[i] = 1.0 if raw.get("title_type", "") == expected else 0.0
-        elif col.startswith("is_adult_"):
-            expected = int(col.split("_")[-1])
-            tab_vec[i] = 1.0 if int(raw.get("is_adult", 0)) == expected else 0.0
+    }, models)
+    assert vec.shape == (9,)
+    leaked = build_feature_vector({
+        "start_year": 2010,
+        "runtime_minutes": 148,
+        "title_type": "movie",
+        "is_adult": 0,
+        "average_rating": 10.0,
+        "num_votes": 1_000_000,
+        "rating_bucket": "excellent",
+    }, models)
+    assert np.allclose(vec, leaked), "rating-pillar inputs leaked into feature vector"
 
-    assert tab_vec[0] == 2010.0
-    assert tab_vec[2] == 1.0
-    assert tab_vec[3] == 0.0
-    assert tab_vec[4] == 1.0
-    assert tab_vec[5] == 0.0
+
+def test_build_feature_vector_onehot_encoding():
+    from src.inference.pipeline import build_feature_vector
+
+    models = _models_dict(_fitted_preprocessor())
+    vec = build_feature_vector({
+        "start_year": 2005,
+        "runtime_minutes": 100,
+        "title_type": "tvSeries",
+        "is_adult": 1,
+    }, models)
+    tab = vec[: models["num_tab"]]
+    assert tab[2] == 0.0
+    assert tab[3] == 0.0
+    assert tab[4] == 1.0
+    assert tab[5] == 0.0
+    assert tab[6] == 1.0
+    assert np.all(vec[models["num_tab"]:] == 0.0), "text embeddings must be zero without title_text"
+
+
+def test_build_feature_vector_missing_cols():
+    from src.inference.pipeline import build_feature_vector
+
+    models = _models_dict(_fitted_preprocessor())
+    vec = build_feature_vector({"start_year": 2005}, models)
+    assert vec.shape == (9,)
+    assert np.isfinite(vec).all(), "missing features must be imputed, not NaN"
+
+
+def test_build_feature_vector_rejects_no_schema():
+    from src.inference.pipeline import build_feature_vector
+
+    models = {
+        "feature_info": None,
+        "preprocessor": None,
+        "scaler": None,
+        "num_tab": 0,
+        "num_text": 0,
+    }
+    try:
+        build_feature_vector({"start_year": 2010}, models)
+        raise AssertionError("expected failure with missing preprocessor")
+    except (AttributeError, TypeError):
+        pass
 
 
 def test_predict_genre_schema():
@@ -69,38 +136,3 @@ def test_predict_rating_range():
     }, models)
     assert "predicted_rating" in result
     assert 1.0 <= result["predicted_rating"] <= 10.0
-
-
-def test_build_feature_vector_missing_cols():
-    dummy_features = ["start_year", "runtime_minutes", "num_persons"]
-    raw = {"start_year": 2015}
-    tab_vec = np.zeros(len(dummy_features), dtype=np.float32)
-    for i, col in enumerate(dummy_features):
-        if col in raw:
-            tab_vec[i] = float(raw[col])
-    assert tab_vec[0] == 2015.0
-    assert tab_vec[1] == 0.0
-    assert tab_vec[2] == 0.0
-
-
-def test_build_feature_vector_onehot_encoding():
-    dummy_features = [
-        "start_year", "title_type_movie", "title_type_tvSeries",
-        "title_type_short", "is_adult_0", "is_adult_1",
-    ]
-    raw = {"start_year": 2020, "title_type": "tvSeries", "is_adult": 1}
-    tab_vec = np.zeros(len(dummy_features), dtype=np.float32)
-    for i, col in enumerate(dummy_features):
-        if col in raw:
-            tab_vec[i] = float(raw[col])
-        elif col.startswith("title_type_"):
-            tab_vec[i] = 1.0 if raw.get("title_type", "") == col.split("_", 2)[-1] else 0.0
-        elif col.startswith("is_adult_"):
-            tab_vec[i] = 1.0 if int(raw.get("is_adult", 0)) == int(col.split("_")[-1]) else 0.0
-
-    assert tab_vec[0] == 2020.0
-    assert tab_vec[1] == 0.0
-    assert tab_vec[2] == 1.0
-    assert tab_vec[3] == 0.0
-    assert tab_vec[4] == 0.0
-    assert tab_vec[5] == 1.0

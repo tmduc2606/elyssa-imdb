@@ -11,13 +11,24 @@ BATCH_SIZE = 128
 EMBEDDING_DIM = 768
 
 
-def load_text_encoder(model_name: str = "distilbert-base-uncased", device: Optional[str] = None):
+def load_text_encoder(
+    model_name: str = "distilbert-base-uncased",
+    device: Optional[str] = None,
+    quantized_path: Optional[Path] = None,
+):
     from transformers import DistilBertTokenizer, DistilBertModel
 
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     tokenizer = DistilBertTokenizer.from_pretrained(model_name)
+    if quantized_path:
+        from src.features.quantize import try_load_quantized_encoder
+        quantized = try_load_quantized_encoder(quantized_path, device)
+        if quantized is not None:
+            logger.info(f"Using INT8-quantized encoder {model_name} on {device}")
+            return tokenizer, quantized, device
+        logger.warning(f"Quantized encoder unavailable ({quantized_path}); using float32")
     model = DistilBertModel.from_pretrained(model_name).to(device).eval()
     logger.info(f"Loaded {model_name} on {device}")
     return tokenizer, model, device

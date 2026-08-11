@@ -7,10 +7,10 @@ project:
     gpu: false
 
 paths:
-  marts_dir: "../marts"
-  processed_dir: "../marts/processed"
-  figures_dir: "../figures"
-  contracts_dir: "../contracts"
+  marts_dir: "marts"
+  processed_dir: "marts/processed"
+  figures_dir: "figures"
+  contracts_dir: "contracts"
 
 development_mode:
   enabled: true
@@ -53,9 +53,13 @@ features:
     - wri_avg_recent_activity
   text_embedding_model: distilbert-base-uncased
   text_embedding_dim: 768
+  text_embedding_quantized_path: null
   rating_excluded_features:
     - average_rating
     - num_votes
+    - rating_bucket
+    - avg_rating_genre_year
+    - avg_votes_genre_year
 
 models:
   genre:
@@ -68,7 +72,7 @@ models:
     bilstm:
       embedding_dim: 128
       lstm_units: 64
-      max_epochs: 20
+      max_epochs: 8
   rating:
     catboost:
       optuna_trials: 5

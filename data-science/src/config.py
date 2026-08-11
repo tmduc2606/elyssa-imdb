@@ -28,7 +28,10 @@ class FeatureConfig:
         "wri_avg_career_len", "wri_max_career_len", "wri_avg_experience", "wri_avg_recent_activity",
     ])
     text_embedding_dim: int = 768
-    rating_excluded_features: List[str] = field(default_factory=lambda: ["average_rating", "num_votes"])
+    rating_excluded_features: List[str] = field(default_factory=lambda: [
+        "average_rating", "num_votes", "rating_bucket",
+        "avg_rating_genre_year", "avg_votes_genre_year",
+    ])
 
 
 @dataclass
