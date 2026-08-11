@@ -1,7 +1,8 @@
 """Shared S3 / httpfs configuration for DuckDB connections.
-    
+
 All ETL scripts call configure_s3(conn) to bootstrap httpfs
-and set RustFS S3 credentials. Environment variables override defaults."""
+and set RustFS S3 credentials. Credentials come from the environment
+(docker/.env via compose) — no hardcoded fallbacks (C1-C7)."""
 
 import os
 
@@ -13,10 +14,15 @@ def get_s3_config() -> dict:
         if raw_endpoint.startswith(prefix):
             raw_endpoint = raw_endpoint[len(prefix):]
             break
+    secret_key = os.environ.get("S3_SECRET_KEY", "")
+    if not secret_key:
+        raise ValueError(
+            "S3_SECRET_KEY is not set in the environment (docker/.env via compose)"
+        )
     return {
         "endpoint": raw_endpoint,
         "access_key": os.environ.get("S3_ACCESS_KEY", "elyssa"),
-        "secret_key": os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026"),
+        "secret_key": secret_key,
         "region": os.environ.get("S3_REGION", "us-east-1"),
         "url_style": "path",
         "use_ssl": False,

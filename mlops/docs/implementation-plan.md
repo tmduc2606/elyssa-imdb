@@ -240,7 +240,7 @@ mlflow:
     mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri postgresql://elyssa:elyssa_pg_2026@postgres:5432/mlflow
+      --backend-store-uri postgresql://elyssa:${POSTGRES_PASSWORD}@postgres:5432/mlflow
       --default-artifact-root s3://elyssa-mlflow-artifacts/
   ports:
     - "5000:5000"

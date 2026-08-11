@@ -20,14 +20,20 @@ from pipeline_logger import get_logger
 
 
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
+# Access key is a username (non-secret); the secret key MUST come from the
+# environment (docker/.env via compose) — no hardcoded fallback (C1-C7).
 S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "elyssa")
-S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "")
 
 _s3_client = None
 
 
 def _get_s3_client():
     global _s3_client
+    if not S3_SECRET_KEY:
+        raise ValueError(
+            "S3_SECRET_KEY is not set in the environment (docker/.env via compose)"
+        )
     if _s3_client is None:
         _s3_client = boto3.client(
             "s3",

@@ -26,7 +26,7 @@ IMDb .tsv.gz ─▶ RustFS S3 (imdb-source/) ─▶ Bronze (DuckDB) ─▶ RustF
 |-------|--------|-----|--------|
 | **Bronze** | DuckDB + httpfs | S3 `imdb-source/` → S3 `bronze/` | Raw Parquet (7 tables, 212 M rows) |
 | **Silver** | DuckDB → psycopg2 COPY | S3 → PostgreSQL | 3NF/BCNF (14 tables + 3 governance, SCD2) |
-| **Gold** | dbt (threads=2) | PostgreSQL → PostgreSQL | Star-schema (12 models, 43 tests) |
+| **Gold** | dbt (threads=3) | PostgreSQL → PostgreSQL | Star-schema (14 models, 43 tests) |
 | **Export** | DuckDB | PostgreSQL → bind mount | Snappy Parquet (6 marts ≈ 5.7 GB) + `_MANIFEST.json` |
 
 ## Performance Baseline
@@ -40,7 +40,7 @@ Full report: [`docs/pipeline_performance_metrics.md`](docs/pipeline_performance_
 | Bronze | 12 s | — | 212 M | Checkpoint reuse |
 | Silver (ETL) | skipped | 212 M | 355 M | Checkpoint reuse |
 | Silver (export) | 20 m | 355 M | 355 M | PostgreSQL → DuckDB |
-| Gold (dbt run) | 2 h 59 m | 355 M | 241 M | Full-refresh, 12 models |
+| Gold (dbt run) | 2 h 59 m | 355 M | 241 M | Full-refresh, 14 models |
 | Gold (dbt test) | 59 m | — | — | 43 tests (37P/6W/0E) |
 | Gold (DQ + freshness) | 4 m | — | — | 7/7 PASS, 6/6 PASS |
 | Gold (export) | 19 m | 241 M | 241 M | 5.7 GB Parquet |
@@ -162,8 +162,8 @@ docker exec elyssa-airflow airflow dags trigger imdb_pipeline
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | Airflow | http://localhost:18081 | `admin` / `admin` |
-| PostgreSQL | `localhost:54321` | `elyssa` / `elyssa_pg_2026` |
-| RustFS S3 API | http://localhost:9100 | `elyssa` / `elyssa_s3_2026` |
+| PostgreSQL | `localhost:54321` | see `docker/.env` (`POSTGRES_USER` / `POSTGRES_PASSWORD`) |
+| RustFS S3 API | http://localhost:9100 | see `docker/.env` (`S3_ACCESS_KEY` / `S3_SECRET_KEY`) |
 | RustFS Console | http://localhost:9101 | — |
 
 ## Idempotency & Checkpoints

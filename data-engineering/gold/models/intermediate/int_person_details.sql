@@ -11,7 +11,8 @@ professions AS (
 known_for AS (
     SELECT
         k.nconst,
-        STRING_AGG(tb.primary_title, ', ' ORDER BY k.known_for_order) AS known_for_titles
+        STRING_AGG(tb.primary_title, ', ' ORDER BY k.known_for_order) AS known_for_titles,
+        STRING_AGG(k.tconst, ',' ORDER BY k.known_for_order) AS known_for_ids
     FROM {{ source('silver', 'name_known_for_title') }} k
     LEFT JOIN {{ ref('stg_title_basics') }} tb ON k.tconst = tb.tconst
     GROUP BY k.nconst
@@ -28,6 +29,7 @@ SELECT
     END AS age_at_death,
     pr.profession_list,
     kf.known_for_titles,
+    kf.known_for_ids,
     pb.batch_id,
     pb.ingested_at
 FROM person_base pb

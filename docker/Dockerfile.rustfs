@@ -17,10 +17,9 @@ RUN wget -qO /tmp/rc.tar.gz ${RC_URL} \
     && rm /tmp/rc.tar.gz
 USER rustfs
 
-# Environment
-ENV RUSTFS_ACCESS_KEY=elyssa \
-    RUSTFS_SECRET_KEY=elyssa_s3_2026 \
-    RUSTFS_REGION=us-east-1 \
+# Credentials are injected at runtime via docker-compose env (C1-C7);
+# nothing secret is baked into the image.
+ENV RUSTFS_REGION=us-east-1 \
     RUSTFS_CONSOLE_ADDRESS=":9001"
 
 # Create buckets at startup using rc CLI

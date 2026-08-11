@@ -67,6 +67,17 @@ class FreshnessCheckOperator(BaseOperator):
         import subprocess
         import os
 
+        # C1-C7: resolve credentials from env/Airflow Connections when not
+        # explicitly passed by the caller (never hardcoded).
+        import sys as _sys
+        _sys.path.insert(0, "/opt/airflow/data-engineering/orchestration")
+        from config.secrets import pg_user, pg_password, pg_host, pg_port, pg_db
+        self.jdbc_user = self.jdbc_user or pg_user()
+        self.jdbc_password = self.jdbc_password or pg_password()
+        self.jdbc_url = self.jdbc_url or (
+            f"postgresql://{self.jdbc_user}:{self.jdbc_password}@{pg_host()}:{pg_port()}/{pg_db()}"
+        )
+
         log = get_logger()
         batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         start_ts = datetime.now(timezone.utc)

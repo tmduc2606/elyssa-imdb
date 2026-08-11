@@ -4,6 +4,8 @@ Elyssa-IMDb | Gold Export Runner (detached subprocess)
 Exports all Gold-layer tables (6 tables) from PostgreSQL to Snappy Parquet
 in a bind-mounted host directory, plus a manifest. Row counts are read from
 the parquet footers (pyarrow metadata) — no COUNT(*) re-scan (P0-2).
+Tables are exported in parallel with 2 workers (O4), each worker using its
+own DuckDB connection.
 
 Runs OUTSIDE Airflow's supervisor (spawned with start_new_session=True)
 so the long DuckDB postgres_scanner COPY operations survive the scheduler's
@@ -22,7 +24,7 @@ import argparse
 import json
 import os
 import sys
-import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,9 +40,41 @@ TABLES = [
     "fact_title_rating",
 ]
 
+EXPORT_WORKERS = 2
+
 
 def _log(message: str):
     print(f"[{datetime.now(timezone.utc).isoformat()}] {message}", flush=True)
+
+
+def _where_clause(table: str) -> str:
+    if table == "dim_title":
+        return (
+            " WHERE NOT (title_type = 'movie' AND (runtime_minutes IS NULL OR runtime_minutes <= 0))"
+        )
+    return ""
+
+
+def _export_one(conn_info: dict, table: str, output_dir: Path) -> int:
+    """Export a single table on its own DuckDB connection (worker-safe)."""
+    conn = duckdb.connect(":memory:")
+    try:
+        conn.execute("INSTALL postgres_scanner; LOAD postgres_scanner;")
+        dsn = (
+            f"host={conn_info['host']} port={conn_info['port']} "
+            f"dbname={conn_info['dbname']} user={conn_info['user']} "
+            f"password={conn_info['password']}"
+        )
+        conn.execute(f"ATTACH '{dsn}' AS pg (TYPE POSTGRES, SCHEMA 'gold');")
+        path = output_dir / f"{table}.parquet"
+        sql = f"SELECT * FROM pg.gold.{table}{_where_clause(table)}"
+        conn.execute(
+            f"COPY ({sql}) TO '{path}' (FORMAT PARQUET, COMPRESSION SNAPPY)"
+        )
+        # P0-2: footer-only row count (no post-export COUNT(*) re-scan)
+        return read_metadata(path).num_rows
+    finally:
+        conn.close()
 
 
 def main() -> int:
@@ -78,49 +112,33 @@ def main() -> int:
             _log(f"Warning: could not remove stale {stale.name}: {e}")
 
     row_counts = {}
-    conn = duckdb.connect(":memory:")
-    try:
-        conn.execute("INSTALL postgres_scanner; LOAD postgres_scanner;")
-        dsn = (
-            f"host={args.pg_host} port={args.pg_port} dbname={args.pg_db} "
-            f"user={args.pg_user} password={pg_password}"
-        )
-        conn.execute(f"ATTACH '{dsn}' AS pg (TYPE POSTGRES, SCHEMA 'gold');")
-        _log(f"Connected to {args.pg_db} (schema gold), exporting {len(TABLES)} tables")
+    conn_info = {
+        "host": args.pg_host,
+        "port": args.pg_port,
+        "dbname": args.pg_db,
+        "user": args.pg_user,
+        "password": pg_password,
+    }
+    _log(f"Connected to {args.pg_db} (schema gold), exporting {len(TABLES)} tables "
+         f"with {EXPORT_WORKERS} workers")
 
-        for t in TABLES:
-            path = output_dir / f"{t}.parquet"
+    with ThreadPoolExecutor(max_workers=EXPORT_WORKERS,
+                            thread_name_prefix="gold-export") as executor:
+        futures = {
+            executor.submit(_export_one, conn_info, t, output_dir): t
+            for t in TABLES
+        }
+        for future in as_completed(futures):
+            table = futures[future]
             started = datetime.now(timezone.utc)
             try:
-                if t == "dim_title":
-                    where_clause = (
-                        " WHERE NOT (title_type = 'movie' AND (runtime_minutes IS NULL OR runtime_minutes <= 0))"
-                    )
-                else:
-                    where_clause = ""
-                sql = f"SELECT * FROM pg.gold.{t}{where_clause}"
-                conn.execute(
-                    f'COPY ({sql}) TO \'{path}\' (FORMAT PARQUET, COMPRESSION SNAPPY)'
-                )
-                # P0-2: footer-only row count (no post-export COUNT(*) re-scan)
-                r = read_metadata(path).num_rows
-                row_counts[t] = r
+                count = future.result()
+                row_counts[table] = count
                 elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-                _log(f"Exported gold.{t}: {r:,} rows -> {path.name} ({elapsed:.0f}s)")
+                _log(f"Exported gold.{table}: {count:,} rows -> {table}.parquet ({elapsed:.0f}s)")
             except Exception as e:
-                row_counts[t] = None
-                _log(f"Failed to export gold.{t}: {e}")
-
-    except Exception as e:
-        _log(f"FATAL: {e}")
-        _log(traceback.format_exc())
-        failed_marker.touch()
-        return 1
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+                row_counts[table] = None
+                _log(f"Failed to export gold.{table}: {e}")
 
     # Write manifest
     manifest = {

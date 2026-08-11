@@ -64,8 +64,10 @@ USER airflow
 RUN dbt deps --project-dir /opt/gold-build --profiles-dir /opt/gold-build 2>/dev/null || \
     echo "[WARN] dbt deps at build time failed — will retry at task time"
 
+# Credentials are injected at runtime via docker-compose env (C1-C7);
+# nothing secret is baked into the image. The Airflow DB connection comes
+# from AIRFLOW__DATABASE__SQL_ALCHEMY_CONN set in docker/docker-compose.yml.
 ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor \
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse \
     AIRFLOW__CORE__LOAD_EXAMPLES=false \
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
 

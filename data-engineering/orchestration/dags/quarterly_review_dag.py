@@ -12,10 +12,17 @@ Runs quarterly (Jan, Apr, Jul, Oct) via cron trigger.
 """
 
 from datetime import datetime, timedelta
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.trigger_rule import TriggerRule
+
+from config.secrets import pg_connect_kwargs
 
 default_args = {
     "owner": "de-team",
@@ -38,10 +45,7 @@ def generate_observability_report(**context):
     import psycopg2
     import json
 
-    conn = psycopg2.connect(
-        host="postgres", port=5432, dbname="elyssa_warehouse",
-        user="elyssa", password="elyssa_pg_2026"
-    )
+    conn = psycopg2.connect(**pg_connect_kwargs())
     cursor = conn.cursor()
 
     report = {

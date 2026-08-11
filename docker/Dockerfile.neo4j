@@ -7,7 +7,10 @@
 FROM neo4j:community
 
 # Environment
-ENV NEO4J_AUTH=neo4j/elyssa_neo_2026 \
+# NOTE: placeholder auth only — this service is dormant (not referenced by
+# docker/docker-compose.yml). Real deployments must override NEO4J_AUTH at
+# runtime via compose environment from docker/.env (C1-C7).
+ENV NEO4J_AUTH=neo4j/change-me-neo4j-password \
     NEO4J_server_memory_heap_max__size=1G \
     NEO4J_server_memory_pagecache_size=1G \
     NEO4J_PLUGINS='["apoc"]'

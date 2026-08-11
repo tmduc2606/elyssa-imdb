@@ -188,7 +188,8 @@ docker/data-engineering/
 data-engineering/.venv/
 
 # ─── Ingestion / pipeline runtime logs & parquet output ───────────
-bronze/
+# Root-anchored: accidental bronze/logs at repo root (NOT data-engineering/bronze/)
+/bronze/
 data-engineering/bronze/db_parquet/
 data-engineering/bronze/logs/
 data-engineering/logs/

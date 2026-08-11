@@ -120,7 +120,7 @@ All tasks below have been implemented. See git diff for details.
   ```
   S3_ENDPOINT=http://rustfs:9000
   S3_ACCESS_KEY=elyssa
-  S3_SECRET_KEY=elyssa_s3_2026
+  S3_SECRET_KEY=${S3_SECRET_KEY}   # from docker/.env
   S3_REGION=us-east-1
   ```
 
@@ -170,7 +170,7 @@ Add S3 bootstrap block to every DuckDB connection:
 conn.execute("INSTALL httpfs; LOAD httpfs;")
 conn.execute("SET s3_endpoint = 'rustfs:9000'")  # Docker internal DNS
 conn.execute("SET s3_access_key_id = 'elyssa'")
-conn.execute("SET s3_secret_access_key = 'elyssa_s3_2026'")
+conn.execute("SET s3_secret_access_key = os.environ['S3_SECRET_KEY']")  # from docker/.env
 conn.execute("SET s3_region = 'us-east-1'")
 conn.execute("SET s3_url_style = 'path'")
 conn.execute("SET s3_use_ssl = false")

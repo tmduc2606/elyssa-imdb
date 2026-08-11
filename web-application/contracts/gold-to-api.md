@@ -19,12 +19,12 @@ The API uses DuckDB to query Gold marts directly from Parquet files. No ETL — 
 
 | Mart | File | Primary Key | Description |
 |------|------|-------------|-------------|
-| dim_title | dim_title.parquet | title_key | Title dimension (12.6M rows) |
-| dim_person | dim_person.parquet | person_key | Person dimension (15.4M rows) |
-| fact_title_rating | fact_title_rating.parquet | title_key | Rating facts (1.7M rows) |
-| fact_title_principal | fact_title_principal.parquet | principal_key | Principal credits (100M rows) |
-| fact_performance | fact_performance.parquet | performance_key | Performance facts (100M rows) |
-| fact_episode | fact_episode.parquet | episode_key | Episode hierarchy (9.7M rows) |
+| dim_title | dim_title.parquet | tconst | Title dimension (12.6M rows) |
+| dim_person | dim_person.parquet | nconst | Person dimension (15.4M rows) |
+| fact_title_rating | fact_title_rating.parquet | (title_key, snapshot_date) | Rating facts (1.7M rows) |
+| fact_title_principal | fact_title_principal.parquet | (title_key, ordering) | Principal credits (100M rows) |
+| fact_performance | fact_performance.parquet | — (no unique key) | Performance facts (100M rows) |
+| fact_episode | fact_episode.parquet | (episode_key, series_key) | Episode hierarchy (9.7M rows) |
 
 ---
 
@@ -44,6 +44,7 @@ The API uses DuckDB to query Gold marts directly from Parquet files. No ETL — 
 | `primary_name` | `primaryName` | Person name |
 | `primary_profession` | `professionList` | Comma-separated professions |
 | `known_for_titles` | `knownForTitles` | Title names (not IDs) |
+| `known_for_ids` | `knownForTitleIds` | Comma-separated tconsts of known-for titles |
 | `character_name` | `characterName` | Character name(s) |
 | `category` | `category` | Credit category (actor, director, etc.) |
 | `season_number` | `seasonNumber` | TV season number |

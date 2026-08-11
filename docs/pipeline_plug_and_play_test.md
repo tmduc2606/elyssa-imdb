@@ -323,7 +323,7 @@ SELECT table_name, n_live_tup FROM pg_stat_user_tables WHERE schemaname = 'gold'
 
 ```powershell
 docker exec elyssa-airflow python -c "
-import os; os.environ['GOLD_EXPORT_PG_PASSWORD'] = 'elyssa_pg_2026'
+import os; os.environ['GOLD_EXPORT_PG_PASSWORD'] = os.environ['POSTGRES_PASSWORD']
 from operators.gold_export_operator import GoldExportOperator
 GoldExportOperator(task_id='gold_export').execute({})
 "
@@ -396,7 +396,7 @@ docker exec elyssa-airflow dbt run --project-dir /opt/airflow/data-engineering/g
 
 # 5. Gold export
 docker exec elyssa-airflow python -c "
-import os; os.environ['GOLD_EXPORT_PG_PASSWORD'] = 'elyssa_pg_2026'
+import os; os.environ['GOLD_EXPORT_PG_PASSWORD'] = os.environ['POSTGRES_PASSWORD']
 from operators.gold_export_operator import GoldExportOperator
 GoldExportOperator(task_id='gold_export').execute({})
 "

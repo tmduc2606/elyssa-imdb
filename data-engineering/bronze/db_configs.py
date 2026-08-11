@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -8,9 +8,19 @@ class DatabaseConnection:
     port: int = 5432
     database: str = "elyssa_warehouse"
     user: str = "elyssa"
-    password: str = "elyssa_pg_2026"
+    password: str = ""
     schema: str = "silver"
     source_type: str = "postgresql"
+
+    def __post_init__(self):
+        # C1-C7: no hardcoded passwords — resolve from env when not provided.
+        if not self.password:
+            import os
+
+            self.password = (
+                os.environ.get("ELYSSA_PG_PASSWORD")
+                or os.environ.get("POSTGRES_PASSWORD", "")
+            )
 
 
 @dataclass

@@ -101,11 +101,15 @@ def _s3_object_exists(bucket: str, key: str) -> bool:
         import boto3
         from botocore.config import Config
         endpoint = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
+        secret = os.environ.get("S3_SECRET_KEY", "")
+        if not secret:
+            log("[WARN] S3_SECRET_KEY not set (docker/.env via compose) — treating objects as missing")
+            return False
         client = boto3.client(
             "s3",
             endpoint_url=endpoint,
             aws_access_key_id=os.environ.get("S3_ACCESS_KEY", "elyssa"),
-            aws_secret_access_key=os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026"),
+            aws_secret_access_key=secret,
             config=Config(signature_version="s3v4"),
             region_name="us-east-1",
         )
@@ -280,7 +284,9 @@ def run():
         import psycopg2
         pg = psycopg2.connect(
             host="postgres", port=5432,
-            user="elyssa", password="elyssa_pg_2026",
+            user="elyssa",
+            password=os.environ.get("ELYSSA_PG_PASSWORD")
+            or os.environ.get("POSTGRES_PASSWORD", ""),
             dbname="elyssa_warehouse",
         )
         pg.autocommit = True

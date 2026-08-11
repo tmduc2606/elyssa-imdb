@@ -5,6 +5,14 @@ sources:
     database: elyssa_warehouse
     schema: silver
     description: "Silver layer PostgreSQL tables"
+    freshness:
+      warn_after:
+        count: 24
+        period: hour
+      error_after:
+        count: 48
+        period: hour
+    loaded_at_field: ingested_at
     tables:
       - name: title_basics
         description: "Core title data with SCD2"

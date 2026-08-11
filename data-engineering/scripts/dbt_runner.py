@@ -22,6 +22,11 @@ Usage:
   python dbt_runner.py --project-dir /opt/airflow/data-engineering/gold \
                        --target prod \
                        --command run
+
+Options:
+  --full-refresh   Force dbt --full-refresh (default: off so incremental
+                   materializations such as dim_person are honored)
+  --exclude        Comma-separated models to exclude (default: agg_actor_cooccurrence)
 """
 
 import argparse
@@ -34,9 +39,46 @@ from pathlib import Path
 
 DBT_LOCK_FILE = "/tmp/dbt_lock"
 
+DEFAULT_EXCLUDE_MODELS = "agg_actor_cooccurrence"
+
 
 def _log(message: str):
     print(f"[{datetime.now(timezone.utc).isoformat()}] {message}", flush=True)
+
+
+def _run_composite_indexes(project_dir: Path) -> bool:
+    """Run gold/migrations/create_composite_indexes.sql before dbt test (O3)."""
+    sql_path = project_dir / "migrations" / "create_composite_indexes.sql"
+    if not sql_path.is_file():
+        _log("Warning: create_composite_indexes.sql not found — skipping index creation")
+        return True
+
+    de_root = str(project_dir.parent)
+    if de_root not in sys.path:
+        sys.path.insert(0, de_root)
+    try:
+        import psycopg2
+
+        from orchestration.config import secrets
+    except ImportError as e:
+        _log(f"FATAL: cannot import psycopg2/orchestration.config: {e}")
+        return False
+
+    try:
+        conn = psycopg2.connect(**secrets.pg_connect_kwargs())
+        conn.autocommit = True
+        statements = [s.strip() for s in sql_path.read_text().split(";")]
+        with conn.cursor() as cur:
+            for stmt in statements:
+                if not stmt or stmt.startswith("--"):
+                    continue
+                cur.execute(stmt)
+        conn.close()
+        _log("Composite FK indexes created/verified (gold/migrations/create_composite_indexes.sql)")
+        return True
+    except Exception as e:
+        _log(f"FATAL: composite index creation failed: {e}")
+        return False
 
 
 def main() -> int:
@@ -48,6 +90,16 @@ def main() -> int:
         required=True,
         choices=["run", "test"],
         help="DBT command to run",
+    )
+    parser.add_argument(
+        "--full-refresh",
+        action="store_true",
+        help="Force dbt --full-refresh (default: off, honors incremental models)",
+    )
+    parser.add_argument(
+        "--exclude",
+        default=DEFAULT_EXCLUDE_MODELS,
+        help="Comma-separated models to exclude (default: agg_actor_cooccurrence)",
     )
     args = parser.parse_args()
 
@@ -147,8 +199,18 @@ def main() -> int:
             args.target,
             "--no-partial-parse",
         ]
-        if args.command == "run":
+        if args.command == "run" and args.full_refresh:
             cmd.append("--full-refresh")
+        if args.exclude:
+            excluded = [m.strip() for m in args.exclude.split(",") if m.strip()]
+            if excluded:
+                cmd.append("--exclude")
+                cmd.append(" ".join(excluded))
+
+        if args.command == "test":
+            if not _run_composite_indexes(project_dir):
+                failed_marker.touch()
+                return 1
 
         _log(f"Running: {' '.join(cmd)}")
         start_time = datetime.now(timezone.utc)

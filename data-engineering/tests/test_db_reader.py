@@ -1,10 +1,15 @@
-from unittest.mock import patch, MagicMock, call
+"""DB reader (legacy PostgreSQL/DuckDB ingestion) tests — no Spark."""
+
+from unittest.mock import patch, MagicMock
+
 import pytest
+
+import duckdb
 
 from bronze.db_configs import (
     DatabaseConnection, SourceTableDef, DuckDBConfig,
     DB_SOURCE_TABLES, DUCKDB_PARQUET_SOURCES,
-    POSTGRESQL_CONFIG, DUCKDB_CONFIG,
+    POSTGRESQL_CONFIG,
 )
 from bronze.db_schema_map import (
     DB_TO_BRONZE_COLUMN_MAP, get_bronze_columns, get_db_columns,
@@ -111,13 +116,12 @@ class TestDbSchemaMap:
         row = {
             "tconst": "tt0000001",
             "title_type": "short",
-            "primary_title": "Test Title",
+            "primary_title": "Test",
+            "original_title": "Original",
             "is_adult": False,
             "start_year": 2020,
             "end_year": None,
             "runtime_minutes": 120,
-            "primary_title": "Test",
-            "original_title": "Original",
         }
         result = map_row_to_bronze(row, "title.basics")
         assert result["tconst"] == "tt0000001"
@@ -136,7 +140,6 @@ class TestDbSchemaMap:
         for source_name in DB_SOURCE_TABLES:
             db_cols = get_db_columns(source_name)
             bronze_cols = get_bronze_columns(source_name)
-            mapping = DB_TO_BRONZE_COLUMN_MAP[source_name]
             assert len(db_cols) == len(bronze_cols)
             assert len(set(bronze_cols)) == len(bronze_cols), \
                 f"{source_name}: duplicate bronze column names"
@@ -156,12 +159,10 @@ class TestDbReader:
         mock_cursor.fetchone.return_value = (12345,)
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-
         from bronze.db_reader import DatabaseReader
         reader = DatabaseReader()
         table_def = DB_SOURCE_TABLES["title.basics"]
         count = reader.get_row_count(table_def)
-
         assert count == 12345
         mock_cursor.execute.assert_called_once_with(
             "SELECT COUNT(*) FROM silver.title_basics"
@@ -180,11 +181,10 @@ class TestDbReader:
         mock_cursor.__iter__.return_value = iter(fake_rows)
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-
         from bronze.db_reader import DatabaseReader
         reader = DatabaseReader()
         table_def = DB_SOURCE_TABLES["title.basics"]
-        table_def._batch_size_backup = table_def.batch_size
+        backup = table_def.batch_size
         try:
             table_def.batch_size = 100
             batches = list(reader.read_table_batches(table_def))
@@ -192,7 +192,7 @@ class TestDbReader:
             assert len(batches[0]) == 100
             assert len(batches[1]) == 50
         finally:
-            table_def.batch_size = table_def._batch_size_backup
+            table_def.batch_size = backup
 
     @patch("bronze.db_reader.psycopg2.connect")
     def test_empty_table_returns_no_batches(self, mock_connect):
@@ -201,23 +201,17 @@ class TestDbReader:
         mock_cursor.__iter__.return_value = iter([])
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-
         from bronze.db_reader import DatabaseReader
         reader = DatabaseReader()
         table_def = DB_SOURCE_TABLES["title.basics"]
         batches = list(reader.read_table_batches(table_def))
         assert len(batches) == 0
 
-    def test_infer_spark_schema_snake_case_conversion(self):
+    def test_pg_type_map_keys(self):
         from bronze.db_reader import PG_TYPE_MAP
-        assert "int2" in PG_TYPE_MAP
-        assert "int4" in PG_TYPE_MAP
-        assert "text" in PG_TYPE_MAP
-        assert "varchar" in PG_TYPE_MAP
-        assert "bool" in PG_TYPE_MAP
-        assert "numeric" in PG_TYPE_MAP
-        assert "date" in PG_TYPE_MAP
-        assert "timestamptz" in PG_TYPE_MAP
+        for key in ["int2", "int4", "text", "varchar", "bool", "numeric",
+                    "date", "timestamptz"]:
+            assert key in PG_TYPE_MAP
 
     def test_empty_schema_has_metadata_columns(self):
         from bronze.db_reader import DatabaseReader
@@ -242,7 +236,6 @@ class TestDbReader:
         ])
         mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-
         from bronze.db_reader import DatabaseReader
         reader = DatabaseReader()
         result = reader.read_query(
@@ -251,6 +244,8 @@ class TestDbReader:
             "batch_test",
         )
         assert result is not None
+        assert result.count() == 1
+        assert result.rows[0]["_source_table"] == "title.basics"
 
 
 class TestIngestFromDb:
@@ -259,11 +254,18 @@ class TestIngestFromDb:
         mock_instance = MagicMock()
         mock_instance.read_table.return_value.count.return_value = 42
         mock_reader_cls.return_value = mock_instance
-
         from bronze.db_reader import ingest_from_db
         result = ingest_from_db(table_names=["title.basics"])
         assert isinstance(result, dict)
         assert result["title.basics"] == 42
+
+    def test_ingest_default_source_is_postgresql(self):
+        import inspect
+        from bronze.db_reader import ingest_from_db
+        sig = inspect.signature(ingest_from_db)
+        source_type_param = sig.parameters.get("source_type")
+        assert source_type_param is not None
+        assert source_type_param.default == "postgresql"
 
 
 class TestDbConfigEdgeCases:
@@ -329,7 +331,6 @@ class TestDuckDBConfig:
     def test_duckdb_reader_initializes(self, mock_duckdb):
         mock_conn = MagicMock()
         mock_duckdb.connect.return_value = mock_conn
-
         from bronze.db_reader import DuckDBReader
         reader = DuckDBReader()
         assert reader is not None
@@ -340,7 +341,6 @@ class TestDuckDBConfig:
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchone.return_value = (42,)
         mock_duckdb.connect.return_value = mock_conn
-
         from bronze.db_reader import DuckDBReader
         reader = DuckDBReader()
         td = DUCKDB_PARQUET_SOURCES["title.basics"]
@@ -351,24 +351,16 @@ class TestDuckDBConfig:
     def test_duckdb_reader_close(self, mock_duckdb):
         mock_conn = MagicMock()
         mock_duckdb.connect.return_value = mock_conn
-
         from bronze.db_reader import DuckDBReader
         reader = DuckDBReader()
         reader.close()
         mock_conn.close.assert_called_once()
 
-    def test_duckdb_ingest_from_db_routes_correctly(self):
-        from bronze.db_reader import ingest_from_db, DatabaseReader, DuckDBReader
-        assert callable(ingest_from_db)
-
-
-class TestIngestFromDbDuckDB:
     @patch("bronze.db_reader.DuckDBReader")
     def test_ingest_duckdb_source_creates_reader(self, mock_reader_cls):
         mock_instance = MagicMock()
         mock_instance.read_table.return_value.count.return_value = 42
         mock_reader_cls.return_value = mock_instance
-
         from bronze.db_reader import ingest_from_db
         result = ingest_from_db(
             table_names=["title.basics"],
@@ -377,10 +369,72 @@ class TestIngestFromDbDuckDB:
         assert isinstance(result, dict)
         assert result["title.basics"] == 42
 
-    def test_ingest_default_source_is_postgresql(self):
-        import inspect
-        from bronze.db_reader import ingest_from_db
-        sig = inspect.signature(ingest_from_db)
-        source_type_param = sig.parameters.get("source_type")
-        assert source_type_param is not None
-        assert source_type_param.default == "postgresql"
+
+class TestDuckDBReaderReal:
+    """Real-DuckDB integration tests against a local parquet file."""
+
+    @pytest.fixture
+    def parquet_path(self, tmp_path):
+        path = tmp_path / "people.parquet"
+        conn = duckdb.connect()
+        try:
+            conn.execute("CREATE TABLE t (nconst VARCHAR, primary_name VARCHAR)")
+            conn.executemany(
+                "INSERT INTO t VALUES (?, ?)",
+                [("nm0000001", "Alice"), ("nm0000002", "Bob")],
+            )
+            conn.execute(
+                f"COPY t TO '{str(path).replace(chr(92), '/')}' (FORMAT PARQUET)"
+            )
+        finally:
+            conn.close()
+        return str(path)
+
+    def _reader(self, monkeypatch):
+        monkeypatch.setattr("bronze.s3_config.configure_s3", lambda conn: None)
+        from bronze.db_reader import DuckDBReader
+        return DuckDBReader()
+
+    def test_read_table(self, parquet_path, monkeypatch):
+        td = SourceTableDef(
+            source_table=parquet_path,
+            bronze_name="name.basics",
+            columns=["nconst", "primary_name"],
+            id_column="nconst",
+        )
+        reader = self._reader(monkeypatch)
+        try:
+            table = reader.read_table(td, "batch1")
+            assert table.count() == 2
+            assert table.rows[0]["nconst"] == "nm0000001"
+            assert table.rows[0]["_batch_id"] == "batch1"
+            assert table.rows[0]["_source_table"] == "name.basics"
+        finally:
+            reader.close()
+
+    def test_get_row_count_real(self, parquet_path, monkeypatch):
+        td = SourceTableDef(
+            source_table=parquet_path,
+            bronze_name="name.basics",
+            columns=["nconst", "primary_name"],
+            id_column="nconst",
+        )
+        reader = self._reader(monkeypatch)
+        try:
+            assert reader.get_row_count(td) == 2
+        finally:
+            reader.close()
+
+    def test_read_query_real(self, parquet_path, monkeypatch):
+        reader = self._reader(monkeypatch)
+        try:
+            path = parquet_path.replace(chr(92), "/")
+            table = reader.read_query(
+                f"SELECT nconst FROM read_parquet('{path}') WHERE nconst = 'nm0000001'",
+                "name.basics",
+                "batch1",
+            )
+            assert table.count() == 1
+            assert table.rows[0]["nconst"] == "nm0000001"
+        finally:
+            reader.close()

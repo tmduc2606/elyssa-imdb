@@ -34,7 +34,12 @@ jobs:
         run: ruff check . --output-format=github
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short 2>/dev/null || echo "No tests found or tests require external services"
+        run: |
+          if [ -d tests ]; then
+            pytest tests/ -v --tb=short
+          else
+            echo "No tests directory in ${{ matrix.module }} — skipping"
+          fi
 
   frontend:
     runs-on: ubuntu-latest
@@ -48,7 +53,7 @@ jobs:
           node-version: "20"
       - run: npm ci --silent
       - run: npm run lint --silent 2>/dev/null || true
-      - run: npm run test -- --run 2>/dev/null || echo "No frontend tests configured"
+      - run: npm run test -- --run
 
   contract-validation:
     runs-on: ubuntu-latest
@@ -77,7 +82,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check Dockerfiles exist
         run: |
-          for f in mlops/docker/Dockerfile.api mlops/docker/Dockerfile.model mlops/docker/Dockerfile.frontend docker/Dockerfile.airflow; do
+          for f in web-application/api/Dockerfile mlops/docker/Dockerfile.model mlops/docker/Dockerfile.frontend docker/Dockerfile.airflow; do
             if [ ! -f "$f" ]; then
               echo "Missing: $f"
               exit 1

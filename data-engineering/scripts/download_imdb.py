@@ -21,7 +21,7 @@ from botocore.config import Config
 
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://rustfs:9000").rstrip("/")
 S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "elyssa")
-S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "elyssa_s3_2026")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "")
 BUCKET = "imdb-source"
 BASE_URL = "https://datasets.imdbws.com"
 
@@ -34,6 +34,12 @@ FILES = [
     "title.ratings.tsv.gz",
     "name.basics.tsv.gz",
 ]
+
+if not S3_SECRET_KEY:
+    raise SystemExit(
+        "FATAL: S3_SECRET_KEY is not set. Export it from docker/.env "
+        "(e.g. `docker compose -f docker/docker-compose.yml config` or load docker/.env)."
+    )
 
 s3_client = boto3.client(
     "s3",

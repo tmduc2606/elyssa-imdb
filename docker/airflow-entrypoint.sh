@@ -17,7 +17,8 @@ PASSWORD_FILE="${AIRFLOW_HOME}/simple_auth_manager_passwords.json.generated"
 # Only pre-seed if the file doesn't exist yet (first start).
 if [[ ! -f "${PASSWORD_FILE}" ]]; then
     ADMIN_USER="${AIRFLOW_ADMIN_USER:-admin}"
-    ADMIN_PASS="${AIRFLOW_ADMIN_PASSWORD:-admin}"
+    # Placeholder fallback only — real value comes from docker/.env via compose
+    ADMIN_PASS="${AIRFLOW_ADMIN_PASSWORD:-change-me-airflow-admin}"
     echo "{\"${ADMIN_USER}\": \"${ADMIN_PASS}\"}" > "${PASSWORD_FILE}"
     echo "[INFO] Pre-seeded simple_auth_manager password for '${ADMIN_USER}'"
 fi

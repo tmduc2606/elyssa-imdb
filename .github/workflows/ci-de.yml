@@ -25,4 +25,4 @@ jobs:
           python-version: "3.13"
       - run: pip install --no-cache-dir -r data-engineering/requirements.txt
       - run: pip install --no-cache-dir pytest
-      - run: pytest data-engineering/tests/ -q --tb=short || echo "No DE tests found (tests/ absent)"
+      - run: pytest data-engineering/tests/ -q --tb=short

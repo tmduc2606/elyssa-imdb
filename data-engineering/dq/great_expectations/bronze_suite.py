@@ -46,7 +46,25 @@ SILVER_TABLES = [
 ]
 
 DS_NAME = "silver_postgres"
-CONN_STRING = "postgresql://elyssa:elyssa_pg_2026@postgres:5432/elyssa_warehouse"
+
+
+def _build_conn_string() -> str:
+    """Build the PostgreSQL connection string from env (C1-C7)."""
+    import os
+
+    password = os.environ.get("ELYSSA_PG_PASSWORD") or os.environ.get("POSTGRES_PASSWORD", "")
+    if not password:
+        raise ValueError(
+            "PostgreSQL password is not set. Set ELYSSA_PG_PASSWORD in the "
+            "environment (docker/.env via compose)."
+        )
+    return (
+        f"postgresql://{os.environ.get('POSTGRES_USER', 'elyssa')}:{password}"
+        f"@{os.environ.get('POSTGRES_HOST', 'postgres')}:5432/{os.environ.get('POSTGRES_DB', 'elyssa_warehouse')}"
+    )
+
+
+CONN_STRING = _build_conn_string()
 
 
 def build_suite(name: str, null_threshold: dict) -> ExpectationSuite:

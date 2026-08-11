@@ -40,6 +40,8 @@ from airflow.sensors.base import BaseSensorOperator
 
 from pipeline_logger import get_logger
 
+from config.secrets import pg_connect_kwargs
+
 from operators.dbt_operator import DbtRunOperator
 from operators.dbt_done_sensor import DbtDoneSensor
 from operators.dq_operator import DataQualityOperator
@@ -247,11 +249,7 @@ class SilverDoneSensor(BaseSensorOperator):
                     pass
                 raise RuntimeError(msg)
             try:
-                pg = psycopg2.connect(
-                    host="postgres", port=5432,
-                    user="elyssa", password="elyssa_pg_2026",
-                    dbname="elyssa_warehouse",
-                )
+                pg = psycopg2.connect(**pg_connect_kwargs())
                 cur = pg.cursor()
                 populated = 0
                 for tbl in all_tables:
@@ -414,11 +412,10 @@ with DAG(
     )
 
     # ─── Data Quality (halts on threshold violations) ─────────────────────
+    # Credentials are resolved from env/Airflow Connections at execute time
+    # (config/secrets.py) — nothing hardcoded in the DAG (C1-C7).
     dq_checks = DataQualityOperator(
         task_id="dq_checks",
-        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
-        jdbc_user="elyssa",
-        jdbc_password="elyssa_pg_2026",
         dq_config_path="/opt/airflow/data-engineering/dq/config.yaml",
         run_gx=True,
         bronze_path=_BRONZE_PATH,
@@ -427,9 +424,6 @@ with DAG(
     # ─── Freshness ────────────────────────────────────────────────────────
     freshness_check = FreshnessCheckOperator(
         task_id="freshness_check",
-        jdbc_url="postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
-        jdbc_user="elyssa",
-        jdbc_password="elyssa_pg_2026",
         sla_hours=24,
     )
 

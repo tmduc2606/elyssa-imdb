@@ -52,7 +52,7 @@
 - Aura-compatible config, 2G heap, 4G pagecache
 
 ### Dockerfile.rustfs (rustfs/rustfs:latest)
-- S3-compatible storage, credentials: elyssa / elyssa_s3_2026
+- S3-compatible storage, credentials from `docker/.env` (`S3_ACCESS_KEY` / `S3_SECRET_KEY`)
 
 ## Airflow DAG: `imdb_pipeline`
 

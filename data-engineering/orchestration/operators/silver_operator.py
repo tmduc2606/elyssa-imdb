@@ -285,8 +285,8 @@ class SilverTransformOperator(BaseOperator):
         self,
         bronze_path: str = "s3://bronze/",
         jdbc_url: str = "postgresql://elyssa:***@postgres:5432/elyssa_warehouse",
-        jdbc_user: str = "elyssa",
-        jdbc_password: str = "elyssa_pg_2026",
+        jdbc_user: str = "",
+        jdbc_password: str = "",
         profile_memory: bool = False,
         *args,
         **kwargs,
@@ -301,6 +301,21 @@ class SilverTransformOperator(BaseOperator):
     def execute(self, context):
         import duckdb
         import psycopg2
+
+        # C1-C7: credentials resolved from env/Airflow Connections when not
+        # explicitly passed by the caller (never hardcoded).
+        sys.path.insert(0, _root_path)
+        from orchestration.config.secrets import pg_password, pg_user, pg_host, pg_port, pg_db
+        self.jdbc_user = self.jdbc_user or pg_user()
+        self.jdbc_password = self.jdbc_password or pg_password()
+
+        # H1/H3: bronze source delta detection (persisted fingerprints)
+        from bronze.detect_delta import (
+            align_silver_schema,
+            check_source_delta,
+            load_hashes,
+            persist_fingerprint,
+        )
 
         log = get_logger()
         batch_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -321,6 +336,7 @@ class SilverTransformOperator(BaseOperator):
             temp_root = "/tmp/"
         duckdb_temp = os.path.join(temp_root, "duckdb_spill")
         csv_dir = os.path.join(temp_root, "csv_intermediates")
+        hashes_path = os.path.join(temp_root, "silver_hashes.parquet")
         duckdb_file = os.path.join(duckdb_temp, f"silver_{batch_id}.duckdb")
         os.makedirs(duckdb_temp, exist_ok=True)
         os.makedirs(csv_dir, exist_ok=True)
@@ -336,9 +352,9 @@ class SilverTransformOperator(BaseOperator):
         conn.execute("SET max_temp_directory_size = '1.25GB'")
 
         pg = psycopg2.connect(
-            host="postgres", port=5432,
+            host=pg_host(), port=pg_port(),
             user=self.jdbc_user, password=self.jdbc_password,
-            dbname="elyssa_warehouse",
+            dbname=pg_db(),
             keepalives=1,
             keepalives_idle=300,
             keepalives_interval=60,
@@ -429,13 +445,45 @@ class SilverTransformOperator(BaseOperator):
             conn.close()
             return
 
+        # H1/H3: load persisted bronze fingerprints once; per-source delta
+        # results are cached so the early cleanup, parent loop, and child
+        # loop all share a single metadata pass per source.
+        previous_hashes = load_hashes(hashes_path)
+        source_deltas: dict[str, str] = {}
+
+        def _src_delta(src_table: str, parquet_url: str) -> str:
+            delta = source_deltas.get(src_table)
+            if delta is None:
+                delta = check_source_delta(conn, src_table, parquet_url, previous_hashes)
+                source_deltas[src_table] = delta
+            return delta
+
         # Clean partial/corrupted Silver state from previous failed runs
-        # (only if not resuming from a parents_done checkpoint)
+        # (only if not resuming from a parents_done checkpoint). Children
+        # whose bronze source is unchanged (H1 NO_DELTA) are kept — their
+        # data is still valid, and truncating them would orphan the table.
         if not skip_parents:
-            with pg.cursor() as cleanup:
-                cleanup.execute("TRUNCATE silver.title_genre, silver.title_director, silver.title_writer, silver.title_akas_type, silver.title_akas_attribute, silver.title_principal_char, silver.name_profession, silver.name_known_for_title")
-            pg.commit()
-            self.log.info("Truncated Silver child tables to clear partial/corrupted state")
+            child_sources = [
+                ("silver.title_genre", "title.basics"),
+                ("silver.title_director", "title.crew"),
+                ("silver.title_writer", "title.crew"),
+                ("silver.title_akas_type", "title.akas"),
+                ("silver.title_akas_attribute", "title.akas"),
+                ("silver.title_principal_char", "title.principals"),
+                ("silver.name_profession", "name.basics"),
+                ("silver.name_known_for_title", "name.basics"),
+            ]
+            dirty_children = [
+                dst for dst, src in child_sources
+                if _src_delta(src, f"{self.bronze_path}{src}.parquet") != "NO_DELTA"
+            ]
+            if dirty_children:
+                with pg.cursor() as cleanup:
+                    cleanup.execute("TRUNCATE " + ", ".join(dirty_children))
+                pg.commit()
+                self.log.info("Truncated dirty Silver child tables to clear partial/corrupted state")
+            else:
+                self.log.info("No dirty Silver child tables to clean")
 
         # ── Schema migrations for SCD2 (drop old UNIQUE constraints) ─────
         for _tbl, _old_con in [
@@ -544,6 +592,7 @@ class SilverTransformOperator(BaseOperator):
         _lock_fd = None
         try:
             total_rows = 0
+            processed_parent_sources = []
             table_items = list(table_defs.items()) if not skip_parents else []
             for table_idx, (src_table, (dst_table, camel_cols, pk_cols)) in enumerate(table_items):
                 self.log.info(f"  [{table_idx+1}/{len(table_items)}] Starting {src_table} -> {dst_table}...")
@@ -590,12 +639,35 @@ class SilverTransformOperator(BaseOperator):
                     self.log.info(f"  {src_table}: 0 rows, skipping")
                     continue
 
+                # H1: skip SCD2/load entirely when the bronze source has not
+                # changed since the last successful run (fingerprint match).
+                if _src_delta(src_table, parquet_url) == "NO_DELTA":
+                    self.log.info(f"  {src_table}: source unchanged (H1 delta), skipping SCD2/load")
+                    continue
+
                 self.log.info(f"  {src_table}: {row_count} rows -> {dst_table}")
 
                 # Build snake_case column list (needed before CSV export for SCD2 hashing)
                 snake_cols = [camel_to_snake_map.get(c, c) for c in camel_cols]
                 snake_cols_list = ", ".join(snake_cols)
                 pg_cols_part = f"({snake_cols_list})"
+
+                # H4: ADD-only schema evolution — align the silver table to
+                # the bronze columns before load. Missing bronze columns are
+                # added as TEXT; columns dropped from bronze are only warned
+                # about (never dropped from silver).
+                with pg.cursor() as sc:
+                    parquet_cols = [r[0] for r in conn.execute(
+                        f"DESCRIBE SELECT * FROM read_parquet('{parquet_url}')").fetchall()]
+                    added_cols, dropped_cols = align_silver_schema(
+                        sc, dst_table, parquet_cols, camel_to_snake_map,
+                        exclude={"is_current", "valid_from", "valid_to",
+                                 "ingested_at", "batch_id", "attr_hash"})
+                if added_cols:
+                    self.log.warning(f"  H4: added {len(added_cols)} column(s) to {dst_table}: {added_cols}")
+                if dropped_cols:
+                    self.log.warning(f"  H4: {dst_table} columns absent from bronze (kept): {dropped_cols}")
+                pg.commit()
 
                 # ── SCD2 Merge (title_basics, name_basics) vs Truncate+Copy ──
                 scd2_pk_map = {
@@ -730,6 +802,7 @@ class SilverTransformOperator(BaseOperator):
                             )
 
                 os.remove(csv_path)
+                processed_parent_sources.append((src_table, parquet_url))
                 total_rows += row_count
                 self.log.info(f"  {dst_table}: {row_count} rows loaded")
                 log.log_stage(stage="silver_transform", batch_id=batch_id,
@@ -740,6 +813,11 @@ class SilverTransformOperator(BaseOperator):
 
             # Commit parents before children — so a child failure doesn't roll back 2h of parent work
             pg.commit()
+            # H3: persist fingerprints of loaded parents AFTER commit so a
+            # failed parent run never freezes a stale hash.
+            for _src, _url in processed_parent_sources:
+                if not persist_fingerprint(conn, _src, _url, hashes_path, batch_id):
+                    self.log.warning(f"  H3: failed to persist fingerprint for {_src}")
             # Save checkpoint: parents done
             with pg.cursor() as ck:
                 ck.execute("""
@@ -909,6 +987,7 @@ class SilverTransformOperator(BaseOperator):
             ]
 
             child_rows = 0
+            processed_child_sources = []
             # R2: drop secondary indexes on the child tables before bulk load.
             # Recreated after the loop (and in the except path on failure).
             with pg.cursor() as idxc:
@@ -940,6 +1019,12 @@ class SilverTransformOperator(BaseOperator):
                     self.log.info(f"  {child['dst_table']}: 0 source rows, skipping")
                     continue
 
+                # H1: skip the rebuild (truncate + shard + load) when the
+                # bronze source has not changed since the last committed run.
+                if _src_delta(child["src_table"], child_parquet_url) == "NO_DELTA":
+                    self.log.info(f"  {child['dst_table']}: source unchanged (H1 delta), skipping rebuild")
+                    continue
+
                 # R1: partition the source once (single S3 pass) into
                 # _shard=N/ directories, then load each shard from its own
                 # files (1/16 of the source per shard). Replaces the
@@ -961,6 +1046,7 @@ class SilverTransformOperator(BaseOperator):
                     shutil.rmtree(part_dir, ignore_errors=True)
 
                 child_rows += loaded
+                processed_child_sources.append((child["src_table"], child_parquet_url))
                 self.log.info(f"  {child['dst_table']}: {loaded} rows loaded (sharded)")
                 log.log_stage(stage="silver_transform", batch_id=batch_id,
                               status="success", row_count=loaded,
@@ -973,6 +1059,10 @@ class SilverTransformOperator(BaseOperator):
                 conn.execute("CHECKPOINT")
 
             pg.commit()
+            # H3: persist fingerprints of loaded children AFTER commit.
+            for _src, _url in processed_child_sources:
+                if not persist_fingerprint(conn, _src, _url, hashes_path, batch_id):
+                    self.log.warning(f"  H3: failed to persist fingerprint for {_src}")
             # R2: recreate secondary indexes after all child tables load
             with pg.cursor() as idxc:
                 for _tbl, _idxs in CHILD_SECONDARY_INDEXES.items():

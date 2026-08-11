@@ -53,32 +53,14 @@ def check_freshness(
             else:
                 print(f"[FRESHNESS] EMPTY: {table} has no data")
         except Exception as e:
-            # Check if ingested_at column is missing; add it if so.
-            # The failed query leaves the transaction aborted — roll back
-            # first or every subsequent statement fails the same way.
+            # O7: no auto-ALTER — schema changes must go through explicit
+            # migrations (silver/schema.sql). Report and continue so a single
+            # broken table doesn't abort the whole SLA scan.
             try:
                 conn.rollback()
-                schema, tbl = table.split('.')
-                cursor.execute("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = %s AND table_name = %s AND column_name = 'ingested_at'
-                """, (schema, tbl))
-                if not cursor.fetchone():
-                    print(f"[FRESHNESS] Adding ingested_at column to {table}")
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN ingested_at TIMESTAMPTZ DEFAULT NOW()")
-                    cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_ingested_at ON {table}(ingested_at)")
-                    conn.commit()
-                    print(f"[FRESHNESS] Added ingested_at to {table} — re-running check")
-                    cursor.execute(f"SELECT MAX(ingested_at) FROM {table}")
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        print(f"[FRESHNESS] PASS: {table} now has ingested_at")
-                    else:
-                        print(f"[FRESHNESS] EMPTY: {table} has no data after column add")
-                else:
-                    print(f"[FRESHNESS] ERROR: {table} — {e}")
-            except Exception as e2:
-                print(f"[FRESHNESS] ERROR: {table} — failed to patch ingested_at: {e2}")
+            except Exception:
+                pass
+            print(f"[FRESHNESS] ERROR: {table} — {e}")
 
     cursor.close()
     conn.close()

@@ -26,6 +26,19 @@ $PG = "docker exec elyssa-postgres psql -U elyssa -d elyssa_warehouse"
 $BRONZE_PATH = "/opt/airflow/output/bronze/"
 $GOLD_PATH = "/opt/airflow/output/gold/"
 
+# Load secrets from docker/.env (C1-C7) so no plaintext credentials live here.
+function Get-EnvValue($key) {
+    $envFile = Join-Path $PSScriptRoot ".env"
+    if (-not (Test-Path -LiteralPath $envFile)) {
+        Write-Warn "docker/.env not found — copy docker/.env.example to docker/.env first"
+        return ""
+    }
+    $line = Get-Content -LiteralPath $envFile | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
+    if ($line) { return ($line -replace "^$key=", "").Trim() }
+    return ""
+}
+$PG_PASSWORD = Get-EnvValue "GOLD_EXPORT_PG_PASSWORD"
+
 function Write-Step($msg) {
     Write-Host ">>> $msg" -ForegroundColor Cyan
 }
@@ -73,8 +86,13 @@ function Invoke-Gold {
         Write-Step "Running gold dbt test..."
         & $AIRFLOW dbt test --project-dir /opt/airflow/data-engineering/gold --profiles-dir /opt/airflow/data-engineering/gold --target prod
         Write-Step "Running gold export..."
+        if ([string]::IsNullOrEmpty($PG_PASSWORD)) {
+            Write-Warn "GOLD_EXPORT_PG_PASSWORD missing from docker/.env — cannot run gold export"
+            return
+        }
+        $env:PGPASSWORD = $PG_PASSWORD
         docker exec elyssa-airflow python -c "
-import os; os.environ['GOLD_EXPORT_PG_PASSWORD'] = 'elyssa_pg_2026'
+import os; os.environ['GOLD_EXPORT_PG_PASSWORD'] = '$PG_PASSWORD'
 from operators.gold_export_operator import GoldExportOperator
 GoldExportOperator(task_id='gold_export').execute({})
 "

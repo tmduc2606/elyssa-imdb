@@ -16,7 +16,7 @@ frozen Parquet snapshots — never live database connections.
 ## Schema Guarantee
 
 Schemas below match the dbt Gold models in `data-engineering/gold/models/marts/`
-(verified against `data-science/scripts/validate_all_marts.py`).
+(verified against `data-science/scripts/validate_contracts.py`).
 
 ### dim_title
 
@@ -49,7 +49,7 @@ Source: `marts/dim_title.sql` (22 columns)
 
 ### dim_person
 
-Source: `marts/dim_person.sql` (8 columns)
+Source: `marts/dim_person.sql` (9 columns)
 
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
@@ -61,6 +61,7 @@ Source: `marts/dim_person.sql` (8 columns)
 | generation | string | Yes | Gen Alpha/Gen Z/Millennial/Gen X/Boomer/Silent-Greatest (CASE on birth_year) |
 | profession_list | string | Yes | Comma-separated top-3 professions |
 | known_for_titles | string | Yes | Comma-separated **primary titles** (not tconsts) |
+| known_for_ids | string | Yes | Comma-separated **tconsts** of known-for titles |
 
 ### fact_title_rating
 
@@ -137,7 +138,7 @@ Source: `marts/episodic_content/fact_episode.sql` (9 columns)
 6. **Rating range:** `average_rating` between 1.0 and 10.0
 7. **Vote count:** `num_votes >= 0`
 8. **Performance grain:** `fact_performance` may contain duplicate `(tconst, ordering)` rows (row-expanding character join) — deduplicate downstream when a unique key is required
-9. **Known-for titles:** `dim_person.known_for_titles` stores comma-separated title names, not tconsts
+9. **Known-for titles:** `dim_person.known_for_titles` stores comma-separated title names, not tconsts; the matching `dim_person.known_for_ids` stores the comma-separated tconsts in the same order
 
 ---
 

@@ -48,8 +48,9 @@ web-down:
 # ─── Export Gold marts to Parquet ──────────────────────────
 
 # Export Gold marts from PostgreSQL to Parquet (requires DE stack running)
+# Credentials come from docker/.env (never hardcoded).
 export:
-	docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/export_marts.py
+	docker exec elyssa-airflow python /opt/airflow/data-engineering/scripts/gold_export_runner.py
 
 # ─── MLOps targets ──────────────────────────────────────────
 

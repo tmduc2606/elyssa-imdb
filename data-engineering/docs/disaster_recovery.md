@@ -111,13 +111,10 @@ docker compose logs postgres
 ## Validation After Recovery
 
 ```bash
-# Run validation report
-python scripts/validation_report.py
-
-# Verify row counts
+# Verify row counts (credentials from docker/.env — never hardcoded)
 python dq/run_checks.py --config dq/config.yaml \
   --jdbc-url "postgresql://postgres:5432/elyssa_warehouse" \
-  --jdbc-user elyssa --jdbc-password elyssa_pg_2026
+  --jdbc-user "$POSTGRES_USER" --jdbc-password "$POSTGRES_PASSWORD"
 
 # Run dbt tests
 cd gold && dbt test --select source:silver

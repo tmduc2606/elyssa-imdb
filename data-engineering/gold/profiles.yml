@@ -1,3 +1,7 @@
+# dbt profile for the Gold layer (C1-C7: no plaintext credentials).
+# The password is read from the ELYSSA_PG_PASSWORD env var — set it from
+# docker/.env (docker compose exports it into the airflow/etl-runner
+# containers automatically). dbt fails fast if the variable is missing.
 imdb_gold:
   target: prod
   outputs:
@@ -6,18 +10,18 @@ imdb_gold:
       host: postgres
       port: 5432
       user: elyssa
-      pass: elyssa_pg_2026
+      pass: "{{ env_var('ELYSSA_PG_PASSWORD') }}"
       dbname: elyssa_warehouse
       schema: gold
-      threads: 2
+      threads: 3
       keepalives_idle: 0
     dev:
       type: postgres
       host: localhost
       port: 54321
       user: elyssa
-      pass: elyssa_pg_2026
+      pass: "{{ env_var('ELYSSA_PG_PASSWORD') }}"
       dbname: elyssa_warehouse
       schema: gold_dev
-      threads: 2
+      threads: 3
       keepalives_idle: 0

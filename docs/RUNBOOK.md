@@ -80,8 +80,8 @@ for t in ['title.basics','name.basics','title.ratings','title.principals','title
 
 # Quarantine rows
 docker exec elyssa-airflow python -c "
-import psycopg2
-con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password='elyssa_pg_2026', dbname='elyssa_warehouse')
+import os, psycopg2
+con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password=os.environ['POSTGRES_PASSWORD'], dbname='elyssa_warehouse')
 cur = con.cursor()
 cur.execute('SELECT table_name, count(*) FROM silver.quarantine GROUP BY table_name')
 for r in cur.fetchall(): print(f'  {r[0]}: {r[1]} quarantined')
@@ -105,8 +105,8 @@ Expected: 6 parents processed first (title_basics, title_akas, title_episode, ti
 Checkpoint — verify all 14 tables have rows:
 ```powershell
 docker exec elyssa-airflow python -c "
-import psycopg2
-con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password='elyssa_pg_2026', dbname='elyssa_warehouse')
+import os, psycopg2
+con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password=os.environ['POSTGRES_PASSWORD'], dbname='elyssa_warehouse')
 cur = con.cursor()
 for t in ['title_basics','title_akas','title_episode','title_rating','title_principal','name_basics',
           'title_genre','title_director','title_writer','title_akas_type','title_akas_attribute',
@@ -135,8 +135,8 @@ dbt_operator.py acquires an `fcntl` exclusive lock, kills stale PIDs, cleans `__
 Checkpoint — gold tables + dbt test results:
 ```powershell
 docker exec elyssa-airflow python -c "
-import psycopg2
-con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password='elyssa_pg_2026', dbname='elyssa_warehouse')
+import os, psycopg2
+con = psycopg2.connect(host='postgres', port=5432, user='elyssa', password=os.environ['POSTGRES_PASSWORD'], dbname='elyssa_warehouse')
 cur = con.cursor()
 for t in ['dim_title','dim_person','fact_title_rating','fact_title_principal','fact_performance','fact_episode']:
     cur.execute(f'SELECT count(*) FROM gold.{t}')
@@ -201,8 +201,8 @@ docker exec elyssa-airflow airflow dags list-runs -d imdb_pipeline --output json
   python -c "import sys,json; [print(f'  {r[\"run_id\"][-20:]:20s} state={r[\"state\"]:10s} start={r[\"start_date\"][:19]}') for r in json.load(sys.stdin)[:5]]"; `
 Write-Host "`nLast 10 task events:" -ForegroundColor Cyan; `
 docker exec elyssa-airflow python -c "
-import psycopg2
-con = psycopg2.connect(host='postgres',port=5432,user='elyssa',password='elyssa_pg_2026',dbname='elyssa_warehouse')
+import os, psycopg2
+con = psycopg2.connect(host='postgres',port=5432,user='elyssa',password=os.environ['POSTGRES_PASSWORD'],dbname='elyssa_warehouse')
 cur = con.cursor()
 cur.execute(\"SELECT task_id, state, start_date FROM task_instance WHERE dag_id='imdb_pipeline' ORDER BY start_date DESC NULLS LAST LIMIT 10\")
 for r in cur.fetchall(): print(f'  {r[0]:25s} {str(r[1]):10s} {str(r[2])[:19]}')
