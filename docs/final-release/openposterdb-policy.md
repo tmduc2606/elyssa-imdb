@@ -53,6 +53,9 @@ and disable the local service (`ELYSSA_POSTER_ENABLED=false`).
 - **Backend:** Redis (db 0), 256 MB cap in compose
 - **Eviction:** Redis `allkeys-lru` (default); warm entries survive as long as
   they are re-read within the TTL.
+- **Batch access:** `cache_mget` used by summary resolvers (home, browse, search,
+  similar) to resolve posters in bulk; individual misses filled via single
+  `get_poster_url` calls.
 - **Pre-warm:** On startup the API gateway asynchronously fetches posters for
   the top-100 rated titles (non-blocking background thread).
 
@@ -60,10 +63,10 @@ and disable the local service (`ELYSSA_POSTER_ENABLED=false`).
 
 | Mode | Behaviour |
 |------|-----------|
-| OpenPosterDB down | `PosterService.get_poster_url` returns `None` after retries; frontend shows text placeholder |
+| OpenPosterDB down | `PosterService.get_poster_url` returns `None` after retries (10 s timeout, 2 attempts); frontend shows text placeholder |
 | Redis down | In-memory cache still works; poster fetch falls through to HTTP each call |
 | Invalid id | 404 → cached as `None` (empty string) for the TTL; no error surfaced |
-| Timeout (>3 s) | One retry, then `None` |
+| Timeout (>10 s) | One retry, then `None` |
 
 ## Security
 
